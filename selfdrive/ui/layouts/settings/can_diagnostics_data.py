@@ -1,4 +1,5 @@
 import time
+from collections import deque
 from dataclasses import dataclass, field
 
 from opendbc.can import CANParser
@@ -80,7 +81,6 @@ class CanSnapshot:
     self.parsers, self._known_addrs = build_parsers(car_fingerprint)
     self.tally: dict[int, BusStats] = {bus: BusStats() for bus in self.parsers}
     self.rows: dict[tuple[int, int, str | None], SignalRow] = {}
-    self._raw_fallback: dict[tuple[int, int], bytes] = {}
 
   def ingest(self, batches: list[tuple[int, list[tuple[int, bytes, int]]]]) -> set[tuple[int, int, str | None]]:
     """Feed drained (timestamp_ns, [(address, dat, src), ...]) batches. Returns the set of row keys touched."""
@@ -89,21 +89,37 @@ class CanSnapshot:
 
     updated_by_bus: dict[int, set[int]] = {}
     for t, frames in batches:
-      for bus, parser in self.parsers.items():
-        updated = parser.update([(t, frames)])
-        updated_by_bus.setdefault(bus, set()).update(updated)
+      frames_by_bus: dict[int, list[tuple[int, bytes, int]]] = {}
       for address, dat, src in frames:
+        frames_by_bus.setdefault(src, []).append((address, dat, src))
+
         stats = self.tally.get(src)
         if stats is None:
           continue
         stats.count += 1
         stats.last_seen = now
         if address not in self._known_addrs.get(src, ()):
-          self._raw_fallback[(src, address)] = dat
           key = (src, address, None)
           touched.add(key)
           self.rows[key] = SignalRow(bus=src, address=address, signal=None,
                                       text=dat.hex(' ').upper(), last_updated=now)
+
+      # Only feed each parser the frames for its own bus (and only bother calling a
+      # parser at all when this batch actually touched its bus) instead of handing every
+      # parser the full mixed-bus frame list - CANParser.update() would filter it down to
+      # its own src internally anyway, but re-scanning all frames once per bus (and paying
+      # its per-call vl_all bookkeeping) for buses with nothing new here is wasted work.
+      # Note: this means a parser's own can_valid/bus_timeout bookkeeping (which advances
+      # _last_update_nanos unconditionally on every update() call) stops advancing entirely
+      # once its bus goes silent, rather than correctly timing out - harmless today since
+      # this module never reads those properties (bus liveness is tracked separately via
+      # self.tally), but worth knowing before ever relying on a parser's own validity here.
+      for bus, bus_frames in frames_by_bus.items():
+        parser = self.parsers.get(bus)
+        if parser is None:
+          continue
+        updated = parser.update([(t, bus_frames)])
+        updated_by_bus.setdefault(bus, set()).update(updated)
 
     for bus, addrs in updated_by_bus.items():
       parser = self.parsers[bus]
@@ -127,13 +143,15 @@ class CanSnapshot:
 @dataclass
 class GraphBuffer:
   window_s: float = 10.0
-  samples: list[tuple[float, float]] = field(default_factory=list)
+  # deque so evicting expired samples off the front is O(1); a plain list's pop(0) is O(n),
+  # which turns a whole session's worth of high-frequency samples into O(n^2) work overall.
+  samples: deque[tuple[float, float]] = field(default_factory=deque)
 
   def add(self, t: float, value: float) -> None:
     self.samples.append((t, value))
     cutoff = t - self.window_s
     while self.samples and self.samples[0][0] < cutoff:
-      self.samples.pop(0)
+      self.samples.popleft()
 
   def bounds(self) -> tuple[float, float] | None:
     if not self.samples:

@@ -313,7 +313,9 @@ class SelfdriveD:
 
     # Handle HW and system malfunctions
     # Order is very intentional here. Be careful when modifying this.
-    # All events here should at least have NO_ENTRY and SOFT_DISABLE.
+    # All events here should at least have NO_ENTRY and SOFT_DISABLE, with one deliberate
+    # exception: radarDegraded is non-disabling by design (see EventName.radarDegraded in
+    # events.py) - it falls back to vision-only lead tracking instead of disabling.
     num_events = len(self.events)
 
     not_running = {p.name for p in self.sm['managerState'].processes if not p.running and p.shouldBeRunning}

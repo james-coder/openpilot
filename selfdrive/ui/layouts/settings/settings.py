@@ -2,6 +2,7 @@ import pyray as rl
 from dataclasses import dataclass
 from enum import IntEnum
 from collections.abc import Callable
+from openpilot.selfdrive.ui.layouts.settings.can_diagnostics import CanDiagnosticsLayout
 from openpilot.selfdrive.ui.layouts.settings.developer import DeveloperLayout
 from openpilot.selfdrive.ui.layouts.settings.device import DeviceLayout
 from openpilot.selfdrive.ui.layouts.settings.firehose import FirehoseLayout
@@ -37,6 +38,7 @@ class PanelType(IntEnum):
   SOFTWARE = 3
   FIREHOSE = 4
   DEVELOPER = 5
+  CAN_DIAGNOSTICS = 6
 
 
 @dataclass
@@ -62,6 +64,7 @@ class SettingsLayout(Widget):
       PanelType.SOFTWARE: PanelInfo(tr_noop("Software"), SoftwareLayout()),
       PanelType.FIREHOSE: PanelInfo(tr_noop("Firehose"), FirehoseLayout()),
       PanelType.DEVELOPER: PanelInfo(tr_noop("Developer"), DeveloperLayout()),
+      PanelType.CAN_DIAGNOSTICS: PanelInfo(tr_noop("CAN Diagnostics"), CanDiagnosticsLayout()),
     }
 
     self._font_medium = gui_app.font(FontWeight.MEDIUM)

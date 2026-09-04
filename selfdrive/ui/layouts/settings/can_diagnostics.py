@@ -10,7 +10,7 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.list_view import ListItem, button_item, multiple_button_item, text_item
+from openpilot.system.ui.widgets.list_view import ITEM_BASE_HEIGHT, ListItem, button_item, multiple_button_item, text_item
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 
 REFRESH_INTERVAL = 0.1  # seconds - matches selfdrive/debug/can_printer.py's own display cadence
@@ -91,11 +91,13 @@ class CanDiagnosticsLayout(Widget):
     # error instead of risking a crash loop every frame.
     self._faulted = False
 
+    # Kept out of the Scroller deliberately - a filter control that scrolls away with the
+    # list it's filtering is a bad pattern. Rendered as a fixed header instead (see _render).
     self._bus_filter = multiple_button_item(
       "CAN Bus", "", BUS_FILTER_LABELS, selected_index=0,
       button_width=180, callback=self._on_bus_filter_changed,
     )
-    self._scroller = Scroller([self._bus_filter], line_separator=True, spacing=0)
+    self._scroller = Scroller([], line_separator=True, spacing=0)
 
     self._graph = SignalGraph()
     self._graph.on_dismiss = self._close_graph
@@ -106,10 +108,9 @@ class CanDiagnosticsLayout(Widget):
     if self._faulted:
       return
     try:
-      self._ensure_snapshot()
-      if self._snapshot is not None:
-        self._sock = messaging.sub_sock('can', conflate=False)
+      self._ensure_ready()
       self._scroller.show_event()
+      self._bus_filter.show_event()
     except Exception:
       self._fault("show_event")
 
@@ -119,24 +120,31 @@ class CanDiagnosticsLayout(Widget):
     self._close_graph()
     if not self._faulted:
       self._scroller.hide_event()
+      self._bus_filter.hide_event()
 
   def _fault(self, where: str):
     cloudlog.exception(f"CanDiagnosticsLayout: disabling after unexpected error in {where}")
     self._faulted = True
     self._sock = None
 
-  def _ensure_snapshot(self):
-    if self._snapshot is not None:
-      return
-    if ui_state.CP is None:
-      return
-    self._snapshot = CanSnapshot(ui_state.CP.carFingerprint)
+  def _ensure_ready(self):
+    # Lazily build the snapshot and open the CAN socket once the car is known. Called from
+    # both show_event() and every _update_state() frame - retrying here (not just at
+    # show_event time) matters because the panel can be opened before CarParams has
+    # arrived yet; without retrying every frame, the socket would never open if CP became
+    # available only after this panel was already on screen.
+    if self._snapshot is None:
+      if ui_state.CP is None:
+        return
+      self._snapshot = CanSnapshot(ui_state.CP.carFingerprint)
+    if self._sock is None:
+      self._sock = messaging.sub_sock('can', conflate=False)
 
   def _update_state(self):
     if self._faulted:
       return
     try:
-      self._ensure_snapshot()
+      self._ensure_ready()
       if self._sock is None or self._snapshot is None:
         return
 
@@ -173,12 +181,25 @@ class CanDiagnosticsLayout(Widget):
     self._dirty.clear()
 
   def _make_item(self, key: tuple[int, int, str | None], row) -> ListItem:
+    # Title is a callable, re-evaluated every frame, so the bus prefix can appear/disappear
+    # as the filter changes without needing to rebuild the item.
+    def title() -> str:
+      return self._row_title(key)
+
     if key[2] is None:
       # Raw/undecoded fallback rows have nothing to graph - plain display only.
-      return text_item(title=row.label(), value=self._make_value_getter(key))
-    item = button_item(title=row.label(), button_text="Graph", callback=lambda k=key: self._open_graph(k))
+      return text_item(title=title, value=self._make_value_getter(key))
+    item = button_item(title=title, button_text="Graph", callback=lambda k=key: self._open_graph(k))
     item.action_item.set_value(self._make_value_getter(key))
     return item
+
+  def _row_title(self, key: tuple[int, int, str | None]) -> str:
+    row = self._snapshot.rows.get(key) if self._snapshot else None
+    base = row.label() if row is not None else ""
+    # Only prefix with the bus name when viewing "All" - redundant once already filtered to one bus.
+    if BUS_FILTER_VALUES[self._bus_filter_index] is None:
+      return f"[{BUS_LABELS[key[0]]}] {base}"
+    return base
 
   def _make_value_getter(self, key: tuple[int, int, str | None]):
     def _get() -> str:
@@ -221,6 +242,13 @@ class CanDiagnosticsLayout(Widget):
         rl.draw_text_ex(gui_app.font(FontWeight.NORMAL), "Waiting for car...", rl.Vector2(rect.x + 20, rect.y + 20), 50, 0, TEXT_COLOR)
         return
 
-      self._scroller.render(rect)
+      filter_rect = rl.Rectangle(rect.x, rect.y, rect.width, ITEM_BASE_HEIGHT)
+      # ListItem._render dereferences _parent_rect unconditionally (viewport-culling check) -
+      # since this item lives outside a Scroller now, nothing else ever sets this for it.
+      self._bus_filter.set_parent_rect(filter_rect)
+      self._bus_filter.render(filter_rect)
+
+      list_rect = rl.Rectangle(rect.x, rect.y + ITEM_BASE_HEIGHT, rect.width, rect.height - ITEM_BASE_HEIGHT)
+      self._scroller.render(list_rect)
     except Exception:
       self._fault("_render")

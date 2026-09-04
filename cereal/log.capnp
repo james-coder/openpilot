@@ -61,6 +61,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     pcmDisable @24;
     radarFault @25;
     radarTempUnavailable @93;
+    radarDegraded @100;
     brakeHold @26;
     parkBrake @27;
     manualRestart @28;

@@ -335,6 +335,8 @@ class SelfdriveD:
       self.events.add(EventName.canError)
     elif self.sm['radarState'].radarErrors.radarUnavailableTemporary:
       self.events.add(EventName.radarTempUnavailable)
+    elif self.sm['radarState'].radarErrors.radarDegraded:
+      self.events.add(EventName.radarDegraded)
     elif any(self.sm['radarState'].radarErrors.to_dict().values()):
       self.events.add(EventName.radarFault)
     if not self.sm.valid['pandaStates']:

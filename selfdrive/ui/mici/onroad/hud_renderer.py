@@ -26,12 +26,14 @@ class FontSizes:
   speed_unit: int = 66
   max_speed: int = 36
   set_speed: int = 112
+  no_radar: int = 30
 
 
 @dataclass(frozen=True)
 class Colors:
   WHITE = rl.WHITE
   WHITE_TRANSLUCENT = rl.Color(255, 255, 255, 200)
+  NO_RADAR = rl.Color(255, 0, 21, 255)  # matches AlertStatus.critical in alert_renderer.py
 
 
 FONT_SIZES = FontSizes()
@@ -106,6 +108,7 @@ class HudRenderer(Widget):
     self.speed: float = 0.0
     self.v_ego_cluster_seen: bool = False
     self._engaged: bool = False
+    self.no_radar: bool = False
 
     self._can_draw_top_icons = True
     self._show_wheel_critical = False
@@ -163,6 +166,8 @@ class HudRenderer(Widget):
     self.is_cruise_set = 0 < self.set_speed < SET_SPEED_NA
     self.is_cruise_available = self.set_speed != -1
 
+    self.no_radar = sm['radarState'].radarErrors.radarDegraded
+
     v_ego_cluster = car_state.vEgoCluster
     self.v_ego_cluster_seen = self.v_ego_cluster_seen or v_ego_cluster != 0.0
     v_ego = v_ego_cluster if self.v_ego_cluster_seen else car_state.vEgo
@@ -178,6 +183,9 @@ class HudRenderer(Widget):
       self._draw_set_speed(rect)
 
     self._draw_steering_wheel(rect)
+
+    if self.no_radar:
+      self._draw_no_radar(rect)
 
   def _draw_steering_wheel(self, rect: rl.Rectangle) -> None:
     wheel_txt = self._txt_wheel_critical if self._show_wheel_critical else self._txt_wheel
@@ -262,6 +270,14 @@ class HudRenderer(Widget):
       0,
       max_color,
     )
+
+  def _draw_no_radar(self, rect: rl.Rectangle) -> None:
+    """Small persistent 'NO RADAR' label in the top-right corner, shown while the radar is degraded."""
+    margin = 16
+    text = tr("NO RADAR")
+    text_width = measure_text_cached(self._font_semi_bold, text, FONT_SIZES.no_radar).x
+    pos = rl.Vector2(rect.x + rect.width - margin - text_width, rect.y + margin)
+    rl.draw_text_ex(self._font_semi_bold, text, pos, FONT_SIZES.no_radar, 0, COLORS.NO_RADAR)
 
   def _draw_current_speed(self, rect: rl.Rectangle) -> None:
     """Draw the current vehicle speed and unit."""

@@ -31,6 +31,7 @@ class FontSizes:
   speed_unit: int = 66
   max_speed: int = 40
   set_speed: int = 90
+  no_radar: int = 36
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,7 @@ class Colors:
   BORDER_TRANSLUCENT = rl.Color(255, 255, 255, 75)
   HEADER_GRADIENT_START = rl.Color(0, 0, 0, 114)
   HEADER_GRADIENT_END = rl.BLANK
+  NO_RADAR = rl.Color(0xC9, 0x22, 0x31, 255)  # matches AlertStatus.critical in alert_renderer.py
 
 
 UI_CONFIG = UIConfig()
@@ -65,6 +67,7 @@ class HudRenderer(Widget):
     self.set_speed: float = SET_SPEED_NA
     self.speed: float = 0.0
     self.v_ego_cluster_seen: bool = False
+    self.no_radar: bool = False
 
     self._font_semi_bold: rl.Font = gui_app.font(FontWeight.SEMI_BOLD)
     self._font_bold: rl.Font = gui_app.font(FontWeight.BOLD)
@@ -94,6 +97,8 @@ class HudRenderer(Widget):
     if self.is_cruise_set and not ui_state.is_metric:
       self.set_speed *= KM_TO_MILE
 
+    self.no_radar = sm['radarState'].radarErrors.radarDegraded
+
     v_ego_cluster = car_state.vEgoCluster
     self.v_ego_cluster_seen = self.v_ego_cluster_seen or v_ego_cluster != 0.0
     v_ego = v_ego_cluster if self.v_ego_cluster_seen else car_state.vEgo
@@ -120,6 +125,9 @@ class HudRenderer(Widget):
     button_x = rect.x + rect.width - UI_CONFIG.border_size - UI_CONFIG.button_size
     button_y = rect.y + UI_CONFIG.border_size
     self._exp_button.render(rl.Rectangle(button_x, button_y, UI_CONFIG.button_size, UI_CONFIG.button_size))
+
+    if self.no_radar:
+      self._draw_no_radar(button_x, button_y + UI_CONFIG.button_size)
 
   def user_interacting(self) -> bool:
     return self._exp_button.is_pressed
@@ -166,6 +174,13 @@ class HudRenderer(Widget):
       0,
       set_speed_color,
     )
+
+  def _draw_no_radar(self, button_x: float, button_bottom_y: float) -> None:
+    """Small persistent 'NO RADAR' label below the exp button, shown while the radar is degraded."""
+    text = tr("NO RADAR")
+    text_width = measure_text_cached(self._font_semi_bold, text, FONT_SIZES.no_radar).x
+    pos = rl.Vector2(button_x + (UI_CONFIG.button_size - text_width) / 2, button_bottom_y + 15)
+    rl.draw_text_ex(self._font_semi_bold, text, pos, FONT_SIZES.no_radar, 0, COLORS.NO_RADAR)
 
   def _draw_current_speed(self, rect: rl.Rectangle) -> None:
     """Draw the current vehicle speed and unit."""

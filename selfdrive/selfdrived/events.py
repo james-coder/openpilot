@@ -254,6 +254,30 @@ def below_steer_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.S
     Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 0.4)
 
 
+# Ordered most to least severe - only the single highest-priority active reason is ever
+# shown (never a joined list): the smallest UI this renders on is a 536x240 display where
+# a long joined string would either get silently dropped or overflow off-screen. Keep in
+# sync with GMRadarFaultBit in opendbc/car/gm/radar_interface.py.
+GM_RADAR_DEGRADED_REASONS = [
+  (1 << 3, "Hardware Fault"),
+  (1 << 5, "Alignment Fault"),
+  (1 << 4, "Antenna Tuning Fault"),
+  (1 << 2, "Yaw Rate Fault"),
+  (1 << 1, "Sensitivity Fault"),
+  (1 << 0, "Sensor Blocked"),
+]
+
+
+def radar_degraded_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
+  bits = sm['radarState'].radarErrors.radarDegradedReasons
+  reason = next((text for bit, text in GM_RADAR_DEGRADED_REASONS if bits & bit), "Unknown")
+  # Explicit minimum duration (default is 0.2s) so even a fault that clears almost
+  # immediately stays on screen long enough to actually read - this alert keeps
+  # re-triggering every cycle for as long as the fault is ongoing regardless, this only
+  # guards the tail end of a very brief one.
+  return NormalPermanentAlert("Vision Only", reason, duration=4.0)
+
+
 def calibration_incomplete_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   first_word = 'Recalibrating' if sm['liveCalibration'].calStatus == log.LiveCalibrationData.Status.recalibrating else 'Calibrating'
   return Alert(
@@ -878,6 +902,13 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.radarTempUnavailable: {
     ET.SOFT_DISABLE: soft_disable_alert("Radar Temporarily Unavailable"),
     ET.NO_ENTRY: NoEntryAlert("Radar Temporarily Unavailable"),
+  },
+
+  # Radar self-reports a recoverable fault (e.g. blocked/misaligned). Unlike radarFault/
+  # radarTempUnavailable above, this does not disable or block engagement - openpilot keeps
+  # driving on vision-only lead tracking until the radar clears itself.
+  EventName.radarDegraded: {
+    ET.PERMANENT: radar_degraded_alert,
   },
 
   # Every frame from the camera should be processed by the model. If modeld

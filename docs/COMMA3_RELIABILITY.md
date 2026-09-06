@@ -103,6 +103,9 @@ A live authenticated device API request returned `is_paired: false` and
 server-side status observation, not a conclusion about whether a subscription
 was purchased. Pair this device to the subscribed account through its pairing
 QR code in comma connect, then verify the server status and relay again.
+At the user's suggestion, one offroad reboot was performed on the baseline
+software. The fresh API check still returned the same unpaired/no-plan status.
+The resumable footage export was paused for the reboot and resumed afterward.
 
 There is no ignition prerequisite in this source: manager registers at startup,
 Athena is a daemon started offroad, the pairing dialog creates a pairing token

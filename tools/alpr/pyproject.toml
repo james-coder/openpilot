@@ -1,0 +1,20 @@
+[project]
+name = "comma-video-alpr-study"
+version = "0.1.0"
+description = "Offline plate recognition experiments; never imported by driving processes"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fast-alpr==0.4.0",
+  "fast-plate-ocr==1.1.0",
+  "open-image-models==0.6.0",
+  "onnxruntime-gpu[cuda,cudnn]==1.29.0; platform_machine == 'x86_64' and sys_platform == 'linux'",
+  "onnxruntime==1.29.0; platform_machine != 'x86_64' or sys_platform != 'linux'",
+  "av==16.1.0",
+  "psutil==7.2.2",
+]
+
+[project.optional-dependencies]
+paddle = ["paddleocr==3.7.0", "paddlepaddle==3.3.1"]
+
+[tool.uv]
+package = false

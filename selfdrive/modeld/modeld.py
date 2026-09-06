@@ -194,6 +194,7 @@ def main(demo=False):
   frame_id = 0
   last_vipc_frame_id = 0
   run_count = 0
+  warmup_dropped_frames = 0
 
   model_transform_main = np.zeros((3, 3), dtype=np.float32)
   model_transform_extra = np.zeros((3, 3), dtype=np.float32)
@@ -280,7 +281,12 @@ def main(demo=False):
     frame_drop_ratio = frames_dropped / (1 + frames_dropped)
     prepare_only = vipc_dropped_frames > 0
     if prepare_only:
-      cloudlog.error(f"skipping model eval. Dropped {vipc_dropped_frames} frames")
+      if run_count <= 10:
+        warmup_dropped_frames += vipc_dropped_frames
+      else:
+        cloudlog.error(f"skipping model eval. Dropped {vipc_dropped_frames} frames")
+    if run_count == 10:
+      cloudlog.info(f"model warmup completed: {warmup_dropped_frames} camera frames skipped")
 
     bufs = {name: buf_extra if 'big' in name else buf_main for name in model.vision_input_names}
     transforms = {name: model_transform_extra if 'big' in name else model_transform_main for name in model.vision_input_names}

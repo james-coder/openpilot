@@ -248,8 +248,14 @@ class RadarD:
         else:
           self.lead_prob_filters[i].update(lead_prob)
 
-      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True)
-      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False)
+      for i, lead in enumerate((self.radar_state.leadOne, self.radar_state.leadTwo)):
+        values = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[i], model_v_ego,
+                          self.lead_prob_filters[i].x, low_speed_override=(i == 0))
+        # pycapnp's dict-to-struct conversion creates schema reference cycles.
+        # Real-time processes disable GC, so write scalar fields directly.
+        # radar_state is fresh each update: absent fields keep their defaults.
+        for key, value in values.items():
+          setattr(lead, key, value)
 
   def publish(self, pm: messaging.PubMaster):
     assert self.radar_state is not None

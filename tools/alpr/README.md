@@ -39,6 +39,10 @@ PYTHONPATH="$PWD" .venv/bin/python -m tools.alpr.review \
 PYTHONPATH="$PWD" .venv/bin/python -m tools.alpr.evaluate \
   /mnt/algo14/comma3-alpr/runs/s-native-5fps /mnt/algo14/comma3-alpr/labels.json \
   --split test --output /mnt/algo14/comma3-alpr/evaluation-s.json
+
+PYTHONPATH="$PWD" .venv/bin/python -m tools.alpr.compare \
+  /mnt/algo14/comma3-alpr/runs/s-native-5fps /mnt/algo14/comma3-alpr/runs/t-native-5fps \
+  /mnt/algo14/comma3-alpr/runs/paddle-shared-crops --output /mnt/algo14/comma3-alpr/comparison.html
 ```
 
 Use `--host-key-alias` only for a previously verified identity when an existing
@@ -58,7 +62,8 @@ transfer checks this before files and every five seconds during a file, and stop
 on a failed check or lost connection. SSH uses keepalives and remote checks have
 a thirty-second deadline, so stop detection is not instantaneous. Each copied file is checked
 against the source size and SHA-256 before the manifest marks it verified.
-Re-run the same command to resume partial transfers. Deleted or changed sources
+Transient connection failures get at most two retries, each requiring a fresh
+offroad check before resuming. Re-run the same command to resume partial transfers. Deleted or changed sources
 fail visibly. No source files are removed or protected from the normal deleter.
 
 At the measured bitrate, both cameras consume about 145 MiB/minute plus logs:
@@ -110,7 +115,7 @@ meaningful timing; these desktop results cannot establish comma3 feasibility.
 
 ## Independent labels and accuracy
 
-Open `review.html` locally. It presents one-second context frames sampled every
+Open `review.html` locally and use its zoom slider for native-resolution detail. It presents one-second context frames sampled every
 five seconds by default (`--stride 1` for every context frame). It does not show
 predictions. Draw all plate boxes, transcribe readable text, mark lighting and
 blur, and assign the same human encounter ID to a vehicle across adjacent

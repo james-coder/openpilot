@@ -6,6 +6,7 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
 from pathlib import Path
 
 LOG_ROOT = '/data/media/0/realdata'
@@ -102,27 +103,37 @@ def main():
       # Recheck before each transfer; a recording deleted in the meantime is a
       # visible failure, never silently substituted by a different segment.
       guard = "test \"$(cat /data/params/d/IsOffroad)\" = 1"
-      remote(guard)
-      print(f'Copying {key} ({size / 1024**2:.1f} MiB)', flush=True)
-      with subprocess.Popen(['rsync', '--partial', '--append-verify', f'--bwlimit={args.bwlimit}',
-                             '-e', shlex.join(ssh), f'{args.host}:{source}', str(local)]) as transfer:
+      for attempt in range(3):
         try:
-          while True:
+          remote(guard)
+          print(f'Copying {key} ({size / 1024**2:.1f} MiB)', flush=True)
+          with subprocess.Popen(['rsync', '--partial', '--append-verify', f'--bwlimit={args.bwlimit}',
+                                 '-e', shlex.join(ssh), f'{args.host}:{source}', str(local)]) as transfer:
             try:
-              result = transfer.wait(timeout=5)
-              if result:
-                raise subprocess.CalledProcessError(result, transfer.args)
-              break
-            except subprocess.TimeoutExpired:
-              remote(guard)
-        except BaseException:
-          transfer.terminate()
-          try:
-            transfer.wait(timeout=5)
-          except subprocess.TimeoutExpired:
-            transfer.kill()
-          raise
-      digest = remote(f'{guard} && sha256sum {shlex.quote(source)}').split()[0]
+              while True:
+                try:
+                  result = transfer.wait(timeout=5)
+                  if result:
+                    raise subprocess.CalledProcessError(result, transfer.args)
+                  break
+                except subprocess.TimeoutExpired:
+                  remote(guard)
+            except BaseException:
+              transfer.terminate()
+              try:
+                transfer.wait(timeout=5)
+              except subprocess.TimeoutExpired:
+                transfer.kill()
+              raise
+          digest = remote(f'{guard} && sha256sum {shlex.quote(source)}').split()[0]
+          break
+        except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as e:
+          # A failed offroad check (exit 1) is final. A lost connection stops
+          # the transfer first; only a fresh successful guard allows resumption.
+          if attempt == 2 or (isinstance(e, subprocess.CalledProcessError) and e.returncode not in (12, 30, 35, 255)):
+            raise
+          print(f"Connection interrupted; retrying {key}", flush=True)
+          time.sleep(2 ** attempt)
       if local.stat().st_size != size or checksum(local) != digest:
         raise RuntimeError(f'source changed or checksum mismatch: {key}')
       manifest['verified'][key] = digest

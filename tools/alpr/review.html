@@ -1,5 +1,6 @@
 <!doctype html><meta charset="utf-8"><title>Independent plate annotation</title>
-<style>body{font:16px sans-serif;margin:20px}canvas{max-width:100%;border:1px solid #aaa;touch-action:none}
+<style>body{font:16px sans-serif;margin:20px}canvas{border:1px solid #aaa;touch-action:none}
+#viewport{overflow:auto;max-height:75vh}
 input,button,select{font:inherit;margin:4px}#plates>div{border-bottom:1px solid #ccc}</style>
 <h1>Independent plate annotation</h1><p>Drag a box around EVERY visible plate, including unreadable plates.
 Transcribe directly from the image. Reuse an encounter ID for the same vehicle across frames and cameras within a route.
@@ -9,7 +10,8 @@ Download labels to save progress, and import them to resume.</p>
 <label>Lighting <select id="lighting"><option>unknown</option><option>day</option><option>night</option><option>dusk</option></select></label>
 <label><input id="reviewed" type="checkbox">Frame completely reviewed</label>
 <button id="save">Download labels</button><input id="load" type="file" accept=".json">
-<p id="name"></p><canvas id="canvas"></canvas><div id="plates"></div>
+<label>Image zoom <input id="zoom" type="range" min="0.25" max="4" step="0.25" value="1"></label>
+<p id="name"></p><div id="viewport"><canvas id="canvas"></canvas></div><div id="plates"></div>
 <script>
 let data=DATA, n=0, start=null; const c=document.querySelector('#canvas'), ctx=c.getContext('2d'), img=new Image();
 const el=id=>document.getElementById(id); const frame=()=>data.frames[n];
@@ -27,7 +29,9 @@ function controls(){el('plates').replaceChildren();frame().plates.forEach((p,i)=
 function show(){el('position').textContent=(n+1)+' / '+data.frames.length;
 el('name').textContent=frame().segment+' / '+frame().camera+' / frame '+frame().frame+' / '+frame().split;
 el('reviewed').checked=frame().reviewed;el('lighting').value=frame().lighting;
-img.onload=()=>{c.width=img.width;c.height=img.height;draw()};img.src=frame().image;controls()}
+img.onload=()=>{c.width=img.width;c.height=img.height;resize();draw()};img.src=frame().image;controls()}
+function resize(){c.style.width=(c.width*Number(el('zoom').value))+'px';c.style.height=(c.height*Number(el('zoom').value))+'px'}
+el('zoom').oninput=resize;
 function xy(e){const r=c.getBoundingClientRect();return [Math.round(Math.max(0,Math.min(c.width,(e.clientX-r.left)*c.width/r.width))),Math.round(Math.max(0,Math.min(c.height,(e.clientY-r.top)*c.height/r.height)))]}
 c.onpointerdown=e=>{start=xy(e);c.setPointerCapture(e.pointerId)};
 c.onpointerup=e=>{if(!start)return;const end=xy(e),box=[Math.min(start[0],end[0]),Math.min(start[1],end[1]),Math.max(start[0],end[0]),Math.max(start[1],end[1])];start=null;

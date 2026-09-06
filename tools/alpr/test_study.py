@@ -1,5 +1,9 @@
+import json
+import subprocess
+
 import pytest
 
+from openpilot.tools.alpr import export
 from openpilot.tools.alpr.evaluate import evaluate, normalize, split_for_route
 from openpilot.tools.alpr.export import choose_segments
 
@@ -44,3 +48,30 @@ def test_no_labels_means_unknown_accuracy():
   result = evaluate({'frames': []}, [], [])
   assert result['encounter_exact']['rate'] is None
   assert not result['target_200_met']
+
+
+def test_export_stops_transfer_when_ignition_changes(tmp_path, mocker):
+  rows = [{'segment': '00000001--0123456789--0', 'files': {'fcamera.hevc': 100}}]
+  mocker.patch('sys.argv', ['export', '--output', str(tmp_path)])
+  remote = mocker.patch.object(export.subprocess, 'check_output', side_effect=[
+    json.dumps(rows), '', subprocess.CalledProcessError(1, 'offroad guard')])
+  process = mocker.patch.object(export.subprocess, 'Popen').return_value.__enter__.return_value
+  process.wait.side_effect = [subprocess.TimeoutExpired('rsync', 5), -15]
+  with pytest.raises(subprocess.CalledProcessError):
+    export.main()
+  process.terminate.assert_called_once()
+  assert remote.call_count == 3
+  assert json.loads((tmp_path / 'manifest.json').read_text())['verified'] == {}
+
+
+def test_network_retry_requires_fresh_offroad_confirmation(tmp_path, mocker):
+  rows = [{'segment': '00000001--0123456789--0', 'files': {'fcamera.hevc': 100}}]
+  mocker.patch('sys.argv', ['export', '--output', str(tmp_path)])
+  mocker.patch.object(export.time, 'sleep')
+  remote = mocker.patch.object(export.subprocess, 'check_output', side_effect=[
+    json.dumps(rows), subprocess.CalledProcessError(255, 'network'), subprocess.CalledProcessError(1, 'offroad guard')])
+  process = mocker.patch.object(export.subprocess, 'Popen')
+  with pytest.raises(subprocess.CalledProcessError):
+    export.main()
+  assert remote.call_count == 3
+  process.assert_not_called()

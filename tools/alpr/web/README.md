@@ -125,3 +125,49 @@ manifest there before running. Do not replace a live queue while it has reviews.
 license is AGPL-3.0. Existing plate detector/OCR models retain their separately
 recorded provenance. Queue metadata records versions, CUDA device and the vehicle
 weight checksum. No inference is installed on the comma device.
+
+## Vehicle 2 burst experiment
+
+Vehicle 2's **Compare combined frames** panel compares the reference frame with
+aligned average/median, frequency-weighted fusion, and mild sharpening. Seven
+of its eight displayed views passed alignment; the clipped frame was excluded.
+The same display controls apply to both sides. These are separate derivative
+images, not replacement recordings or machine-confirmed transcripts. Existing
+human decisions and the live encounter queue are unchanged.
+
+The classical experiment uses projective ECC registration, bounded tone
+matching and a conservative implementation of the idea in
+[Fourier burst accumulation](https://openaccess.thecvf.com/content_cvpr_2015/papers/Delbracio_Burst_Deblurring_Removing_2015_CVPR_paper.pdf).
+It uses no learned reconstruction and no OCR-guided fitting. It reduces visible
+noise in this example, but the uncertain characters remain unresolved. Alignment
+correlation is a registration diagnostic, not character-reading accuracy.
+
+Both inertial streams are retained for this interval: 152 gyro and 152
+accelerometer readings over the 1.4-second burst plus 30 ms margins (about
+107 Hz). The uncalibrated gyro norm integrates to roughly 0.44 radians / 25° of
+angular travel. This supports investigating gyro-aided motion correction; it
+does not establish a calibrated camera trajectory. Accelerometer measurements
+include gravity and do not directly yield image displacement.
+
+Road-camera metadata identifies OX03C10 and records integration lines and gain.
+The 14.697 ms SOF-to-EOF duration is sensor readout, **not exposure duration**.
+Exposure/IMU timing, camera-to-IMU calibration and HDR readout need to be
+established before an exposure-aware deblurring kernel is defensible. Gyro data
+is audited but not applied to the current fused images. Relevant prior work:
+[Image Deblurring using Inertial Measurement Sensors](https://www.microsoft.com/en-us/research/publication/image-deblurring-using-inertial-measurement-sensors/).
+
+Reproduce from the repository root:
+
+```sh
+PYTHONPATH="$PWD" .venv/bin/python -m tools.alpr.audit_burst_imu \
+  /mnt/algo14/comma3-alpr --encounter 00000011--c81f40f6a9--16/fcamera/vehicle-086
+PYTHONPATH="$PWD" tools/alpr/.venv/bin/python -m tools.alpr.fuse_burst \
+  /mnt/algo14/comma3-alpr --encounter 00000011--c81f40f6a9--16/fcamera/vehicle-086
+```
+
+Source hashes, accepted/rejected alignment details, the inertial audit and
+native-resolution derivatives live in `assisted-v1/fusion/7d594befef6e/`.
+`fusion/catalogue.json` exposes available comparisons through a read-only API.
+Synthetic checks verify registration direction, identical-input preservation,
+and the average limit of Fourier weights. Browser checks verify both images and
+switching combination methods without altering independent annotations.

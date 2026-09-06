@@ -137,6 +137,16 @@ try {
   await guided.screenshot({ path: path.join(artifacts, 'assisted.png'), fullPage: true });
   await guided.getByLabel('Candidate selection').selectOption('baseline');
   assert.equal(await guided.locator('.saved-decision').textContent(), ' Saved: clear baseline');
+  await guided.getByLabel('Candidate selection').selectOption('close');
+  await guided.getByRole('button', { name: 'Next encounter', exact: true }).click();
+  await guided.getByRole('button', { name: /Compare combined frames/ }).click();
+  await guided.getByLabel('Combined plate frames', { exact: true }).waitFor();
+  await guided.waitForFunction(
+    () => document.querySelector('canvas[aria-label="Combined plate frames"]')?.width === 139,
+  );
+  await guided.getByLabel('Combination method', { exact: true }).selectOption('average');
+  await guided.screenshot({ path: path.join(artifacts, 'burst-comparison.png'), fullPage: true });
+  assert.equal(fs.readFileSync(path.join(fixture, 'labels.json'), 'utf8'), independentBefore);
   assert.deepEqual(errors, []);
   console.log(
     'Browser checks passed: reports/images, native-coordinate boxes, autosave, reload, download, concurrent edits, fresh browser, narrow layout, assisted baseline, persistent brightness, independent-label preservation.',

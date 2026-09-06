@@ -1,3 +1,4 @@
+import BurstComparison from './BurstComparison';
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle2, Download, ScanLine, X, Edit3 } from 'lucide-react';
 import { DisplayControls, useDisplaySettings, enhance } from './DisplayControls';
@@ -266,6 +267,7 @@ function Encounter({ encounter, queue, decision, settings, onSave, busy }) {
             {encounter.observation_count} observations grouped automatically · choose another moment if a
             character is unclear.
           </p>
+          <BurstComparison encounterId={encounter.id} settings={settings} />
           <div className="context-heading">
             <h3>Vehicle context</h3>
             <button onClick={() => setEdit(!edit)}>

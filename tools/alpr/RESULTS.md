@@ -99,3 +99,12 @@ The UI supplies vehicle IDs and estimated lighting, and saves shadow lift,
 brightness and contrast settings in the browser. Review actions confirm/correct,
 reject, or mark unreadable. Optional grouping corrections handle fragmented
 visual tracks. See [web/README.md](web/README.md) for reproduction and storage.
+
+Vehicle 2 also has a classical multi-frame fusion comparison. Seven of eight
+views aligned; the eighth touches the image edge and was excluded. Registered
+averaging and frequency-weighted combination reduce noise, but the characters
+remain uncertain. This is not a successful recognition-accuracy result. A
+recorded IMU audit found substantial angular motion during the burst, supporting
+further gyro/exposure calibration work. Current derivatives use visual
+registration; inertial deblurring has not been applied. See the
+[burst experiment notes](web/README.md#vehicle-2-burst-experiment).

@@ -12,6 +12,10 @@ export function installAssistedRoutes(app, dataDir) {
   const queue = () => read(queueFile);
   const current = () =>
     fs.existsSync(reviewFile) ? read(reviewFile) : { version: 1, dataset_id: 'assisted-v1', decisions: {} };
+  app.get('/api/assisted/fusion', (_req, res) => {
+    const catalogue = path.join(root, 'fusion/catalogue.json');
+    res.json(fs.existsSync(catalogue) ? read(catalogue) : {});
+  });
   app.get('/api/assisted/queue', (_req, res) => {
     if (!fs.existsSync(queueFile))
       return res
@@ -27,12 +31,10 @@ export function installAssistedRoutes(app, dataDir) {
   app.put('/api/assisted/reviews', (req, res) => {
     const previous = current();
     if (req.body?.revision !== hash(previous))
-      return res
-        .status(409)
-        .json({
-          error:
-            'Another reviewer saved changes. Your current correction is kept here; reload saved reviews before trying again.',
-        });
+      return res.status(409).json({
+        error:
+          'Another reviewer saved changes. Your current correction is kept here; reload saved reviews before trying again.',
+      });
     const encounter = queue().encounters.find((e) => e.id === req.body.encounter_id);
     const review = req.body.review;
     const sample = encounter?.samples.find((s) => s.id === review?.sample_id);

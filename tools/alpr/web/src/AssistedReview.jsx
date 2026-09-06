@@ -1,4 +1,6 @@
 import BurstComparison from './BurstComparison';
+import { stateCodes, formatHint } from '../plate-formats.mjs';
+import PlateContext from './PlateContext';
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowLeft, ArrowRight, CheckCircle2, Download, ScanLine, X, Edit3 } from 'lucide-react';
 import { DisplayControls, useDisplaySettings, enhance } from './DisplayControls';
@@ -196,6 +198,18 @@ function Encounter({ encounter, queue, decision, settings, onSave, busy }) {
     [text, setText] = useState(draft?.text ?? decision?.text ?? encounter.suggested_text),
     [lighting, setLighting] = useState(draft?.lighting || decision?.lighting || 'auto'),
     [vehicleId, setVehicleId] = useState(draft?.vehicle_id || decision?.vehicle_id || encounter.id),
+    [context, setContext] = useState(
+      Object.fromEntries(
+        Object.entries({
+          jurisdiction: '',
+          plate_style: 'unknown',
+          certainty: 'unspecified',
+          alternatives: [],
+          uncertainty_note: '',
+          vehicle_type: '',
+        }).map(([key, fallback]) => [key, draft?.[key] ?? decision?.[key] ?? fallback]),
+      ),
+    ),
     [edit, setEdit] = useState(false),
     [message, setMessage] = useState('');
   const touched = useRef(false);
@@ -208,6 +222,7 @@ function Encounter({ encounter, queue, decision, settings, onSave, busy }) {
       localStorage.setItem(
         'road-review-draft:' + encounter.id,
         JSON.stringify({
+          ...context,
           baseSavedAt: decision?.saved_at || null,
           sample_id: sample.id,
           box,
@@ -217,7 +232,7 @@ function Encounter({ encounter, queue, decision, settings, onSave, busy }) {
         }),
       );
     } catch {}
-  }, [sample, box, text, lighting, vehicleId]);
+  }, [sample, box, text, lighting, vehicleId, context]);
   const choose = (s) => {
     remember();
     setSample(s);
@@ -230,7 +245,24 @@ function Encounter({ encounter, queue, decision, settings, onSave, busy }) {
       setMessage('Enter the plate text, or choose “Can’t read it”.');
       return;
     }
-    onSave({ sample_id: sample.id, box, text, lighting, vehicle_id: vehicleId, baseline, state });
+    onSave({
+      ...context,
+      alternatives: context.alternatives.map((v) => v.trim()).filter(Boolean),
+      certainty: baseline ? 'certain' : context.certainty,
+      sample_id: sample.id,
+      box,
+      text,
+      lighting,
+      vehicle_id: vehicleId,
+      baseline,
+      state,
+    });
+  };
+  const uncertain = context.certainty === 'tentative' || context.alternatives.some((v) => v.trim());
+  const hint = formatHint(context.jurisdiction, context.plate_style, text);
+  const updateContext = (values) => {
+    remember();
+    setContext((old) => ({ ...old, ...values }));
   };
   const corrected = text !== encounter.suggested_text || JSON.stringify(box) !== JSON.stringify(sample.box);
   return (
@@ -311,9 +343,22 @@ function Encounter({ encounter, queue, decision, settings, onSave, busy }) {
             />
           </label>
           <small className="suggestion-note">No need to guess. You can mark it unreadable.</small>
+          <PlateContext
+            context={context}
+            update={updateContext}
+            uncertain={uncertain}
+            hint={hint}
+            stateCodes={stateCodes}
+            vehicleClass={sample.vehicle_class}
+          />
           {decision && (
             <div className="saved-decision">
-              <CheckCircle2 size={15} /> Saved: {decision.baseline ? 'clear baseline' : decision.state}
+              <CheckCircle2 size={15} /> Saved:{' '}
+              {decision.baseline
+                ? 'clear baseline'
+                : decision.certainty === 'tentative'
+                  ? 'tentative reading'
+                  : decision.state}
             </div>
           )}
           <button
@@ -322,10 +367,10 @@ function Encounter({ encounter, queue, decision, settings, onSave, busy }) {
             onClick={() => commit(corrected ? 'corrected' : 'confirmed')}
           >
             <CheckCircle2 size={17} />
-            {corrected ? 'Save correction' : 'Box & text are correct'}
+            {uncertain ? 'Save tentative reading' : corrected ? 'Save correction' : 'Box & text are correct'}
           </button>
           <button
-            disabled={busy}
+            disabled={busy || uncertain}
             className="button baseline-button"
             onClick={() => commit(corrected ? 'corrected' : 'confirmed', true)}
           >

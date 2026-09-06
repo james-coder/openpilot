@@ -27,3 +27,20 @@ def test_frequency_zero_power_equals_average():
   rng = np.random.default_rng(5)
   images = rng.uniform(20, 220, (5, 45, 91, 3)).astype(np.float32)
   np.testing.assert_allclose(fourier_accumulate(images, power=0), images.mean(axis=0), atol=1e-4)
+
+
+def test_gyro_yaw_projects_to_horizontal_motion_with_correct_sign():
+  from openpilot.tools.alpr.gyro_deblur import rotational_flow
+  np.testing.assert_allclose(rotational_flow([-.3, 0, 0], [964, 604]), [-794.4, 0], atol=1e-6)
+
+
+def test_motion_inverse_improves_known_synthetic_blur_and_preserves_zero_motion():
+  from openpilot.tools.alpr.gyro_deblur import deconvolve, motion_kernel
+  image = np.full((90, 180, 3), 60, np.uint8)
+  cv2.putText(image, 'TEST', (15, 62), cv2.FONT_HERSHEY_SIMPLEX, 1.5, (180, 180, 180), 3)
+  image = cv2.GaussianBlur(image, (0, 0), .7).astype(np.float32)
+  np.testing.assert_allclose(deconvolve(image, motion_kernel([0, 0], 8)), image, atol=1e-4)
+  kernel = motion_kernel([-800, 25], 8)
+  blurred = cv2.filter2D(image, -1, kernel, borderType=cv2.BORDER_REFLECT)
+  recovered = deconvolve(blurred, kernel)
+  assert np.mean((recovered-image)**2) < .6*np.mean((blurred-image)**2)

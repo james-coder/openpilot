@@ -147,6 +147,28 @@ try {
   await guided.getByLabel('Combination method', { exact: true }).selectOption('average');
   await guided.screenshot({ path: path.join(artifacts, 'burst-comparison.png'), fullPage: true });
   assert.equal(fs.readFileSync(path.join(fixture, 'labels.json'), 'utf8'), independentBefore);
+  await guided.getByLabel('Combination method', { exact: true }).selectOption('gyro_4');
+  await guided.getByText('Experimental motion correction:', { exact: false }).waitFor();
+  await guided.getByLabel('Some characters are uncertain').check();
+  await guided.getByLabel('Issuing state', { exact: true }).selectOption('UT');
+  await guided.getByLabel('Suggested plate text', { exact: true }).fill('A12 3BC');
+  await guided.getByLabel('Alternative readings', { exact: true }).fill('12 3BC');
+  await guided.getByLabel('Vehicle type', { exact: true }).selectOption('truck');
+  assert.equal(
+    await guided
+      .getByRole('button', { name: 'Every character is clear — add to baseline', exact: true })
+      .isDisabled(),
+    true,
+  );
+  await guided.getByRole('button', { name: 'Save tentative reading', exact: true }).click();
+  await guided.getByRole('status').filter({ hasText: 'Review saved' }).waitFor();
+  await guided.reload();
+  await guided.getByRole('button', { name: 'Next encounter', exact: true }).click();
+  assert.equal(await guided.getByLabel('Issuing state', { exact: true }).inputValue(), 'UT');
+  assert.equal(await guided.getByLabel('Alternative readings', { exact: true }).inputValue(), '12 3BC');
+  assert.equal(await guided.locator('.saved-decision').textContent(), ' Saved: tentative reading');
+  assert.equal(fs.readFileSync(path.join(fixture, 'labels.json'), 'utf8'), independentBefore);
+  await guided.screenshot({ path: path.join(artifacts, 'plate-context.png'), fullPage: true });
   assert.deepEqual(errors, []);
   console.log(
     'Browser checks passed: reports/images, native-coordinate boxes, autosave, reload, download, concurrent edits, fresh browser, narrow layout, assisted baseline, persistent brightness, independent-label preservation.',

@@ -153,7 +153,7 @@ Road-camera metadata identifies OX03C10 and records integration lines and gain.
 The 14.697 ms SOF-to-EOF duration is sensor readout, **not exposure duration**.
 Exposure/IMU timing, camera-to-IMU calibration and HDR readout need to be
 established before an exposure-aware deblurring kernel is defensible. Gyro data
-is audited but not applied to the current fused images. Relevant prior work:
+now drives a separate, explicitly uncalibrated sensitivity comparison. Relevant prior work:
 [Image Deblurring using Inertial Measurement Sensors](https://www.microsoft.com/en-us/research/publication/image-deblurring-using-inertial-measurement-sensors/).
 
 Reproduce from the repository root:
@@ -171,3 +171,46 @@ native-resolution derivatives live in `assisted-v1/fusion/7d594befef6e/`.
 Synthetic checks verify registration direction, identical-input preservation,
 and the average limit of Fourier weights. Browser checks verify both images and
 switching combination methods without altering independent annotations.
+
+
+## Plate context and tentative readings
+
+Assisted review accepts an optional issuing state, plate design, vehicle type,
+alternate transcripts and an uncertainty note. The chosen text remains verbatim.
+Tentative readings cannot enter the clear baseline; older browser submissions
+preserve this context. These annotations remain separate from independent labels.
+
+Format hints currently cover Utah's standard Skier and Arches designs only:
+letter + three digits + two letters, per the
+[Utah DMV Skier page](https://dmv.utah.gov/plates/license-plates/skier/) and
+[Arches page](https://dmv.utah.gov/plates/license-plates/arches/), checked 2026-09-06.
+Other states can be recorded without imposing an unverified pattern. Unknown
+designs receive a conditional hint; personalized and other designs bypass it.
+No character is inserted, O/0 substituted, or certainty raised by a format match.
+State-based OCR reranking has not yet been evaluated or connected to inference.
+
+## Gyro-guided sensitivity comparison
+
+After the audit and fusion commands above, run:
+
+```sh
+PYTHONPATH="$PWD" tools/alpr/.venv/bin/python -m tools.alpr.gyro_deblur \
+  /mnt/algo14/comma3-alpr --encounter 00000011--c81f40f6a9--16/fcamera/vehicle-086
+```
+
+The recorded local gyro averages and nominal narrow-camera geometry predict
+roughly 738–1029 px/s of horizontal camera-induced motion at these plate positions.
+For each usable frame, the script constructs a local motion kernel with an
+**assumed** 1, 2, 4, 8 or 12 ms exposure, applies a regularized inverse filter,
+then reuses the original image alignment and combines frames. The sweep is fixed
+in advance and uses no transcript or OCR score. Source image and IMU hashes,
+flow estimates and assumptions are retained in the report. Rerun this command
+following any regenerated fusion report to restore these comparison methods.
+
+This is not calibrated recovery: HDR exposure weights/timing, gyro bias, exact
+camera-to-IMU axes, rolling shutter, radiometric response and target translation
+are unresolved. The low-duration variants show little change; stronger variants
+introduce doubled/ringing edges without reliably resolving the characters.
+No improvement in reading accuracy has been established. Synthetic tests check
+zero-motion preservation, yaw projection direction and recovery of known blur;
+these tests do not establish real-plate accuracy.

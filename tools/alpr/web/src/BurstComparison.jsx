@@ -31,8 +31,8 @@ export default function BurstComparison({ encounterId, settings }) {
           <h3>Can several frames reveal more?</h3>
           <p>
             {report.used_frames} views aligned; {report.input_frames - report.used_frames} clipped or poorly
-            aligned views excluded. The result is cleaner, but the plate remains uncertain. Compare against
-            the original before accepting a character.
+            aligned views excluded. These combinations have not resolved the uncertain characters. Compare
+            against the original before accepting a character.
           </p>
           <label>
             Combination method{' '}
@@ -73,12 +73,20 @@ export default function BurstComparison({ encounterId, settings }) {
               <strong>Motion sensors are available</strong>
               <p>
                 Gyroscope and accelerometer: about {Math.round(report.imu_summary.gyroscope.median_rate_hz)}{' '}
-                samples/sec. This sequence contains about{' '}
-                {Math.round((report.imu_summary.gyro_integrated_norm_rad * 180) / Math.PI)}° of accumulated
-                camera rotation. Gyroscope-assisted exposure correction is a next experiment; it is not
-                applied to these combined images.
+                samples/sec. Integrated gyro magnitude over this sequence is about{' '}
+                {Math.round((report.imu_summary.gyro_integrated_norm_rad * 180) / Math.PI)}° of angular travel
+                (not a calibrated camera pose).
+                {report.gyro_experiment
+                  ? ' Gyro-guided methods are now available above. Their exposure durations are assumptions, not measurements; stronger settings can create false edges.'
+                  : ' Gyroscope correction is not applied to these combined images.'}
               </p>
             </div>
+          )}
+          {report.gyro_experiment && chosen.id.startsWith('gyro_') && (
+            <p className="validation">
+              Experimental motion correction: measured gyro direction, assumed exposure. Camera motion only;
+              truck motion and HDR mixing remain unresolved. Do not accept a character from new edges alone.
+            </p>
           )}
           <details>
             <summary>Alignment details</summary>

@@ -105,6 +105,8 @@ views aligned; the eighth touches the image edge and was excluded. Registered
 averaging and frequency-weighted combination reduce noise, but the characters
 remain uncertain. This is not a successful recognition-accuracy result. A
 recorded IMU audit found substantial angular motion during the burst, supporting
-further gyro/exposure calibration work. Current derivatives use visual
-registration; inertial deblurring has not been applied. See the
+further gyro/exposure calibration work. A subsequent gyro-guided inverse-filter sweep (assumed exposures of 1–12 ms)
+uses measured local rotation and the existing visual registration. It does not
+reliably resolve the characters: stronger settings introduce ringing. Exposure
+and camera/IMU calibration remain incomplete, and no accuracy gain is established. See the
 [burst experiment notes](web/README.md#vehicle-2-burst-experiment).

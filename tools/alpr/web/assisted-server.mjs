@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import express from 'express';
+import { stateCodes, plateStyles } from './plate-formats.mjs';
 const hash = (data) => createHash('sha256').update(JSON.stringify(data)).digest('hex');
 const read = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
 
@@ -54,11 +55,43 @@ export function installAssistedRoutes(app, dataDir) {
     )
       return res.status(400).json({ error: 'Invalid review correction.' });
     const readable = ['confirmed', 'corrected'].includes(review.state);
+    // Preserve context when an older browser submits a correction without the new fields.
+    const prior = previous.decisions[encounter.id] || {};
+    const metadata = Object.fromEntries(
+      Object.entries({
+        jurisdiction: '',
+        plate_style: 'unknown',
+        certainty: 'unspecified',
+        alternatives: [],
+        uncertainty_note: '',
+        vehicle_type: '',
+      }).map(([key, fallback]) => [key, review[key] ?? prior[key] ?? fallback]),
+    );
+    if (
+      !['', ...stateCodes].includes(metadata.jurisdiction) ||
+      !plateStyles.includes(metadata.plate_style) ||
+      (metadata.plate_style.startsWith('ut_') && metadata.jurisdiction !== 'UT') ||
+      !['unspecified', 'certain', 'tentative'].includes(metadata.certainty) ||
+      !Array.isArray(metadata.alternatives) ||
+      metadata.alternatives.length > 10 ||
+      !metadata.alternatives.every((v) => typeof v === 'string' && v.length > 0 && v.length <= 100) ||
+      typeof metadata.uncertainty_note !== 'string' ||
+      metadata.uncertainty_note.length > 1000 ||
+      !['', 'car', 'truck', 'bus', 'motorcycle', 'other'].includes(metadata.vehicle_type)
+    )
+      return res.status(400).json({ error: 'Invalid plate context.' });
+    if (metadata.alternatives.length) metadata.certainty = 'tentative';
+    if (review.baseline && metadata.certainty === 'tentative')
+      return res
+        .status(400)
+        .json({ error: 'Resolve uncertain characters and alternatives before adding a clear baseline.' });
+    if (review.baseline) metadata.certainty = 'certain';
     if ((readable && !/[a-z0-9]/i.test(review.text)) || (review.baseline && !readable))
       return res
         .status(400)
         .json({ error: 'A clear baseline requires a readable, confirmed plate transcript.' });
     const decision = {
+      ...metadata,
       state: review.state,
       sample_id: sample.id,
       text: readable ? review.text : '',

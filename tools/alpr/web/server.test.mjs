@@ -135,3 +135,57 @@ test('assisted decisions are revision-protected and never alter independent anno
     400,
   );
 });
+
+test('tentative context survives older clients and cannot become a clear baseline', async () => {
+  const load = () => fetch(url + '/api/assisted/reviews').then((r) => r.json());
+  const initial = await load();
+  const oldReview = initial.data.decisions['vehicle-a'];
+  const send = async (review) =>
+    fetch(url + '/api/assisted/reviews', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ revision: (await load()).revision, encounter_id: 'vehicle-a', review }),
+    });
+  const uncertain = {
+    ...oldReview,
+    text: 'A12 3BC',
+    baseline: false,
+    jurisdiction: 'UT',
+    plate_style: 'unknown',
+    certainty: 'tentative',
+    alternatives: ['12 3BC'],
+    uncertainty_note: 'Leading character unclear',
+    vehicle_type: 'truck',
+  };
+  assert.equal((await send(uncertain)).status, 200);
+  assert.equal((await send({ ...uncertain, baseline: true })).status, 400);
+  const legacy = { ...oldReview, baseline: false, text: 'A12 3BC' };
+  for (const key of [
+    'jurisdiction',
+    'plate_style',
+    'certainty',
+    'alternatives',
+    'uncertainty_note',
+    'vehicle_type',
+  ])
+    delete legacy[key];
+  assert.equal((await send(legacy)).status, 200);
+  assert.equal((await load()).data.decisions['vehicle-a'].certainty, 'tentative');
+  assert.deepEqual((await load()).data.decisions['vehicle-a'].alternatives, ['12 3BC']);
+  assert.equal((await send({ ...legacy, baseline: true })).status, 400);
+  assert.equal((await send({ ...uncertain, jurisdiction: 'FL', plate_style: 'ut_skier' })).status, 400);
+  assert.equal(
+    (await send({ ...uncertain, certainty: 'certain', alternatives: [], baseline: true })).status,
+    200,
+  );
+});
+
+test('state and design hints never rewrite OCR or impose a universal state format', async () => {
+  const { formatHint } = await import('./plate-formats.mjs');
+  assert.equal(formatHint('UT', 'ut_skier', 'A12 3BC').matches, true);
+  assert.equal(formatHint('UT', 'ut_arches', '12 3BC').matches, false);
+  assert.equal(formatHint('UT', 'ut_skier', 'A1O 3BC').matches, false);
+  assert.equal(formatHint('UT', 'unknown', 'A12 3BC').known, false);
+  assert.equal(formatHint('UT', 'personalized', 'HELLO'), null);
+  assert.equal(formatHint('FL', 'unknown', 'A12 3BC'), null);
+});

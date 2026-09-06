@@ -19,6 +19,13 @@ for (const file of [
 ])
   fs.copyFileSync(path.join(source, file), path.join(fixture, file));
 fs.symlinkSync(path.join(source, 'runs'), path.join(fixture, 'runs'));
+const assisted = path.join(fixture, 'assisted-v1');
+fs.mkdirSync(assisted);
+fs.copyFileSync(path.join(source, 'assisted-v1/queue.json'), path.join(assisted, 'queue.json'));
+for (const entry of fs.readdirSync(path.join(source, 'assisted-v1'), { withFileTypes: true })) {
+  if (entry.isDirectory())
+    fs.symlinkSync(path.join(source, 'assisted-v1', entry.name), path.join(assisted, entry.name));
+}
 const server = createApp({ dataDir: fixture }).listen(0, '127.0.0.1');
 await new Promise((resolve) => server.once('listening', resolve));
 const base = `http://127.0.0.1:${server.address().port}`;
@@ -54,7 +61,7 @@ try {
     await page.goto(base + '/#' + name);
     await page.locator('.document h1').waitFor();
   }
-  await page.goto(base + '/#review');
+  await page.goto(base + '/#manual');
   const canvas = page.getByLabel('Road frame: drag to draw a plate box');
   await canvas.waitFor();
   await page.getByLabel('Zoom', { exact: true }).selectOption('1');
@@ -82,7 +89,7 @@ try {
   assert.equal(exported.suggestedFilename(), 'labels.json');
   // Concurrent tabs must not overwrite one another.
   const other = await context.newPage();
-  await other.goto(base + '/#review');
+  await other.goto(base + '/#manual');
   await other.getByLabel('Lighting', { exact: true }).waitFor();
   await page.getByLabel('Lighting', { exact: true }).selectOption('day');
   await page.getByRole('status').filter({ hasText: 'All changes saved' }).waitFor();
@@ -93,13 +100,46 @@ try {
   // A fresh browser retrieves saved work independently of localStorage.
   const fresh = await browser.newContext({ viewport: { width: 390, height: 844 } });
   const mobile = await fresh.newPage();
-  await mobile.goto(base + '/#review');
+  await mobile.goto(base + '/#manual');
   await mobile.getByLabel('Plate text').waitFor();
   assert.equal(await mobile.getByLabel('Plate text').inputValue(), 'TEST123');
   await mobile.screenshot({ path: path.join(artifacts, 'mobile.png'), fullPage: true });
+  // Machine-assisted reviews use separate decisions, persistent display controls and automatic identities.
+  const independentBefore = fs.readFileSync(path.join(fixture, 'labels.json'), 'utf8');
+  const guided = await context.newPage();
+  guided.on('pageerror', (e) => errors.push(e.message));
+  await guided.goto(base + '/#review');
+  await guided.getByLabel('Enlarged plate', { exact: true }).waitFor();
+  assert.equal(await guided.getByLabel('Candidate selection').inputValue(), 'close');
+  await guided.getByLabel('Lift shadows', { exact: true }).focus();
+  await guided.keyboard.press('End');
+  assert.equal(await guided.getByLabel('Lift shadows', { exact: true }).inputValue(), '3');
+  await guided.getByRole('button', { name: 'Next encounter', exact: true }).click();
+  assert.equal(await guided.getByLabel('Lift shadows', { exact: true }).inputValue(), '3');
+  await guided.reload();
+  await guided.getByLabel('Enlarged plate', { exact: true }).waitFor();
+  assert.equal(await guided.getByLabel('Lift shadows', { exact: true }).inputValue(), '3');
+  await guided.getByRole('button', { name: 'Lift shadows preset', exact: true }).click();
+  await guided.getByLabel('Next after saving').uncheck();
+  await guided.getByLabel('Suggested plate text', { exact: true }).fill('TEST456');
+  await guided
+    .getByRole('button', { name: 'Every character is clear — add to baseline', exact: true })
+    .click();
+  await guided.getByRole('status').filter({ hasText: 'Review saved' }).waitFor();
+  const decisions = JSON.parse(fs.readFileSync(path.join(assisted, 'reviews.json'))).decisions;
+  assert.equal(Object.values(decisions)[0].baseline, true);
+  assert.equal(Object.values(decisions)[0].text, 'TEST456');
+  assert.equal(Object.values(decisions)[0].state, 'corrected');
+  assert.equal(fs.readFileSync(path.join(fixture, 'labels.json'), 'utf8'), independentBefore);
+  await guided.reload();
+  await guided.getByLabel('Suggested plate text', { exact: true }).waitFor();
+  assert.equal(await guided.getByLabel('Suggested plate text', { exact: true }).inputValue(), 'TEST456');
+  await guided.screenshot({ path: path.join(artifacts, 'assisted.png'), fullPage: true });
+  await guided.getByLabel('Candidate selection').selectOption('baseline');
+  assert.equal(await guided.locator('.saved-decision').textContent(), ' Saved: clear baseline');
   assert.deepEqual(errors, []);
   console.log(
-    'Browser checks passed: reports/images, native-coordinate boxes, autosave, reload, download, concurrent edits, fresh browser, narrow layout.',
+    'Browser checks passed: reports/images, native-coordinate boxes, autosave, reload, download, concurrent edits, fresh browser, narrow layout, assisted baseline, persistent brightness, independent-label preservation.',
   );
 } finally {
   await browser.close();

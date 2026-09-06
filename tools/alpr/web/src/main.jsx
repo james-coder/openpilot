@@ -21,10 +21,13 @@ import {
   Wifi,
 } from 'lucide-react';
 import './style.css';
+import AssistedReview from './AssistedReview';
+import { DisplayControls, useDisplaySettings, enhance } from './DisplayControls';
 
 const nav = [
   ['overview', 'Study overview', Home],
-  ['review', 'Annotate frames', ScanLine],
+  ['review', 'Confirm close examples', ScanLine],
+  ['manual', 'Original annotations', FileText],
   ['radar', 'Radar & video', Radar],
   ['models', 'Model comparison', Layers],
   ['sampling', 'Sampling comparison', Aperture],
@@ -201,7 +204,7 @@ function App() {
           <div className="loading">Loading your local study…</div>
         ) : (
           <>
-            {staleDraft && (
+            {staleDraft && page === 'manual' && (
               <div className="alert">
                 This browser has an older unsaved draft. The current server copy is loaded.{' '}
                 <button onClick={() => download(staleDraft, 'recovered-draft.json')}>
@@ -218,6 +221,8 @@ function App() {
               </div>
             )}
             {page === 'review' ? (
+              <AssistedReview />
+            ) : page === 'manual' ? (
               <Review
                 data={data}
                 update={update}
@@ -294,13 +299,13 @@ function Overview({ study, data, reviewed }) {
       <div className="feature-grid">
         <section className="feature">
           <div className="eyebrow">START HERE</div>
-          <h2>What can you actually read?</h2>
+          <h2>The machine prepares. You confirm.</h2>
           <p>
-            Draw boxes around visible plates and transcribe only what the image supports. Annotations save
-            automatically to the workstation.
+            Start with close vehicles and large plate crops. Boxes, suggested text and vehicle groups are
+            already prepared. Brightness controls stay where you set them.
           </p>
           <a className="button primary" href="#review">
-            Start independent review <ArrowRight size={17} />
+            Confirm close examples <ArrowRight size={17} />
           </a>
           <div className="progress">
             <span style={{ width: `${(reviewed / data.frames.length) * 100}%` }} />
@@ -419,6 +424,7 @@ function Document({ name }) {
 }
 
 function Review({ data, update, reviewed, saveStatus, retry, blocked }) {
+  const [displaySettings, setDisplaySettings] = useDisplaySettings();
   const [n, setN] = useState(0),
     [camera, setCamera] = useState('all'),
     [unreviewed, setUnreviewed] = useState(false);
@@ -483,6 +489,7 @@ function Review({ data, update, reviewed, saveStatus, retry, blocked }) {
       ctx = c.getContext('2d');
     ctx.clearRect(0, 0, c.width, c.height);
     ctx.drawImage(img.current, 0, 0);
+    enhance(ctx, c.width, c.height, displaySettings);
     ctx.lineWidth = 3 / zoom;
     ctx.font = `${15 / zoom}px system-ui`;
     frame.plates.forEach((p, i) => {
@@ -499,7 +506,7 @@ function Review({ data, update, reviewed, saveStatus, retry, blocked }) {
       ctx.strokeRect(drag[0], drag[1], drag[2] - drag[0], drag[3] - drag[1]);
       ctx.setLineDash([]);
     }
-  }, [ready, frame.plates, drag, zoom, size]);
+  }, [ready, frame.plates, drag, zoom, size, displaySettings]);
   const xy = (e) => {
     const r = canvas.current.getBoundingClientRect();
     return [
@@ -541,6 +548,7 @@ function Review({ data, update, reviewed, saveStatus, retry, blocked }) {
         Box every visible plate, including unreadable ones. Reuse an encounter ID for the same vehicle within
         a route. Check the whole image before marking a frame reviewed.
       </p>
+      <DisplayControls settings={displaySettings} setSettings={setDisplaySettings} />
       <div className="review-toolbar">
         <div className="group">
           <button aria-label="Previous frame" disabled={indices.indexOf(n) <= 0} onClick={() => next(-1)}>

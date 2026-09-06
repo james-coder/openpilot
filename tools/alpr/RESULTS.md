@@ -79,3 +79,23 @@ a reliable way to reduce processing or uploads.
 Keep the current study on the workstation. Nothing in these results establishes
 sufficient memory, latency or thermal margin for running ALPR alongside driving
 on the comma3. No cloud service or on-device ALPR job was installed.
+
+## Assisted close-range review
+
+After the first human review, the original uniform frame sampling was replaced
+as the default UI by a prepared encounter queue. Original annotations remain in
+`labels.json`; assisted confirmations have a separate file and provenance.
+
+A new RTX 4090 pass processed 505 radar/plate-selected frames from 14 camera
+clips. YOLO11s detected vehicles, plate detection was repeated on vehicle crops,
+and OCR compared original crops with a shadow-lifted view. It produced 404 plate
+observations grouped into 45 proposed local vehicle tracks in about 247 seconds.
+Two selected views combine 3–8 m radar range with at least 75 original plate
+pixels: approximately 5.6 m / 107 px and 4.0 m / 139 px. Each encounter offers
+up to eight selected views. These are candidates for a human-confirmed clear
+baseline; close range or high model confidence does not establish readability.
+
+The UI supplies vehicle IDs and estimated lighting, and saves shadow lift,
+brightness and contrast settings in the browser. Review actions confirm/correct,
+reject, or mark unreadable. Optional grouping corrections handle fragmented
+visual tracks. See [web/README.md](web/README.md) for reproduction and storage.

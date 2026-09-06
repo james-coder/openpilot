@@ -92,3 +92,46 @@ test('export has the evaluator-compatible document without revision metadata', a
   assert.equal(data.revision, undefined);
   assert.equal(data.frames.length, 1);
 });
+
+test('assisted decisions are revision-protected and never alter independent annotations', async () => {
+  const root = path.join(dir, 'assisted-v1');
+  fs.mkdirSync(root);
+  fs.writeFileSync(
+    path.join(root, 'queue.json'),
+    JSON.stringify({ encounters: [{ id: 'vehicle-a', samples: [{ id: 'sample-a' }] }] }),
+  );
+  const original = fs.readFileSync(path.join(dir, 'labels.json'), 'utf8');
+  const current = await fetch(url + '/api/assisted/reviews').then((r) => r.json());
+  const review = {
+    state: 'confirmed',
+    text: 'TEST123',
+    sample_id: 'sample-a',
+    box: [10, 20, 80, 50],
+    lighting: 'auto',
+    vehicle_id: 'vehicle-a',
+    baseline: true,
+  };
+  const save = (body) =>
+    fetch(url + '/api/assisted/reviews', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  const body = { revision: current.revision, encounter_id: 'vehicle-a', review };
+  const response = await save(body);
+  assert.equal(response.status, 200);
+  const saved = await response.json();
+  assert.equal(saved.data.decisions['vehicle-a'].assisted, true);
+  assert.equal(saved.data.decisions['vehicle-a'].baseline, true);
+  assert.equal(fs.readFileSync(path.join(dir, 'labels.json'), 'utf8'), original);
+  assert.equal((await save(body)).status, 409);
+  assert.equal(
+    (await save({ ...body, revision: saved.revision, review: { ...review, state: 'unreadable' } })).status,
+    400,
+  );
+  assert.equal(
+    (await save({ ...body, revision: saved.revision, review: { ...review, box: [0, 0, 9999, 9999] } }))
+      .status,
+    400,
+  );
+});

@@ -1,4 +1,5 @@
 import express from 'express';
+import { installAssistedRoutes } from './assisted-server.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
@@ -79,6 +80,7 @@ export function createApp({
     next();
   });
   app.use(express.json({ limit: '5mb' }));
+  installAssistedRoutes(app, dataDir);
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
   app.get('/api/study', (_req, res) => res.json(read(path.join(dataDir, 'study-results.json'))));
   app.get('/api/labels', (_req, res) => {
@@ -94,12 +96,10 @@ export function createApp({
   app.put('/api/labels', (req, res) => {
     const previous = current();
     if (req.body?.revision !== revision(previous))
-      return res
-        .status(409)
-        .json({
-          error:
-            'Another tab or reviewer saved changes. Download your draft, then reload to get the saved version.',
-        });
+      return res.status(409).json({
+        error:
+          'Another tab or reviewer saved changes. Download your draft, then reload to get the saved version.',
+      });
     let data;
     try {
       data = validateLabels(req.body.data, template);
@@ -148,14 +148,12 @@ export function createApp({
   app.use((_req, res) => res.sendStatus(404));
   app.use((error, _req, res, _next) => {
     console.error(error.message);
-    res
-      .status(error.status || 500)
-      .json({
-        error:
-          error.status === 413
-            ? 'Annotation document is too large.'
-            : 'Request failed. Your saved labels were not replaced.',
-      });
+    res.status(error.status || 500).json({
+      error:
+        error.status === 413
+          ? 'Annotation document is too large.'
+          : 'Request failed. Your saved labels were not replaced.',
+    });
   });
   return app;
 }

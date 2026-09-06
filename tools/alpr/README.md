@@ -7,6 +7,8 @@ database. Keep data, environments, and model caches on attached USB storage.
 
 See [RESULTS.md](RESULTS.md) for the executed local comparisons and remaining
 data/labeling work.
+The [radar prioritization notes](RADAR_PRIORITIZATION.md) examine selecting
+useful intervals using this car's recorded front and adjacent-lane targets.
 
 ## Reproduce
 

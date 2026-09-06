@@ -108,6 +108,12 @@ QR code in comma connect, then verify the server status and relay again.
 At the user's suggestion, one offroad reboot was performed on the baseline
 software. The fresh API check still returned the same unpaired/no-plan status.
 The resumable footage export was paused for the reboot and resumed afterward.
+After the device returned home, another live request still reported unpaired
+status. All thirty selected footage segments then completed export: 120 files,
+4,287,737,290 bytes, verified against source checksums. Subsequent workstation
+analysis can continue without device connectivity. The device remains connected
+to the car, with ignition off at the last inspection; the disconnected bench
+validation and candidate installation remain pending.
 
 There is no ignition prerequisite in this source: manager registers at startup,
 Athena is a daemon started offroad, the pairing dialog creates a pairing token

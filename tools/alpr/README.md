@@ -5,6 +5,9 @@ completed recordings, runs local open-source models, and produces reviewable
 predictions. Nothing here enables on-device ALPR, cloud uploads, or a plate
 database. Keep data, environments, and model caches on attached USB storage.
 
+See [RESULTS.md](RESULTS.md) for the executed local comparisons and remaining
+data/labeling work.
+
 ## Reproduce
 
 Run commands from the openpilot repository root. The export uses ordinary

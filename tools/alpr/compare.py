@@ -66,7 +66,7 @@ def main():
   args.output.parent.mkdir(parents=True, exist_ok=True)
   args.output.write_text('''<!doctype html><meta charset="utf-8"><title>ALPR model comparison</title>
     <style>body{font:16px sans-serif;margin:20px}td,th{padding:12px;border:1px solid #ccc;overflow-wrap:anywhere}
-    table{border-collapse:collapse}img{max-width:400px;image-rendering:pixelated}pre{white-space:pre-wrap}</style>
+    table{border-collapse:collapse}img{width:320px;max-width:400px;image-rendering:pixelated}pre{white-space:pre-wrap}</style>
     <h1>ALPR model comparison</h1><p>Same-frame predictions on primary-run crops; matching uses box IoU >= 0.5.
     This view omits vehicles missed by the primary detector. Use independently reviewed full frames to measure recall.
     Scores are not measured accuracy. The OCR-only CPU timings are not comparable to GPU detector-plus-OCR timings.</p>

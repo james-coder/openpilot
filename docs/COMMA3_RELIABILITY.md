@@ -34,7 +34,7 @@ services, and non-GM candidates retain their previous behavior.
 - Minimal full host build passed using system clang 18. The workstation's
   user-installed clang could not load `libtinfo.so.5`; no source change was needed.
   Git LFS model/font objects were restored before building.
-- 49 tests and 27 subtests passed: radar allocation and decoded-field equivalence,
+- 51 tests and 27 subtests passed: radar allocation and decoded-field equivalence,
   GM fingerprint negatives, all six radar degradation flags, clean recovery,
   CAN failure behavior, cruise alert timing, existing alert/state-machine tests,
   CAN diagnostic data, API retry behavior, and offline study evaluation.
@@ -42,6 +42,8 @@ services, and non-GM candidates retain their previous behavior.
 - Recorded radar input repeated for **four simulated hours, accelerated**:
   1,200 recorded snapshots; zero measured RSS growth; zero unreachable objects.
   This is not four hours of wall-clock device operation or a thermal test.
+- A second accelerated four-hour run with 2,400 snapshots from two segments
+  grew 0.16 MiB, slope 0.057 MiB/hour, and also left zero unreachable objects.
 
 Reproduce the focused suite from the repository environment:
 

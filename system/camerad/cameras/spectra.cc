@@ -36,7 +36,13 @@ int do_cam_control(int fd, int op_code, void *handle, int size) {
 
   int ret = HANDLE_EINTR(ioctl(fd, VIDIOC_CAM_CONTROL, &camcontrol));
   if (ret == -1) {
-    LOGE("VIDIOC_CAM_CONTROL error: op_code %d - errno %d", op_code, errno);
+    if (op_code == CAM_SENSOR_PROBE_CMD && errno == ENODEV) {
+      // openSensor tries supported sensor types; a non-match is expected.
+      // Failure of every candidate is reported by openSensor below.
+      LOGD("camera sensor probe did not match: errno %d", errno);
+    } else {
+      LOGE("VIDIOC_CAM_CONTROL error: op_code %d - errno %d", op_code, errno);
+    }
   }
   return ret;
 }

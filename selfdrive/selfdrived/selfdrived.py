@@ -360,9 +360,9 @@ class SelfdriveD:
         self.events.add(EventName.commIssue)
 
       logs = {
-        'invalid': [s for s, valid in self.sm.valid.items() if not valid],
-        'not_alive': [s for s, alive in self.sm.alive.items() if not alive],
-        'not_freq_ok': [s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
+        'invalid': [s for s in self.sm.services if not self.sm.all_valid([s])],
+        'not_alive': [s for s in self.sm.services if not self.sm.all_alive([s])],
+        'not_freq_ok': [s for s in self.sm.services if not self.sm.all_freq_ok([s])],
       }
       if logs != self.logged_comm_issue:
         cloudlog.event("commIssue", error=True, **logs)

@@ -8,6 +8,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import drop_realtime
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.api_helpers import get_token
+from openpilot.selfdrive.ui.lib.api_poller import ApiPoller
 from openpilot.selfdrive.ui.ui_state import ui_state, device
 from openpilot.system.athena.registration import UNREGISTERED_DONGLE_ID
 from openpilot.system.ui.lib.application import gui_app, FontWeight, FONT_SCALE
@@ -54,6 +55,7 @@ class FirehoseLayoutBase(Widget):
     self._content_height = 0
 
     self._running = True
+    self._poller = ApiPoller("Firehose stats", self.UPDATE_INTERVAL)
     self._update_thread = threading.Thread(target=self._update_loop, daemon=True)
     self._update_thread.start()
 
@@ -199,25 +201,22 @@ class FirehoseLayoutBase(Widget):
       return tr("INACTIVE: connect to an unmetered network"), self.RED
 
   def _fetch_firehose_stats(self):
-    try:
-      dongle_id = self._params.get("DongleId")
-      if not dongle_id or dongle_id == UNREGISTERED_DONGLE_ID:
-        return
-      identity_token = get_token(dongle_id)
-      response = api_get(f"v1/devices/{dongle_id}/firehose_stats", access_token=identity_token, session=self._session)
-      if response.status_code == 200:
-        data = response.json()
-        self._segment_count = data.get("firehose", 0)
-        self._params.put(self.PARAM_KEY, data)
-    except Exception as e:
-      cloudlog.error(f"Failed to fetch firehose stats: {e}")
+    dongle_id = self._params.get("DongleId")
+    if not dongle_id or dongle_id == UNREGISTERED_DONGLE_ID:
+      return
+    identity_token = get_token(dongle_id)
+    response = api_get(f"v1/devices/{dongle_id}/firehose_stats", timeout=10, access_token=identity_token, session=self._session)
+    response.raise_for_status()
+    data = response.json()
+    self._segment_count = data.get("firehose", 0)
+    self._params.put(self.PARAM_KEY, data)
 
   def _update_loop(self):
     drop_realtime()
     while self._running:
       if not ui_state.started and device._awake:
-        self._fetch_firehose_stats()
-      time.sleep(self.UPDATE_INTERVAL)
+        self._poller.poll(self._fetch_firehose_stats, int(ui_state.sm['deviceState'].networkType))
+      time.sleep(0.5)
 
 
 class FirehoseLayout(NavRawScrollPanel, FirehoseLayoutBase):

@@ -14,9 +14,10 @@ BIG_UI = gui_app.big_ui()
 
 
 def main():
-  cores = {5, }
-  # above plannerd and radard
-  config_realtime_process(0, Priority.CTRL_HIGH)
+  # Keep initialization and hotplug recovery on the same core. Core 5 is
+  # reserved for plannerd/radard; the UI must not migrate there while rendering.
+  cores = {0}
+  config_realtime_process(list(cores), Priority.CTRL_HIGH)
 
   gui_app.init_window("UI")
   if BIG_UI:

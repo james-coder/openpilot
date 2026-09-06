@@ -369,6 +369,12 @@ def high_cpu_usage_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubM
   return NormalPermanentAlert("High CPU Usage", f"{x}% used")
 
 
+def cruise_fault_permanent_alert(CP, CS, sm, metric, soft_disable_time, personality):
+  # Only defer the informational banner while GM brake availability settles.
+  # Refusal to engage and immediate disable remain immediate.
+  return NormalPermanentAlert("Cruise Fault: Restart the car to engage", creation_delay=1.0 if CP.brand == "gm" else 0.0)
+
+
 def modeld_lagging_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   return NormalPermanentAlert("Driving Model Lagging", f"{sm['modelV2'].frameDropPerc:.1f}% frames dropped")
 
@@ -945,7 +951,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
 
   EventName.accFaulted: {
     ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("Cruise Fault: Restart the Car"),
-    ET.PERMANENT: NormalPermanentAlert("Cruise Fault: Restart the car to engage"),
+    ET.PERMANENT: cruise_fault_permanent_alert,
     ET.NO_ENTRY: NoEntryAlert("Cruise Fault: Restart the Car"),
   },
 

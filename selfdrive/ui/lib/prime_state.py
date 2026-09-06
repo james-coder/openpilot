@@ -10,6 +10,7 @@ from openpilot.common.realtime import drop_realtime
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.athena.registration import UNREGISTERED_DONGLE_ID
 from openpilot.selfdrive.ui.lib.api_helpers import get_token
+from openpilot.selfdrive.ui.lib.api_poller import ApiPoller
 
 
 class PrimeType(IntEnum):
@@ -36,6 +37,7 @@ class PrimeState:
 
     self._running = False
     self._thread = None
+    self._poller = ApiPoller("Prime status", self.FETCH_INTERVAL)
 
   def _load_initial_state(self) -> PrimeType:
     prime_type_str = os.getenv("PRIME_TYPE") or self._params.get("PrimeType")
@@ -51,16 +53,13 @@ class PrimeState:
     if not dongle_id or dongle_id == UNREGISTERED_DONGLE_ID:
       return
 
-    try:
-      identity_token = get_token(dongle_id)
-      response = api_get(f"v1.1/devices/{dongle_id}", timeout=self.API_TIMEOUT, access_token=identity_token, session=self._session)
-      if response.status_code == 200:
-        data = response.json()
-        is_paired = data.get("is_paired", False)
-        prime_type = data.get("prime_type", 0)
-        self.set_type(PrimeType(prime_type) if is_paired else PrimeType.UNPAIRED)
-    except Exception as e:
-      cloudlog.error(f"Failed to fetch prime status: {e}")
+    identity_token = get_token(dongle_id)
+    response = api_get(f"v1.1/devices/{dongle_id}", timeout=self.API_TIMEOUT, access_token=identity_token, session=self._session)
+    response.raise_for_status()
+    data = response.json()
+    is_paired = data.get("is_paired", False)
+    prime_type = data.get("prime_type", 0)
+    self.set_type(PrimeType(prime_type) if is_paired else PrimeType.UNPAIRED)
 
   def set_type(self, prime_type: PrimeType) -> None:
     with self._lock:
@@ -74,7 +73,7 @@ class PrimeState:
     from openpilot.selfdrive.ui.ui_state import ui_state, device
     while self._running:
       if not ui_state.started and device._awake:
-        self._fetch_prime_status()
+        self._poller.poll(self._fetch_prime_status, int(ui_state.sm['deviceState'].networkType))
 
       for _ in range(int(self.FETCH_INTERVAL / self.SLEEP_INTERVAL)):
         if not self._running:

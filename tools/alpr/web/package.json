@@ -1,0 +1,28 @@
+{
+  "name": "road-review",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "build": "vite build",
+    "start": "node server.mjs",
+    "test": "node --test server.test.mjs",
+    "test:browser": "node browser.test.mjs"
+  },
+  "engines": {
+    "node": ">=22.12"
+  },
+  "dependencies": {
+    "express": "5.2.1",
+    "lucide-react": "1.41.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "react-markdown": "10.1.0",
+    "remark-gfm": "4.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "prettier": "3.9.6",
+    "vite": "8.2.2"
+  }
+}

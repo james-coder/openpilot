@@ -10,6 +10,12 @@ data/labeling work.
 The [radar prioritization notes](RADAR_PRIORITIZATION.md) examine selecting
 useful intervals using this car's recorded front and adjacent-lane targets.
 
+## Local review site
+
+Open **http://192.168.99.189:8088/** from the local subnet for the React review
+workspace, automatically saved annotations, comparisons and radar examples.
+See [web/README.md](web/README.md) for service management and saving behavior.
+
 ## Reproduce
 
 Run commands from the openpilot repository root. The export uses ordinary

@@ -110,7 +110,12 @@ try {
   guided.on('pageerror', (e) => errors.push(e.message));
   await guided.goto(base + '/#review');
   await guided.getByLabel('Enlarged plate', { exact: true }).waitFor();
-  assert.equal(await guided.getByLabel('Candidate selection').inputValue(), 'close');
+  assert.equal(await guided.getByLabel('Candidate selection').inputValue(), 'recommended');
+  await guided.getByText(/^Browse \d+ examples$/).click();
+  assert.ok((await guided.locator('.encounter-grid button').count()) > 2);
+  await guided.getByRole('button', { name: 'Open vehicle 2', exact: true }).click();
+  await guided.getByRole('button', { name: 'Open vehicle 1', exact: true }).click();
+  await guided.getByLabel('Candidate selection').selectOption('close');
   await guided.getByLabel('Lift shadows', { exact: true }).focus();
   await guided.keyboard.press('End');
   assert.equal(await guided.getByLabel('Lift shadows', { exact: true }).inputValue(), '3');
@@ -119,6 +124,7 @@ try {
   await guided.reload();
   await guided.getByLabel('Enlarged plate', { exact: true }).waitFor();
   assert.equal(await guided.getByLabel('Lift shadows', { exact: true }).inputValue(), '3');
+  await guided.getByLabel('Candidate selection').selectOption('close');
   await guided.getByRole('button', { name: 'Lift shadows preset', exact: true }).click();
   await guided.getByLabel('Next after saving').uncheck();
   await guided.getByLabel('Suggested plate text', { exact: true }).fill('TEST456');
@@ -133,6 +139,8 @@ try {
   assert.equal(fs.readFileSync(path.join(fixture, 'labels.json'), 'utf8'), independentBefore);
   await guided.reload();
   await guided.getByLabel('Suggested plate text', { exact: true }).waitFor();
+  assert.notEqual(await guided.getByLabel('Suggested plate text', { exact: true }).inputValue(), 'TEST456');
+  await guided.getByLabel('Candidate selection').selectOption('close');
   assert.equal(await guided.getByLabel('Suggested plate text', { exact: true }).inputValue(), 'TEST456');
   await guided.screenshot({ path: path.join(artifacts, 'assisted.png'), fullPage: true });
   await guided.getByLabel('Candidate selection').selectOption('baseline');
@@ -163,6 +171,7 @@ try {
   await guided.getByRole('button', { name: 'Save tentative reading', exact: true }).click();
   await guided.getByRole('status').filter({ hasText: 'Review saved' }).waitFor();
   await guided.reload();
+  await guided.getByLabel('Candidate selection').selectOption('close');
   await guided.getByRole('button', { name: 'Next encounter', exact: true }).click();
   assert.equal(await guided.getByLabel('Issuing state', { exact: true }).inputValue(), 'UT');
   assert.equal(await guided.getByLabel('Alternative readings', { exact: true }).inputValue(), '12 3BC');

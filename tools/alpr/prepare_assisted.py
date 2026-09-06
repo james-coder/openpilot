@@ -3,6 +3,7 @@ import argparse
 from collections import defaultdict
 import json
 from pathlib import Path
+import re
 
 import zstandard
 from cereal import log
@@ -14,7 +15,12 @@ def main():
   p = argparse.ArgumentParser(description=__doc__)
   p.add_argument('data', type=Path)
   p.add_argument('--output', type=Path, required=True)
+  p.add_argument('--scan-fps', type=int, choices=[0, 1, 2, 5], default=0,
+                 help='Also scan all narrow-road footage at this rate, without requiring radar or prior detections')
+  p.add_argument('--id-prefix', default='', help='Unique namespace for an additive preprocessing batch')
   args = p.parse_args()
+  if args.id_prefix and not re.fullmatch(r'[a-z0-9-]+', args.id_prefix):
+    p.error('id-prefix must contain lowercase letters, digits or hyphens')
   dataset = args.data / '2026-09-study'
   existing = defaultdict(lambda: defaultdict(list))
   for path in (args.data / 'runs/s-native-5fps').glob('*/*/predictions.jsonl'):
@@ -50,7 +56,8 @@ def main():
         radar = radar_at(snapshots, times, stamp['mono_ns'])
         near = radar and any(3 <= p['range_m'] <= 10 and abs(p['left_m']) < 1.8 for p in radar['points'])
         prior = existing[(name, camera)][number]
-        if not prior and not (camera == 'fcamera' and number % 4 == 0 and near):
+        scan = args.scan_fps and camera == 'fcamera' and number % (20 // args.scan_fps) == 0
+        if not prior and not scan and not (camera == 'fcamera' and number % 4 == 0 and near):
           continue
         offset = index['clock_offset_ns']
         frames.append({'frame': number, 'mono_ns': stamp['mono_ns'],
@@ -60,7 +67,8 @@ def main():
         result.append({'segment': name, 'camera': camera, 'frames': sorted(frames, key=lambda f: f['frame']),
                        'source_sha256': manifest['verified'][f'{name}/{camera}.hevc']})
   args.output.parent.mkdir(parents=True, exist_ok=True)
-  args.output.write_text(json.dumps({'version': 1, 'clips': result}, indent=2) + '\n')
+  args.output.write_text(json.dumps({'version': 1, 'clips': result, 'scan_fps': args.scan_fps,
+                                   'id_prefix': args.id_prefix}, indent=2) + '\n')
   print(f'Prepared {sum(len(c["frames"]) for c in result)} candidate frames from {len(result)} clips')
 
 

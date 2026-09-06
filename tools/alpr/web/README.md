@@ -214,3 +214,45 @@ introduce doubled/ringing edges without reliably resolving the characters.
 No improvement in reading accuracy has been established. Synthetic tests check
 zero-motion preservation, yaw projection direction and recovery of known blur;
 these tests do not establish real-plate accuracy.
+
+
+## Additive review batches
+
+The default selection is **Recommended**, with a thumbnail browser and automatic
+resume at the first unreviewed recommendation. The narrow close-radar filter is
+optional. Encounter numbers follow the persistent queue, so changing filters
+does not rename a previously discussed vehicle. Saved decisions and original
+sample IDs remain intact when new encounters are appended.
+
+To look beyond the original radar/prior-detection selection, prepare a separate
+batch. `--scan-fps 2` also visits the narrow road camera twice per second across
+all downloaded segments, regardless of radar state. It retains the original
+near-radar and previous plate candidates. Keep the batch under `assisted-v1`
+for the image-only server route, and choose a unique ID prefix:
+
+```sh
+PYTHONPATH="$PWD" .venv/bin/python -m tools.alpr.prepare_assisted \
+  /mnt/algo14/comma3-alpr \
+  --output /mnt/algo14/comma3-alpr/assisted-v1/expansion-01/candidates.json \
+  --scan-fps 2 --id-prefix expansion-01
+PYTHONPATH="$PWD" tools/alpr/.venv/bin/python -m tools.alpr.preprocess_assisted \
+  /mnt/algo14/comma3-alpr --output /mnt/algo14/comma3-alpr/assisted-v1/expansion-01
+```
+
+Screen the resulting vehicle/plate views for duplicate encounters, false boxes,
+clipping and severe blur before recommending them. This screening is not a human
+transcript confirmation. Save a selection JSON with `append_ids` from the new
+batch and `recommended_ids` referring to retained or new IDs. Then run:
+
+```sh
+PYTHONPATH="$PWD" .venv/bin/python -m tools.alpr.append_assisted \
+  /mnt/algo14/comma3-alpr/assisted-v1/queue.json \
+  --source /mnt/algo14/comma3-alpr/assisted-v1/expansion-01/queue.json \
+  --selection /mnt/algo14/comma3-alpr/assisted-v1/expansion-01/selection.json
+```
+
+The append command rejects colliding IDs, preserves existing entries and order,
+backs up the prior queue, and atomically publishes the new queue. It never writes
+either human annotation file. Batch hashes and scan counts are recorded separately
+because sampled frames can overlap the original run. Do not rerun an already
+appended selection; use another unique batch for further preprocessing.

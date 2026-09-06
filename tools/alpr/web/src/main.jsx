@@ -26,7 +26,7 @@ import { DisplayControls, useDisplaySettings, enhance } from './DisplayControls'
 
 const nav = [
   ['overview', 'Study overview', Home],
-  ['review', 'Confirm close examples', ScanLine],
+  ['review', 'Review plates', ScanLine],
   ['manual', 'Original annotations', FileText],
   ['radar', 'Radar & video', Radar],
   ['models', 'Model comparison', Layers],
@@ -305,7 +305,7 @@ function Overview({ study, data, reviewed }) {
             already prepared. Brightness controls stay where you set them.
           </p>
           <a className="button primary" href="#review">
-            Confirm close examples <ArrowRight size={17} />
+            Review plates <ArrowRight size={17} />
           </a>
           <div className="progress">
             <span style={{ width: `${(reviewed / data.frames.length) * 100}%` }} />

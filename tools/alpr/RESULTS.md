@@ -110,3 +110,21 @@ uses measured local rotation and the existing visual registration. It does not
 reliably resolve the characters: stronger settings introduce ringing. Exposure
 and camera/IMU calibration remain incomplete, and no accuracy gain is established. See the
 [burst experiment notes](web/README.md#vehicle-2-burst-experiment).
+
+
+A broader assisted scan sampled 3,609 candidate frames from 31 camera clips
+across all 30 retained segments, including a 2 fps narrow-camera pass without
+requiring radar or prior plate detections. It produced 477 plate observations
+in 44 proposed local groups. Most overlap the original queue; visual screening
+rejected a new bumper/background false positive and selected four additional
+truck encounters. The live queue now retains all original 45 entries plus those
+four additions (49 total), with 12 recommended examples and the two close-radar
+examples available as a separate filter. Smaller daytime plates with visible
+character structure are included rather than ranking only by width/sharpness.
+The recommendations are not confirmed transcripts or an accuracy result.
+
+The site starts at the first unreviewed recommendation, offers a thumbnail
+browser and keeps vehicle numbers stable across filters. Queue updates retain
+a prior copy and do not write human labels. The reviewer preferred the 4 ms
+gyro variant for Vehicle 2 but reported no meaningful confidence gain in the
+uncertain first character; further restoration of that example is deferred.

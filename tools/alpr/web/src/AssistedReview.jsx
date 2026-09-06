@@ -16,7 +16,7 @@ export default function AssistedReview() {
     [reviews, setReviews] = useState(null),
     [error, setError] = useState(''),
     [n, setN] = useState(0),
-    [scope, setScope] = useState('close'),
+    [scope, setScope] = useState('recommended'),
     [status, setStatus] = useState(''),
     [busy, setBusy] = useState(false),
     [advance, setAdvance] = useState(true);
@@ -26,7 +26,15 @@ export default function AssistedReview() {
       .then(([q, r]) => {
         setQueue(q);
         setReviews(r);
-        if (!q.encounters.some((e) => e.tier === 'close')) setScope('best');
+        const recommended =
+          q.recommended_ids || q.encounters.filter((e) => e.tier !== 'explore').map((e) => e.id);
+        const pool = recommended.map((id) => q.encounters.find((e) => e.id === id)).filter(Boolean);
+        setN(
+          Math.max(
+            0,
+            pool.findIndex((e) => !r.data.decisions[e.id]),
+          ),
+        );
       })
       .catch((e) => setError(e.message));
   }, []);
@@ -39,13 +47,18 @@ export default function AssistedReview() {
       </div>
     );
   if (!queue || !reviews) return <div className="loading">Loading prepared vehicle encounters…</div>;
-  const eligible = queue.encounters.filter(
-    (e) =>
-      scope === 'all' ||
-      (scope === 'best' && e.tier !== 'explore') ||
-      (scope === 'close' && e.tier === 'close') ||
-      (scope === 'baseline' && reviews.data.decisions[e.id]?.baseline),
-  );
+  const recommended =
+    queue.recommended_ids || queue.encounters.filter((e) => e.tier !== 'explore').map((e) => e.id);
+  const eligible =
+    scope === 'recommended'
+      ? recommended.map((id) => queue.encounters.find((e) => e.id === id)).filter(Boolean)
+      : queue.encounters.filter(
+          (e) =>
+            scope === 'all' ||
+            (scope === 'best' && e.tier !== 'explore') ||
+            (scope === 'close' && e.tier === 'close') ||
+            (scope === 'baseline' && reviews.data.decisions[e.id]?.baseline),
+        );
   const index = Math.min(n, Math.max(0, eligible.length - 1)),
     encounter = eligible[index];
   const reviewed = Object.keys(reviews.data.decisions).length,
@@ -66,7 +79,8 @@ export default function AssistedReview() {
       } catch {}
       setStatus('Review saved');
       if (advance) {
-        const next = eligible.findIndex((e, i) => i > index && !result.data.decisions[e.id]);
+        let next = eligible.findIndex((e, i) => i > index && !result.data.decisions[e.id]);
+        if (next < 0) next = eligible.findIndex((e) => !result.data.decisions[e.id]);
         if (next >= 0) setN(next);
       }
     } catch (e) {
@@ -93,7 +107,7 @@ export default function AssistedReview() {
       </div>
       <div className="assisted-summary">
         <span>
-          <strong>{queue.stats.close_encounters}</strong> close-range candidates
+          <strong>{queue.encounters.length}</strong> prepared encounters
         </span>
         <span>
           <strong>{reviewed}</strong> reviewed encounters
@@ -117,7 +131,8 @@ export default function AssistedReview() {
             <ArrowLeft size={16} />
           </button>
           <strong>
-            Vehicle {index + 1} / {eligible.length}
+            Vehicle {queue.encounters.findIndex((e) => e.id === encounter?.id) + 1} · {index + 1} /{' '}
+            {eligible.length} examples
           </strong>
           <button
             aria-label="Next encounter"
@@ -138,9 +153,10 @@ export default function AssistedReview() {
               setError('');
             }}
           >
-            <option value="close">Closest & clearest · roughly 3–8 m</option>
+            <option value="recommended">Recommended · {recommended.length} examples</option>
+            <option value="close">Close radar matches · {queue.stats.close_encounters} examples</option>
             <option value="best">More large-plate examples</option>
-            <option value="all">All prepared candidates</option>
+            <option value="all">All prepared candidates · {queue.encounters.length}</option>
             <option value="baseline">My confirmed clear baseline</option>
           </select>
         </div>
@@ -152,6 +168,36 @@ export default function AssistedReview() {
           after saving
         </label>
       </div>
+      <div className="review-progress">
+        <span>
+          {eligible.filter((e) => !reviews.data.decisions[e.id]).length} remaining in this selection.
+        </span>
+        {eligible.length > 0 && eligible.every((e) => reviews.data.decisions[e.id]) && (
+          <span> All reviewed — choose another selection to continue.</span>
+        )}
+      </div>
+      <details className="encounter-browser">
+        <summary>Browse {eligible.length} examples</summary>
+        <div className="encounter-grid">
+          {eligible.map((e, i) => (
+            <button
+              key={e.id}
+              className={index === i ? 'selected' : ''}
+              aria-label={'Open vehicle ' + (queue.encounters.indexOf(e) + 1)}
+              onClick={() => {
+                setN(i);
+                setError('');
+              }}
+            >
+              <img src={'/' + e.samples[0].crop} alt="" loading="lazy" />
+              <strong>Vehicle {queue.encounters.indexOf(e) + 1}</strong>
+              <small>
+                {e.samples[0].width} px · {reviews.data.decisions[e.id] ? 'reviewed' : 'new'}
+              </small>
+            </button>
+          ))}
+        </div>
+      </details>
       {error && (
         <div className="alert">
           {error} <button onClick={() => location.reload()}>Reload saved reviews</button>

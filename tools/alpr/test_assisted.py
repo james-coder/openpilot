@@ -31,3 +31,25 @@ def test_quality_priority_does_not_use_ocr_confidence():
   a = {'width': 100, 'sharpness': 100, 'detection_confidence': .9, 'ocr_confidence': .1}
   b = {**a, 'width': 50, 'ocr_confidence': 1.}
   assert score_sample(a) > score_sample(b)
+
+
+def test_additive_batch_preserves_original_encounters_and_rejects_collisions():
+  import copy
+  import pytest
+  from openpilot.tools.alpr.append_assisted import extend_queue
+  old = {'id': 'original', 'tier': 'close', 'observation_count': 8, 'samples': [{'id': 'saved-sample', 'box': [1, 2, 3, 4]}]}
+  new = {'id': 'batch-new', 'tier': 'large', 'observation_count': 9, 'samples': []}
+  original = {'version': 1, 'dataset_id': 'assisted-v1', 'encounters': [old], 'stats': {}}
+  snapshot = copy.deepcopy(original)
+  source = {'encounters': [new]}
+  result = extend_queue(original, source, {'append_ids': ['batch-new'], 'recommended_ids': ['original', 'batch-new']})
+  assert original == snapshot
+  assert result['encounters'][0] == old
+  assert result['stats']['encounters'] == 2
+  for selection in [
+    {'append_ids': ['original'], 'recommended_ids': []},
+    {'append_ids': ['batch-new', 'batch-new'], 'recommended_ids': []},
+    {'append_ids': [], 'recommended_ids': ['missing']},
+  ]:
+    with pytest.raises(ValueError):
+      extend_queue(original, source, selection)

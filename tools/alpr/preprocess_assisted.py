@@ -56,6 +56,8 @@ def main():
     if 'CUDAExecutionProvider' not in model.get_providers():
       raise RuntimeError('ALPR silently fell back to CPU')
   candidates = json.loads((out / 'candidates.json').read_text())
+  prefix = candidates.get('id_prefix', '')
+  prefix = prefix + '-' if prefix else ''
   all_rows = []
   stats = Counter()
   start = time.monotonic()
@@ -66,7 +68,10 @@ def main():
     target.mkdir(parents=True, exist_ok=True)
     cached = target / 'proposals.json'
     if cached.exists():
-      all_rows.extend(json.loads(cached.read_text()))
+      cached_rows = json.loads(cached.read_text())
+      all_rows.extend(cached_rows)
+      stats['frames'] += len(clip['frames'])
+      stats['plate_observations'] += len(cached_rows)
       continue
     wanted = {f['frame']: f for f in clip['frames']}
     rows, active, next_id = [], {}, 0
@@ -75,6 +80,8 @@ def main():
       raise RuntimeError(f'Source checksum mismatch: {video}')
     print(f'Preprocessing {name}/{camera}: {len(wanted)} candidate frames', flush=True)
     with av.open(str(video)) as container:
+      container.streams.video[0].thread_type = 'AUTO'
+      container.streams.video[0].codec_context.thread_count = 8
       for number, raw in enumerate(container.decode(video=0)):
         if number not in wanted:
           continue
@@ -120,7 +127,7 @@ def main():
             if isinstance(confidence, list):
               confidence = statistics.mean(confidence) if confidence else 0
             readings.append({'variant': variant, 'text': prediction.text if prediction else '', 'confidence': float(confidence)})
-          ident = f'{name}/{camera}/vehicle-{vehicle["track"]:03}'
+          ident = f'{name}/{camera}/{prefix}vehicle-{vehicle["track"]:03}'
           image_name = f'frame-{number:06}.png'
           if not (target / image_name).exists():
             cv2.imwrite(str(target / image_name), frame)

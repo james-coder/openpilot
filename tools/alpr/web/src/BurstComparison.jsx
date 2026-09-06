@@ -11,7 +11,10 @@ export default function BurstComparison({ encounterId, settings }) {
     fetch('/api/assisted/fusion')
       .then((r) => (r.ok ? r.json() : {}))
       .then((d) => {
-        if (active) setReport(d[encounterId] || null);
+        if (active) {
+          setReport(d[encounterId] || null);
+          setMethod(d[encounterId]?.preferred_method || 'fourier');
+        }
       })
       .catch(() => {});
     return () => {

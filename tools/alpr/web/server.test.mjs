@@ -189,3 +189,15 @@ test('state and design hints never rewrite OCR or impose a universal state forma
   assert.equal(formatHint('UT', 'personalized', 'HELLO'), null);
   assert.equal(formatHint('FL', 'unknown', 'A12 3BC'), null);
 });
+
+test('diagnostic reports are read-only and preview files use an exact allowlist', async () => {
+  assert.equal((await fetch(url + '/api/braking-audit')).status, 404);
+  fs.writeFileSync(path.join(dir, 'braking-audit.json'), JSON.stringify({ events: [] }));
+  assert.deepEqual(await (await fetch(url + '/api/braking-audit')).json(), { events: [] });
+  assert.equal((await fetch(url + '/api/braking-audit', { method: 'PUT' })).status, 404);
+  fs.mkdirSync(path.join(dir, 'diagnostics-ui'));
+  fs.writeFileSync(path.join(dir, 'diagnostics-ui', 'can-list.png'), 'preview');
+  fs.writeFileSync(path.join(dir, 'diagnostics-ui', 'private.json'), '{}');
+  assert.equal((await fetch(url + '/diagnostics-ui/can-list.png')).status, 200);
+  assert.equal((await fetch(url + '/diagnostics-ui/private.json')).status, 404);
+});

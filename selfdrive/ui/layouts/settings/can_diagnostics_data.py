@@ -1,8 +1,13 @@
 import time
+import math
+import re
 from collections import deque
 from dataclasses import dataclass, field
+from pathlib import Path
 
+from opendbc import DBC_PATH, get_generated_dbcs
 from opendbc.can import CANParser
+from opendbc.can.parser import CANDefine
 from opendbc.can.dbc import DBC as DbcFile
 from opendbc.car import Bus
 from opendbc.car.gm.values import CanBus, DBC as GM_DBC_MAP
@@ -25,6 +30,15 @@ BUS_LABELS: dict[int, str] = {
 BUS_ALIVE_TIMEOUT = 1.0  # seconds since last frame before a bus is considered dead
 
 
+def diagnostics_timeout(started: bool, enabled: bool, speed: float, car_state_valid: bool) -> int | None:
+  return 300 if not started or (car_state_valid and not enabled and math.isfinite(speed) and abs(speed) < .1) else None
+
+
+def graph_display_bounds(lo: float, hi: float) -> tuple[float, float]:
+  padding = max((hi-lo)*.1, abs(lo)*.01, .1)
+  return lo-padding, hi+padding
+
+
 @dataclass
 class BusStats:
   count: int = 0
@@ -44,6 +58,10 @@ class SignalRow:
   signal: str | None  # None means "raw/undecoded fallback for this address"
   text: str = ""
   last_updated: float = 0.0
+  value: float | None = None
+  message: str = ''
+  unit: str = ''
+  choice: str = ''
 
   @property
   def key(self) -> tuple[int, int, str | None]:
@@ -53,6 +71,32 @@ class SignalRow:
     if self.signal is not None:
       return f"{self.address:04X} {self.signal}"
     return f"{self.address:04X} (undecoded)"
+
+  def details(self) -> str:
+    message = self.message or 'No message definition in this bus DBC'
+    return f"Bus {self.bus} ({BUS_LABELS[self.bus]}) | 0x{self.address:X} | {message} | {self.signal or 'raw bytes'}"
+
+
+def signal_metadata(car_fingerprint):
+  """Expose names, physical units and value tables already present in the matching DBC."""
+  metadata = {}
+  for bus, key in BUS_DBC_KEYS.items():
+    name = GM_DBC_MAP[car_fingerprint][key]
+    dbc = DbcFile(name)
+    choices = CANDefine(name).dv
+    content = get_generated_dbcs().get(name)
+    if content is None:
+      content = (Path(DBC_PATH)/(name+'.dbc')).read_text()
+    units, address = {}, None
+    for line in content.splitlines():
+      if match := re.match(r'^BO_ (\d+) ', line):
+        address = int(match[1])
+      elif match := re.match(r'^\s*SG_ (\w+)(?:\s+\w+)?\s*:.*\]\s*"([^"]*)"', line):
+        units[(address, match[1])] = match[2]
+    for address, msg in dbc.msgs.items():
+      for signal in msg.sigs:
+        metadata[(bus, address, signal)] = (msg.name, units.get((address, signal), ''), choices.get(address, {}).get(signal, {}))
+  return metadata
 
 
 def build_parsers(car_fingerprint: str) -> tuple[dict[int, CANParser], dict[int, set[int]]]:
@@ -79,6 +123,7 @@ class CanSnapshot:
 
   def __init__(self, car_fingerprint: str):
     self.parsers, self._known_addrs = build_parsers(car_fingerprint)
+    self.metadata = signal_metadata(car_fingerprint)
     self.tally: dict[int, BusStats] = {bus: BusStats() for bus in self.parsers}
     self.rows: dict[tuple[int, int, str | None], SignalRow] = {}
 
@@ -128,8 +173,15 @@ class CanSnapshot:
         for name, value in signals.items():
           key = (bus, address, name)
           touched.add(key)
+          message, unit, choices = self.metadata.get(key, ('', '', {}))
+          choice = choices.get(value, '')
+          text = format_value(value)
+          if unit:
+            text += ' '+unit
+          if choice:
+            text += ' ('+choice+')'
           self.rows[key] = SignalRow(bus=bus, address=address, signal=name,
-                                      text=format_value(value), last_updated=now)
+                                      text=text, last_updated=now, value=value, message=message, unit=unit, choice=choice)
 
     return touched
 
@@ -145,9 +197,11 @@ class GraphBuffer:
   window_s: float = 10.0
   # deque so evicting expired samples off the front is O(1); a plain list's pop(0) is O(n),
   # which turns a whole session's worth of high-frequency samples into O(n^2) work overall.
-  samples: deque[tuple[float, float]] = field(default_factory=deque)
+  samples: deque[tuple[float, float]] = field(default_factory=lambda: deque(maxlen=6000))
 
   def add(self, t: float, value: float) -> None:
+    if not math.isfinite(t) or not math.isfinite(value):
+      return
     self.samples.append((t, value))
     cutoff = t - self.window_s
     while self.samples and self.samples[0][0] < cutoff:

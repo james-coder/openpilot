@@ -1268,3 +1268,90 @@ h3 {
   object-fit: contain;
   background: #19252c;
 }
+
+.braking-content {
+  max-width: 1250px;
+}
+.braking-content h1 {
+  margin-bottom: 16px;
+}
+.braking-content .review-toolbar {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 24px 0;
+}
+.braking-content select {
+  max-width: 100%;
+  padding: 10px;
+  border: 1px solid #94a3b8;
+  border-radius: 8px;
+  background: white;
+  color: #0f172a;
+}
+.braking-readout {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 16px;
+  margin: 20px 0;
+  padding: 20px;
+  background: #f1f5f9;
+  border-radius: 12px;
+}
+.braking-readout strong {
+  display: block;
+  color: #0f172a;
+}
+.braking-chart {
+  margin: 20px 0;
+  border: 1px solid #cbd5e1;
+  background: white;
+  border-radius: 12px;
+  padding: 16px;
+}
+.braking-chart h2 {
+  font-size: 20px;
+  margin: 0 0 12px;
+}
+.braking-chart small {
+  font-size: 15px;
+  color: #475569;
+}
+.braking-chart svg {
+  width: 100%;
+  display: block;
+  touch-action: pan-y;
+}
+.braking-chart svg text {
+  fill: #334155;
+  font: 15px sans-serif;
+}
+.trace-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  font-size: 13px;
+  color: #334155;
+}
+.trace-legend span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.trace-legend i {
+  display: inline-block;
+  width: 22px;
+  height: 4px;
+}
+.can-preview {
+  display: block;
+  width: 100%;
+  border-radius: 12px;
+}
+.content figure {
+  margin: 28px 0;
+}
+.content figcaption {
+  margin-top: 10px;
+  color: #475569;
+}

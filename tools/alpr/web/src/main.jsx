@@ -22,6 +22,8 @@ import {
 } from 'lucide-react';
 import './style.css';
 import AssistedReview from './AssistedReview';
+import BrakingReview from './BrakingReview';
+import CanReview from './CanReview';
 import { DisplayControls, useDisplaySettings, enhance } from './DisplayControls';
 
 const nav = [
@@ -29,6 +31,8 @@ const nav = [
   ['review', 'Review plates', ScanLine],
   ['manual', 'Original annotations', FileText],
   ['radar', 'Radar & video', Radar],
+  ['braking', 'Braking review', Layers],
+  ['can-review', 'CAN debugger', Layers],
   ['models', 'Model comparison', Layers],
   ['sampling', 'Sampling comparison', Aperture],
   ['results', 'Study findings', FileText],
@@ -231,6 +235,10 @@ function App() {
                 retry={save}
                 blocked={blocked.current}
               />
+            ) : page === 'braking' ? (
+              <BrakingReview />
+            ) : page === 'can-review' ? (
+              <CanReview />
             ) : page === 'radar' ? (
               <Report
                 title="Let distance guide the capture"

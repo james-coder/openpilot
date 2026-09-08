@@ -147,7 +147,7 @@ class Car:
       bundle = read_bundle(raw=raw_bundle) if raw_bundle else None
       profile = bundle['calibration'] if bundle else PROFILE
       mode = configure_volt(self.CP, self.params.get("VoltLongitudinalMode", return_default=True), profile=profile,
-                            test_ready=bool(bundle and bundle['readiness']['test_ready']))
+                            test_ready=bool(bundle and bundle['readiness']['test_ready']), kind=bundle['kind'] if bundle else 'brake')
       if mode != 'stock' and bundle:
         self.params.put('VoltLongitudinalActiveBundle', raw_bundle, block=True)
         if controller_available:

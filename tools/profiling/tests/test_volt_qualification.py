@@ -157,3 +157,26 @@ def test_independent_plant_does_not_recalibrate_the_controller():
   plant = VoltPlant(f, speed=5., smooth=True, controller_profile=controller)
   assert plant.controller.volt_profile is controller
   assert plant.long.volt_profile is controller
+
+
+def test_brake_bundle_needs_no_personal_curve_and_never_sets_personal_flag(monkeypatch):
+  from types import SimpleNamespace
+  from opendbc.car.gm.volt_longitudinal import VoltFlags
+  import openpilot.common.params as params
+  from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
+  bundle = make_bundle(PROFILE, None, checks(), kind='brake')
+  raw = json.dumps(bundle)
+  assert read_bundle(raw=raw)['kind'] == 'brake'
+  monkeypatch.setattr(params, 'Params', lambda: SimpleNamespace(get=lambda *args, **kwargs: raw))
+  cp = volt_params()
+  assert configure(cp, 'test', profile=PROFILE, test_ready=True, kind='brake') == 'test'
+  assert cp.flags & VoltFlags.BUNDLE and not cp.flags & VoltFlags.PERSONAL
+  planner = LongitudinalPlanner(cp)
+  assert planner.mpc.personal_curve is None
+  assert planner.mpc.stop_distance == 6. and planner.mpc.comfort_brake == 2.5
+  assert read_bundle(raw=json.dumps(make_bundle(PROFILE, curve(), checks(), kind='brake'))) is None
+  assert configure(cp, 'personal', profile=replace(PROFILE, validated=True, personal_validated=True), kind='brake') == 'stock'
+  assert configure(cp, 'smooth', profile=replace(PROFILE, validated=True), kind='brake') == 'smooth'
+  monkeypatch.setattr(params, 'Params', lambda: SimpleNamespace(get=lambda *args, **kwargs: None))
+  with pytest.raises(RuntimeError, match='startup snapshot'):
+    runtime_bundle(cp)

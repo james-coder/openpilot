@@ -159,3 +159,45 @@ def test_personal_planner_parameters_are_per_instance_and_stock_defaults_survive
     assert np.all(mpc.params[:, 5] == 0.75)
   assert np.all(custom.params[:, 6] == 4.5) and np.all(custom.params[:, 7] == 1.5)
   assert np.all(stock.params[:, 6] == 6.0) and np.all(stock.params[:, 7] == 2.5)
+
+
+def test_stopping_entry_is_continuous_despite_measured_response_lag():
+  lc = LongControl(volt_params(True))
+  lc.long_control_state = LongCtrlState.pid
+  lc.last_output_accel = -.8
+  lc.pid.i = -.3
+  cs = car.CarState.new_message(vEgo=.4, aEgo=-.1)
+  output = lc.update(True, cs, -.6, True, (-4., 2.))
+  assert abs(output - -.8) < .03
+
+
+def test_final_release_does_not_keep_a_stale_strong_brake_target():
+  lc = LongControl(volt_params(True))
+  lc.long_control_state = LongCtrlState.stopping
+  lc.volt_stopping.target = -.9
+  lc.last_output_accel = -.9
+  cs = car.CarState.new_message(vEgo=.2, aEgo=-1.)
+  for _ in range(40):
+    output = lc.update(True, cs, 0., True, (-4., 2.))
+  assert -.35 < output <= 0.
+
+
+@pytest.mark.parametrize('invalidate', ['stale', 'moving', 'identity', 'secondary', 'override'])
+def test_stationary_lead_latch_holds_through_noise_and_releases(invalidate):
+  from cereal import log
+  from openpilot.selfdrive.controls.lib.volt_stopping import VoltStopLatch
+  radar = log.RadarState.new_message()
+  lead = radar.leadOne
+  lead.status, lead.radar, lead.radarTrackId, lead.modelProb, lead.dRel = True, True, 1, 1., 6.
+  latch = VoltStopLatch(.05)
+  for _ in range(12):
+    held = latch.update(lead, radar.leadTwo, .05, True, .4, False, True, .5)
+  assert held
+  assert latch.update(lead, radar.leadTwo, .05, False, .1, False, True, .5)
+  if invalidate == 'moving':
+    lead.vLead = 1.
+  if invalidate == 'identity':
+    lead.radarTrackId = 2
+  if invalidate == 'secondary':
+    radar.leadTwo.status, radar.leadTwo.dRel = True, 3.
+  assert not latch.update(lead, radar.leadTwo, .31 if invalidate == 'stale' else .05, False, .1, False, invalidate != 'override', .5)

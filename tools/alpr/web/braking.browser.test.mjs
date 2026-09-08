@@ -27,13 +27,15 @@ try {
   await page.getByRole('heading', { name: 'Acceleration and braking', exact: false }).waitFor();
   await page.getByRole('heading', { name: 'A smoother stop must also finish promptly' }).waitFor();
   await page.getByRole('heading', { name: 'Reconstructed traffic: the planner runs again' }).waitFor();
-  assert.equal(await page.getByRole('columnheader', { name: 'Personal stop' }).count(), 1);
+  assert.equal(await page.getByRole('columnheader', { name: 'Brake candidate' }).count(), 1);
+  const brakeOnly = JSON.parse(fs.readFileSync(path.join(review, 'validation.json'))).profile_kind === 'brake';
+  if (brakeOnly) await page.getByRole('heading', { name: 'Where the response model goes wrong' }).waitFor();
   await page.getByLabel('Replay window').selectOption('finish');
   await page.getByLabel('Replay window').selectOption('approach');
-  await page.waitForFunction(() => {
+  await page.waitForFunction((expected) => {
     const paths = [...document.querySelectorAll('[aria-label="Replayed speed over time"] path[d]')];
-    return paths.length === 4 && paths.every((p) => p.getAttribute('d').length > 20);
-  });
+    return paths.length === expected && paths.every((p) => p.getAttribute('d').length > 20);
+  }, brakeOnly ? 3 : 4);
   assert.equal(await page.locator('[aria-label="Recorded stop"] option').count(), 3);
   await page.getByLabel('Inspect braking time').fill('-1');
   await page.getByLabel('Brightness', { exact: true }).fill('1.5');

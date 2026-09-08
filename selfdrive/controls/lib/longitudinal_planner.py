@@ -58,6 +58,9 @@ class LongitudinalPlanner:
     bundle = runtime_bundle(CP)
     if bundle and CP.flags & VoltFlags.PERSONAL:
       self.mpc.set_personal_curve(bundle['curve'])
+    from opendbc.car.gm.volt_longitudinal import enabled as volt_enabled
+    from openpilot.selfdrive.controls.lib.volt_stopping import VoltStopLatch
+    self.volt_stop_latch = VoltStopLatch(dt) if volt_enabled(CP) else None
     self.fcw = False
     self.dt = dt
     self.allow_throttle = True
@@ -146,7 +149,7 @@ class LongitudinalPlanner:
       # release braking early even while the finite stop reference is valid.
       self.mpc.set_cur_state(v_ego, sm['carState'].aEgo)
     radar_age = float('inf')
-    if self.mpc.personal_curve is not None:
+    if self.mpc.personal_curve is not None or self.volt_stop_latch is not None:
       radar_age = (sm.get('radar_age', float('inf')) if isinstance(sm, dict) else
                    time.monotonic() - sm.logMonoTime['radarState'] / 1e9 if sm.valid['radarState'] and sm.alive['radarState'] else float('inf'))
       if sm['selfdriveState'].experimentalMode:
@@ -186,11 +189,10 @@ class LongitudinalPlanner:
       output_a_target = output_a_target_mpc
       self.output_should_stop = output_should_stop_mpc
 
-    trajectory = getattr(self.mpc, 'stop_trajectory', None)
-    if (trajectory is not None and trajectory.reference is not None and self.mpc.personal_blend
-        and (sm['carState'].standstill or previous_should_stop and v_ego < self.CP.vEgoStopping)):
-      # Finish an already initiated stop through low-speed estimator noise.
-      # A moving/lost/changed lead clears the trajectory in the MPC update.
+    if self.volt_stop_latch is not None and self.volt_stop_latch.update(
+        sm['radarState'].leadOne, sm['radarState'].leadTwo, radar_age,
+        self.output_should_stop or previous_should_stop, v_ego, sm['carState'].standstill,
+        not reset_state and not sm['selfdriveState'].experimentalMode and not sm['carState'].brakePressed, self.CP.vEgoStopping):
       self.output_should_stop = True
       output_a_target = min(0., output_a_target)
 

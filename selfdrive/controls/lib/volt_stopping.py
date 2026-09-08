@@ -5,6 +5,29 @@ from opendbc.car.gm.volt_longitudinal import PROFILE
 from openpilot.common.realtime import DT_CTRL
 
 
+class VoltStopLatch:
+  """Finish an initiated stop only while the same fresh stationary lead remains."""
+  def __init__(self, dt):
+    self.dt = dt
+    self.track = None
+    self.stable = 0.
+    self.holding = False
+
+  def update(self, lead, secondary, age, initiated, speed, standstill, active, threshold):
+    valid = (active and 0 <= age <= .3 and lead.status and lead.radar and lead.radarTrackId >= 0
+             and lead.modelProb >= .9 and abs(lead.vLead) < .5
+             and (not secondary.status or secondary.dRel >= lead.dRel))
+    if not valid or self.track != lead.radarTrackId:
+      self.track = lead.radarTrackId if valid else None
+      self.stable = 0.
+      self.holding = False
+    if valid:
+      self.stable += self.dt
+      if self.stable >= .5 and (standstill or initiated and speed < threshold):
+        self.holding = True
+    return self.holding
+
+
 class VoltStopping:
   def __init__(self, profile=PROFILE):
     self.profile = profile
@@ -24,8 +47,10 @@ class VoltStopping:
     desired = min(desired, planned_accel)
     self.stopped_time = self.stopped_time + DT_CTRL if CS.standstill else 0.0
     if entering:
-      self.target = min(0.0, CS.aEgo)
-      pid.i = float(np.clip(last_output - self.target, -profile.integral_limit, positive_limit))
+      # Carry the actual output through the mode transition. Seeding from
+      # measured acceleration can jump when pressure response is delayed.
+      self.target = min(0.0, last_output)
+      pid.reset()
     if self.stopped_time >= 0.2:
       # The allocator preserves stock holding force. Do not integrate noisy
       # standstill acceleration and slowly increase brake pressure indefinitely.
@@ -34,7 +59,7 @@ class VoltStopping:
       return self.target
     # Taper toward zero continuously while moving. Stronger planner requests
     # bypass the comfort slew, retaining the existing deceleration authority.
-    self.target = min(planned_accel, float(np.clip(desired, self.target - 0.8 * DT_CTRL, self.target + 0.8 * DT_CTRL)))
+    self.target = min(planned_accel, float(np.clip(desired, self.target - 0.8 * DT_CTRL, self.target + 1.5 * DT_CTRL)))
     pid.i = float(np.clip(pid.i, -profile.integral_limit, positive_limit))
     pid.update(self.target - CS.aEgo, speed=CS.vEgo, feedforward=self.target)
     pid.i = float(np.clip(pid.i, -profile.integral_limit, positive_limit))

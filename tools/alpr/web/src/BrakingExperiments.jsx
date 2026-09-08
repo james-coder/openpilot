@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
+import BrakingDiagnostics from './BrakingDiagnostics';
 import { Trace } from './BrakingReview';
 
-const modes = [
+const allModes = [
   ['stock', 'Stock model', '#0369a1'],
   ['smooth', 'Brake candidate', '#b45309'],
   ['personal', 'Personal stop', '#7e22ce'],
@@ -21,6 +22,7 @@ function valueAt(rows, t, key) {
 }
 
 export default function BrakingExperiments({ validation, event, cursor, jump, reviewManual, decisions }) {
+  const modes = validation?.profile_kind === 'brake' ? allModes.slice(0, 2) : allModes;
   const [traces, setTraces] = useState({});
   const [error, setError] = useState('');
   const [window, setWindow] = useState('approach');
@@ -87,6 +89,10 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
           {' '}Normal driving: <strong>{validation.readiness.road_ready ? 'Validated' : 'Not validated'}</strong>.
         </p>
       )}
+      <p>{validation.profile_kind === 'brake'
+        ? 'Current candidate: brake control with the existing planner and following distance. Personal approach learning is deferred.'
+        : 'Current candidate: personal stopping trajectory and brake control.'}</p>
+      <BrakingDiagnostics diagnostics={validation.diagnostics} event={event} reproduction={result?.reproduction} />
       <div className="review-toolbar">
         {(reference.collection?.review_ids || [])
           .filter((id) => !['representative', 'exclude'].includes(decisions?.[id]))
@@ -105,7 +111,7 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
           ? ' A new route is reserved for independent evaluation.'
           : ' A new recorded trip is still needed for independent evaluation.'}
       </p>
-      {reference.approach_candidate && (
+      {validation.profile_kind !== 'brake' && reference.approach_candidate && (
         <p>
           Observed manual gap: {n(reference.approach_candidate.observed_gap, ' m')}. The experimental planner
           target is bounded to {n(reference.approach_candidate.gap, ' m')} by the existing profile limits;

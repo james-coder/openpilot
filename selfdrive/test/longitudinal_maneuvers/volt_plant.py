@@ -31,7 +31,7 @@ def volt_params(smooth=False, recorded=None):
         setattr(cp.longitudinalTuning, field, values)
     else:
       setattr(cp, key, value)
-  cp.flags &= ~int(VoltFlags.SMOOTH | VoltFlags.PERSONAL | VoltFlags.TEST)
+  cp.flags &= ~int(VoltFlags.SMOOTH | VoltFlags.PERSONAL | VoltFlags.TEST | VoltFlags.BUNDLE)
   if smooth:
     # Simulation only: startup configure() refuses unvalidated profiles.
     cp.flags |= int(VoltFlags.SMOOTH)

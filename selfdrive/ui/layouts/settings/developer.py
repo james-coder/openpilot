@@ -94,9 +94,9 @@ class DeveloperLayout(Widget):
     self._volt_mode = multiple_button_item(
       lambda: tr("Volt Braking"),
       lambda: tr("Test requires passing offline checks and is for supervised empty-area stops. " +
-                 "Personal also requires vehicle validation. Changes apply next drive."),
-      buttons=[lambda: tr("Stock"), lambda: tr("Test"), lambda: tr("Personal")],
-      callback=self._set_volt_mode, selected_index=0, button_width=255,
+                 "Brake and Personal require vehicle validation. Changes apply next drive."),
+      buttons=[lambda: tr("Stock"), lambda: tr("Test"), lambda: tr("Brake"), lambda: tr("Personal")],
+      callback=self._set_volt_mode, selected_index=0, button_width=190,
     )
     self._scroller = Scroller([
       self._adb_toggle,
@@ -117,10 +117,11 @@ class DeveloperLayout(Widget):
     if not ui_state.is_offroad() or ui_state.CP is None or not volt_supported(ui_state.CP):
       return
     bundle = getattr(self, '_volt_bundle', None)
-    if index and (not bundle or not bundle['readiness']['test_ready' if index == 1 else 'road_ready']):
+    if index and (not bundle or not bundle['readiness']['test_ready' if index == 1 else 'road_ready']
+                  or index == 2 and bundle['kind'] != 'brake' or index == 3 and bundle['kind'] != 'personal'):
       self._update_toggles()
       return
-    self._params.put("VoltLongitudinalMode", ('stock', 'test', 'personal')[index], block=True)
+    self._params.put("VoltLongitudinalMode", ('stock', 'test', 'smooth', 'personal')[index], block=True)
 
   def _render(self, rect):
     self._scroller.render(rect)
@@ -137,8 +138,9 @@ class DeveloperLayout(Widget):
     self._volt_mode.set_visible(ui_state.CP is not None and volt_supported(ui_state.CP))
     self._volt_mode.action_item.set_enabled(ui_state.is_offroad())
     mode = self._params.get("VoltLongitudinalMode", return_default=True)
-    available = self._volt_bundle and self._volt_bundle['readiness']['road_ready' if mode == 'personal' else 'test_ready']
-    selected = ('stock', 'test', 'personal').index(mode) if mode in ('stock', 'test', 'personal') and available else 0
+    available = self._volt_bundle and self._volt_bundle['readiness']['test_ready' if mode == 'test' else 'road_ready']
+    available = available and (mode in ('stock', 'test') or self._volt_bundle['kind'] == ('brake' if mode == 'smooth' else 'personal'))
+    selected = ('stock', 'test', 'smooth', 'personal').index(mode) if mode in ('stock', 'test', 'smooth', 'personal') and available else 0
     self._volt_mode.action_item.set_selected_button(selected)
 
     # Hide non-release toggles on release builds

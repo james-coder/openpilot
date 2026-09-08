@@ -18,6 +18,7 @@ SOURCE_FILES = (
   'opendbc/car/gm/volt_longitudinal.py', 'opendbc/car/gm/carcontroller.py', 'opendbc/car/gm/carstate.py',
   'selfdrive/test/longitudinal_maneuvers/volt_plant.py', 'selfdrive/test/longitudinal_maneuvers/volt_replay.py',
   'tools/profiling/volt_pressure_model.py', 'tools/profiling/volt_response_fit.py', 'tools/profiling/validate_volt_braking.py',
+  'tools/profiling/volt_brake_diagnostics.py',
 )
 VEHICLE_CHECKS = ('walking_stop', 'moderate_stop', 'holding', 'pedal_override', 'grade', 'engine_on', 'reduced_regen',
                   'driver_comfort', 'runtime_deadlines')
@@ -50,9 +51,9 @@ def qualification(checks, identity, vehicle=None):
           'blocked_by': [c['name'] for c in checks if c.get('stage') == 'offline' and c.get('pass') is not True]}
 
 
-def make_bundle(profile, curve, checks, *, vehicle=None, hashes=None):
+def make_bundle(profile, curve, checks, *, vehicle=None, hashes=None, kind='personal'):
   calibration = asdict(replace(profile, validated=False, personal_validated=False))
-  payload = {'version': 1, 'car': 'CHEVROLET_VOLT', 'profile': calibration, 'curve': curve,
+  payload = {'version': 2, 'kind': kind, 'car': 'CHEVROLET_VOLT', 'profile': calibration, 'curve': curve,
              'sources': hashes if hashes is not None else source_hashes(), 'checks': checks}
   identity = digest({k: v for k, v in payload.items() if k != 'checks'})
   return {**payload, 'id': identity, 'vehicle': vehicle or {}, 'readiness': qualification(checks, identity, vehicle)}
@@ -61,21 +62,23 @@ def make_bundle(profile, curve, checks, *, vehicle=None, hashes=None):
 def read_bundle(path=BUNDLE_PATH, *, raw=None, hashes=None):
   try:
     value = json.loads(Path(path).read_text()) if raw is None else json.loads(raw)
-    payload = {key: value[key] for key in ('version', 'car', 'profile', 'curve', 'sources', 'checks')}
-    if (payload['version'] != 1 or payload['car'] != 'CHEVROLET_VOLT'
+    payload = {key: value[key] for key in ('version', 'kind', 'car', 'profile', 'curve', 'sources', 'checks')}
+    if (payload['version'] != 2 or payload['kind'] not in ('brake', 'personal') or payload['car'] != 'CHEVROLET_VOLT'
         or digest({k: v for k, v in payload.items() if k != 'checks'}) != value['id']
         or payload['sources'] != (source_hashes() if hashes is None else hashes)):
       return None
     profile = VoltProfile(**payload['profile'])
-    if not profile_valid(profile) or not payload['curve']:
+    if not profile_valid(profile):
       return None
     # Validate the curve without loading a generated solver in card or the UI.
     from openpilot.selfdrive.controls.lib.volt_trajectory import validate_curve
-    if not validate_curve(payload['curve']):
+    if (payload['kind'] == 'personal' and not validate_curve(payload['curve'])
+        or payload['kind'] == 'brake' and payload['curve'] is not None):
       return None
     ready = qualification(payload['checks'], value['id'], value.get('vehicle'))
     value['readiness'] = ready
-    value['calibration'] = replace(profile, version=value['id'][:16], validated=ready['road_ready'], personal_validated=ready['road_ready'])
+    value['calibration'] = replace(profile, version=value['id'][:16], validated=ready['road_ready'],
+                                   personal_validated=ready['road_ready'] and payload['kind'] == 'personal')
     return value
   except (OSError, ValueError, TypeError, KeyError, OverflowError, AttributeError, IndexError):
     return None
@@ -87,8 +90,9 @@ def runtime_bundle(CP):
   from openpilot.common.params import Params
   raw = Params().get('VoltLongitudinalActiveBundle')
   bundle = read_bundle(raw=raw) if raw else None
-  if bundle and (bundle['readiness']['road_ready'] or CP.flags & VoltFlags.TEST and bundle['readiness']['test_ready']):
+  matches_kind = bundle and bool(CP.flags & VoltFlags.PERSONAL) == (bundle['kind'] == 'personal')
+  if matches_kind and (bundle['readiness']['road_ready'] or CP.flags & VoltFlags.TEST and bundle['readiness']['test_ready']):
     return bundle
-  if CP.flags & (VoltFlags.TEST | VoltFlags.PERSONAL):
+  if CP.flags & (VoltFlags.TEST | VoltFlags.PERSONAL | VoltFlags.BUNDLE):
     raise RuntimeError('Selected Volt profile has no matching qualified startup snapshot')
   return None

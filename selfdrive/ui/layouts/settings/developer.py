@@ -2,7 +2,8 @@ from openpilot.common.params import Params
 from openpilot.selfdrive.ui.widgets.ssh_key import ssh_key_item
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.list_view import toggle_item
+from openpilot.system.ui.widgets.list_view import toggle_item, multiple_button_item
+from opendbc.car.gm.volt_longitudinal import PROFILE, supported as volt_supported
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.lib.application import gui_app
@@ -90,6 +91,13 @@ class DeveloperLayout(Widget):
     )
     self._on_enable_ui_debug(self._params.get_bool("ShowDebugInfo"))
 
+    self._volt_mode = multiple_button_item(
+      lambda: tr("Volt Braking"),
+      lambda: tr("Current openpilot braking is active. Smooth and Personal are awaiting vehicle validation.") if not PROFILE.validated else
+              tr("Smooth improves brake response. Personal also uses your reviewed stopping profile. Changes apply next drive."),
+      buttons=[lambda: tr("Stock"), lambda: tr("Smooth"), lambda: tr("Personal")],
+      callback=self._set_volt_mode, selected_index=0, button_width=255,
+    )
     self._scroller = Scroller([
       self._adb_toggle,
       self._ssh_toggle,
@@ -99,10 +107,19 @@ class DeveloperLayout(Widget):
       self._lat_maneuver_toggle,
       self._alpha_long_toggle,
       self._ui_debug_toggle,
+      self._volt_mode,
     ], line_separator=True, spacing=0)
 
     # Toggles should be not available to change in onroad state
     ui_state.add_offroad_transition_callback(self._update_toggles)
+
+  def _set_volt_mode(self, index):
+    if not ui_state.is_offroad() or ui_state.CP is None or not volt_supported(ui_state.CP):
+      return
+    if index and (not PROFILE.validated or (index == 2 and not PROFILE.personal_validated)):
+      self._update_toggles()
+      return
+    self._params.put("VoltLongitudinalMode", ('stock', 'smooth', 'personal')[index], block=True)
 
   def _render(self, rect):
     self._scroller.render(rect)
@@ -114,6 +131,12 @@ class DeveloperLayout(Widget):
 
   def _update_toggles(self):
     ui_state.update_params()
+    self._volt_mode.set_visible(ui_state.CP is not None and volt_supported(ui_state.CP))
+    self._volt_mode.action_item.set_enabled(ui_state.is_offroad() and PROFILE.validated)
+    mode = self._params.get("VoltLongitudinalMode", return_default=True)
+    available = PROFILE.validated and (mode != 'personal' or PROFILE.personal_validated)
+    selected = ('stock', 'smooth', 'personal').index(mode) if mode in ('stock', 'smooth', 'personal') and available else 0
+    self._volt_mode.action_item.set_selected_button(selected)
 
     # Hide non-release toggles on release builds
     # TODO: we can do an onroad cycle, but alpha long toggle requires a deinit function to re-enable radar and not fault

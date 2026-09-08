@@ -137,6 +137,12 @@ class Car:
         else:
           cloudlog.warning("Saved SecOC key is invalid")
 
+    from opendbc.car.gm.volt_longitudinal import configure as configure_volt, supported as volt_supported, PROFILE
+    if volt_supported(self.CP) and not REPLAY:
+      mode = configure_volt(self.CP, self.params.get("VoltLongitudinalMode", return_default=True))
+      self.params.put("VoltLongitudinalProfile", f"{PROFILE.version}:{mode}", block=True)
+      cloudlog.info("Volt longitudinal profile", version=PROFILE.version, mode=mode, validated=PROFILE.validated)
+
     # Write previous route's CarParams
     prev_cp = self.params.get("CarParamsPersistent")
     if prev_cp is not None:

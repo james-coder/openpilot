@@ -1,5 +1,7 @@
 import numpy as np
 from cereal import car
+from opendbc.car.gm.volt_longitudinal import enabled as volt_enabled, PROFILE
+from openpilot.selfdrive.controls.lib.volt_stopping import VoltStopping
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
 from openpilot.common.pid import PIDController
@@ -52,6 +54,8 @@ class LongControl:
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
+    self.volt_stopping = VoltStopping()
+    self.stock_ki = self.pid._k_i
 
   def reset(self):
     self.pid.reset()
@@ -61,12 +65,20 @@ class LongControl:
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
 
+    volt_braking = volt_enabled(self.CP) and (a_target < 0. or should_stop or self.last_output_accel < 0.)
+    self.pid._k_i = [[0.], [PROFILE.braking_ki]] if volt_braking else self.stock_ki
+    previous_state = self.long_control_state
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
                                                        CS.cruiseState.standstill)
     if self.long_control_state == LongCtrlState.off:
       self.reset()
       output_accel = 0.
+      self.volt_stopping.reset()
+
+    elif self.long_control_state == LongCtrlState.stopping and volt_enabled(self.CP):
+      output_accel = self.volt_stopping.update(CS, a_target, previous_state != LongCtrlState.stopping,
+                                               self.last_output_accel, self.pid)
 
     elif self.long_control_state == LongCtrlState.stopping:
       output_accel = self.last_output_accel
@@ -80,9 +92,17 @@ class LongControl:
       self.reset()
 
     else:  # LongCtrlState.pid
+      if volt_braking:
+        # Bumpless departure from stop control and bounded delayed correction.
+        if previous_state == LongCtrlState.stopping:
+          self.pid.i = float(np.clip(self.last_output_accel-a_target, -PROFILE.integral_limit, PROFILE.integral_limit))
+        self.pid.i = float(np.clip(self.pid.i, -PROFILE.integral_limit, PROFILE.integral_limit))
       error = a_target - CS.aEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
                                      feedforward=a_target)
+      if volt_braking:
+        self.pid.i = float(np.clip(self.pid.i, -PROFILE.integral_limit, PROFILE.integral_limit))
+        output_accel = self.pid.p + self.pid.i + self.pid.f
 
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel

@@ -48,7 +48,10 @@ def limit_accel_in_turns(v_ego, angle_steers, a_target, CP):
 class LongitudinalPlanner:
   def __init__(self, CP, init_v=0.0, init_a=0.0, dt=DT_MDL):
     self.CP = CP
-    self.mpc = LongitudinalMpc(dt=dt)
+    from opendbc.car.gm.volt_longitudinal import personal_enabled, PROFILE
+    profile_args = ({'stop_distance': PROFILE.stop_distance, 'comfort_brake': PROFILE.comfort_brake,
+                     'jerk_scale': PROFILE.jerk_scale} if personal_enabled(CP) else {})
+    self.mpc = LongitudinalMpc(dt=dt, **profile_args)
     self.fcw = False
     self.dt = dt
     self.allow_throttle = True

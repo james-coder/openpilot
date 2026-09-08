@@ -246,7 +246,7 @@ export default function BrakingReview() {
   );
 }
 
-function Trace({ title, unit, rows, series, cursor, setCursor }) {
+export function Trace({ title, unit, rows, series, cursor, setCursor }) {
   const width = 1000,
     height = 250,
     left = 75,

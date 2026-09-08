@@ -1,3 +1,4 @@
+import { installBrakingRoutes } from './braking-server.mjs';
 import express from 'express';
 import { installAssistedRoutes } from './assisted-server.mjs';
 import fs from 'node:fs';
@@ -81,6 +82,7 @@ export function createApp({
   });
   app.use(express.json({ limit: '5mb' }));
   installAssistedRoutes(app, dataDir);
+  installBrakingRoutes(app, dataDir);
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
   for (const name of ['braking-audit', 'can-coverage'])
     app.get('/api/' + name, (_req, res) => {

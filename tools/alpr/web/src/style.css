@@ -1355,3 +1355,33 @@ h3 {
   margin-top: 10px;
   color: #475569;
 }
+
+.braking-videos {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin: 20px 0;
+}
+.braking-videos video {
+  display: block;
+  width: 100%;
+  background: #111;
+  margin-top: 8px;
+  border-radius: 12px;
+}
+.braking-comparison {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 20px 0;
+}
+.braking-comparison th,
+.braking-comparison td {
+  text-align: left;
+  padding: 12px;
+  border-bottom: 1px solid #94a3b8;
+}
+@media (max-width: 800px) {
+  .braking-videos {
+    grid-template-columns: 1fr;
+  }
+}

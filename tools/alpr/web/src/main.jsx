@@ -22,7 +22,7 @@ import {
 } from 'lucide-react';
 import './style.css';
 import AssistedReview from './AssistedReview';
-import BrakingReview from './BrakingReview';
+import BrakingReview from './NativeBrakingReview';
 import CanReview from './CanReview';
 import { DisplayControls, useDisplaySettings, enhance } from './DisplayControls';
 

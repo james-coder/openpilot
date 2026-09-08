@@ -201,3 +201,41 @@ test('diagnostic reports are read-only and preview files use an exact allowlist'
   assert.equal((await fetch(url + '/diagnostics-ui/can-list.png')).status, 200);
   assert.equal((await fetch(url + '/diagnostics-ui/private.json')).status, 404);
 });
+
+test('native braking details and decisions are isolated, revision-protected, and allowlisted', async () => {
+  const root = path.join(dir, 'braking', 'review');
+  fs.mkdirSync(path.join(root, 'events'), { recursive: true });
+  fs.mkdirSync(path.join(root, 'media'));
+  const id = '00000022--0123456789-stop-1';
+  fs.writeFileSync(path.join(root, 'index.json'), JSON.stringify({ events: [{ id }] }));
+  fs.writeFileSync(path.join(root, 'events', id + '.json'), JSON.stringify({ id, samples: [] }));
+  assert.equal((await fetch(url + '/api/braking')).status, 200);
+  assert.equal((await fetch(url + '/api/braking/events/' + id)).status, 200);
+  assert.equal((await fetch(url + '/api/braking/events/unknown')).status, 404);
+  const before = await get();
+  const original = await (await fetch(url + '/api/braking/decisions')).json();
+  const send = (body) =>
+    fetch(url + '/api/braking/decisions/' + id, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  assert.equal((await send({ ...original, decision: 'representative' })).status, 200);
+  assert.equal((await send({ ...original, decision: 'exclude' })).status, 409);
+  const current = await (await fetch(url + '/api/braking/decisions')).json();
+  assert.equal(current.data[id], 'representative');
+  assert.equal((await send({ ...current, decision: 'invalid' })).status, 400);
+  assert.deepEqual(await get(), before);
+  fs.writeFileSync(path.join(root, 'media', id + '-fcamera.mp4'), '0123456789');
+  const range = await fetch(url + '/braking-media/' + id + '-fcamera.mp4', {
+    headers: { Range: 'bytes=0-3' },
+  });
+  assert.equal(range.status, 206);
+  assert.equal(await range.text(), '0123');
+  for (const route of [
+    '/braking-media/decisions.json',
+    '/braking-media/response-fit.json',
+    '/braking/review/cache',
+  ])
+    assert.equal((await fetch(url + route)).status, 404);
+});

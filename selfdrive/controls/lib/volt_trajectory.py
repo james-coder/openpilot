@@ -8,6 +8,9 @@ import numpy as np
 
 
 def validate_curve(curve):
+  from openpilot.selfdrive.controls.lib.volt_polynomial import valid_model
+  if isinstance(curve, dict) and 'model' in curve:
+    return valid_model(curve)
   try:
     speed, decel = np.asarray(curve['speed']), np.asarray(curve['deceleration'])
     knots, coefficients = np.asarray(curve['knots']), np.asarray(curve['coefficients'])
@@ -30,6 +33,12 @@ def validate_curve(curve):
 
 
 class StopTrajectory:
+  def __new__(cls, curve):
+    if 'model' in curve:
+      from openpilot.selfdrive.controls.lib.volt_polynomial import PolynomialStopTrajectory
+      return PolynomialStopTrajectory(curve)
+    return super().__new__(cls)
+
   def __init__(self, curve):
     self.curve = curve
     self.speed = [float(v) for v in curve['speed']]

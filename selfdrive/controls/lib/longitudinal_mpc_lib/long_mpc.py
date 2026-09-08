@@ -277,7 +277,11 @@ class LongitudinalMpc:
       self.stop_trajectory.reset()
 
   def set_personal_curve(self, curve):
-    if curve is not None:
+    if curve is not None and 'model' in curve:
+      from openpilot.selfdrive.controls.lib.volt_polynomial import valid_model
+      if not valid_model(curve):
+        raise ValueError('Invalid polynomial stopping model')
+    elif curve is not None:
       knots = np.asarray(curve['knots'])
       coef = np.asarray(curve['coefficients'])
       if (knots.shape != (7,) or coef.shape != (6, 4) or not np.isfinite(knots).all() or not np.isfinite(coef).all()
@@ -314,7 +318,7 @@ class LongitudinalMpc:
     # Uncertain/moving leads disable personalization immediately. Engagement blends in.
     self.personal_blend = min(1., self.personal_blend + self.dt / .5) if valid and self.personal_stable_time >= .5 else 0.
     self.params[:, 8:] = 0.
-    if self.personal_curve is not None:
+    if self.personal_curve is not None and 'model' not in self.personal_curve:
       c = self.personal_curve
       self.params[:, 8] = self.personal_blend
       self.params[:, 9] = c['gap']
@@ -430,6 +434,7 @@ class LongitudinalMpc:
       self.personal_blend = 0.
       self.params[:, 8] = 0.
 
+    self.polynomial_active = False
     trajectory = getattr(self, 'stop_trajectory', None)
     if trajectory is not None:
       lead = radarstate.leadOne
@@ -439,6 +444,9 @@ class LongitudinalMpc:
         measured_v, measured_a = measured_state if measured_state is not None else self.x0[1:3]
         reference = trajectory.update(T_IDXS, measured_v, measured_a, lead.dRel, self.dt)
         if reference is not None:
+          self.polynomial_active = 'model' in self.personal_curve
+          if self.polynomial_active:
+            self.params[:, 6] = self.personal_curve['gap']
           weights = list(self.normal_cost_weights)
           weights[1:4] = np.array([20., 60., 30.]) * self.personal_blend
           self.set_cost_weights(weights, self.constraint_cost_weights)
@@ -455,6 +463,7 @@ class LongitudinalMpc:
         self.set_cost_weights(self.normal_cost_weights, self.constraint_cost_weights)
 
     self.run()
+    self.polynomial_active = self.polynomial_active and self.solution_status == 0
     if (np.any(lead_xv_0[FCW_IDXS,0] - self.x_sol[FCW_IDXS,0] < CRASH_DISTANCE) and
             radarstate.leadOne.modelProb > 0.9):
       self.crash_cnt += 1

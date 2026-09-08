@@ -11,7 +11,7 @@ for (const file of ['labels.template.json', 'study-results.json'])
   fs.copyFileSync(path.join(source, file), path.join(fixture, file));
 const review = path.join(fixture, 'braking', 'review');
 fs.mkdirSync(review, { recursive: true });
-for (const file of ['index.json', 'validation.json'])
+for (const file of ['index.json', 'validation.json', 'function-fit.json'])
   fs.copyFileSync(path.join(source, 'braking', 'review', file), path.join(review, file));
 for (const dir of ['events', 'media', 'simulation'])
   fs.symlinkSync(path.join(source, 'braking', 'review', dir), path.join(review, dir));
@@ -34,7 +34,7 @@ try {
   await page.getByLabel('Replay window').selectOption('approach');
   await page.waitForFunction((expected) => {
     const paths = [...document.querySelectorAll('[aria-label="Replayed speed over time"] path[d]')];
-    return paths.length === expected && paths.every((p) => p.getAttribute('d').length > 20);
+    return paths.length >= expected && paths.every((p) => p.getAttribute('d').length > 20);
   }, brakeOnly ? 3 : 4);
   assert.equal(await page.locator('[aria-label="Recorded stop"] option').count(), 3);
   await page.getByLabel('Inspect braking time').fill('-1');
@@ -52,7 +52,13 @@ try {
     path: '/mnt/algo14/comma3-alpr/braking/review/browser-review.png',
     fullPage: true,
   });
-  await page.getByLabel('Braking event selection').selectOption('manual');
+  await page.getByRole('heading', { name: 'Your braking fitted to a smooth function' }).waitFor();
+  await page.getByRole('button', { name: 'Manual stop 1 · training', exact: true }).click();
+  await page.getByRole('heading', { name: 'Speed: recording and fitted function', exact: false }).waitFor();
+  assert.equal(await page.getByLabel('Braking event selection').inputValue(), 'manual');
+  await page.locator('[aria-label="Fitted stopping function"]').screenshot({
+    path: '/mnt/algo14/comma3-alpr/braking/review/browser-function-review.png',
+  });
   await page.getByRole('button', { name: 'Yes, representative' }).waitFor();
   await page.getByRole('button', { name: 'Yes, representative' }).click();
   await page.getByText('representative', { exact: true }).waitFor();

@@ -310,6 +310,8 @@ def fit_style(root):
         'final_jerk_p95': e['final_jerk_p95'],
       }
     )
+  from openpilot.tools.profiling.volt_function_fit import fit_functions
+  function_fit = fit_functions(root, examples, split)
   gaps = [e['gap'] for e in examples if e['gap'] is not None]
   return {
     'version': 1,
@@ -317,7 +319,8 @@ def fit_style(root):
     'speed_bins': [[0, 0.5], [0.5, 1], [1, 2], [2, 5], [5, 10], [10, 20]],
     'median_settled_radar_gap': float(np.median(gaps)) if gaps else None,
     'stopping_candidate': fit_stopping_curve(examples, samples),
-    'approach_candidate': approach_curve(examples, samples, split),
+    'approach_candidate': function_fit['curve'],
+    'function_fit': function_fit,
     'split': split,
     'collection': {'target_examples': 10, 'qualifying_examples': len(examples),
                    'review_ids': [e['id'] for e in examples if not e['reviewed'] and e['route'] != split['holdout_route']][:5]},

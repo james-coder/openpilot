@@ -68,6 +68,13 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
             color: '#111827',
             value: (r) => (Number.isFinite(r[recordedKey]) ? r[recordedKey] * multiplier : null),
           },
+          ...(['v', 'a'].includes(key) && traces.personal?.some(r => Number.isFinite(r['function_' + key])) ? [
+            { label: 'Function target', color: '#15803d', value: r => {
+              const value = valueAt(traces.personal, r.t, 'function_' + key);
+              return Number.isFinite(value) ? value * multiplier : null;
+            } },
+            ...(key === 'a' ? [{ label: 'Planner target', color: '#be123c', value: r => valueAt(traces.personal, r.t, 'target') }] : []),
+          ] : []),
           ...modes.map(([mode, label, color]) => ({
             label,
             color,
@@ -91,7 +98,7 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
       )}
       <p>{validation.profile_kind === 'brake'
         ? 'Current candidate: brake control with the existing planner and following distance. Personal approach learning is deferred.'
-        : 'Current candidate: personal stopping trajectory and brake control.'}</p>
+        : 'Current candidate: a fitted polynomial stopping function and brake control.'}</p>
       <BrakingDiagnostics diagnostics={validation.diagnostics} event={event} reproduction={result?.reproduction} />
       <div className="review-toolbar">
         {(reference.collection?.review_ids || [])
@@ -108,13 +115,12 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
         finish the phase below 4.5 mph in {n(Math.min(...trainingExamples.map((e) => e.low_speed_seconds)))}–
         {n(Math.max(...trainingExamples.map((e) => e.low_speed_seconds)))} s.
         {reference.split?.holdout_route
-          ? ' A new route is reserved for independent evaluation.'
+          ? ' The reserved route is excluded from fitting but was previously inspected.'
           : ' A new recorded trip is still needed for independent evaluation.'}
       </p>
       {validation.profile_kind !== 'brake' && reference.approach_candidate && (
         <p>
-          Observed manual gap: {n(reference.approach_candidate.observed_gap, ' m')}. The experimental planner
-          target is bounded to {n(reference.approach_candidate.gap, ' m')} by the existing profile limits;
+          The experimental planner target is {n(reference.approach_candidate.gap, ' m')};
           actual simulated gaps are shown separately below. The controller aims to meet timing, smoothness,
           and gap targets together. This page reports qualification, not the mode currently selected on the car.
         </p>

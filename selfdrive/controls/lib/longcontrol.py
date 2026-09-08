@@ -1,6 +1,6 @@
 import numpy as np
 from cereal import car
-from opendbc.car.gm.volt_longitudinal import enabled as volt_enabled, PROFILE
+from opendbc.car.gm.volt_longitudinal import enabled as volt_enabled, PROFILE, VoltFlags
 from openpilot.selfdrive.controls.lib.volt_stopping import VoltStopping
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
@@ -63,7 +63,7 @@ class LongControl:
   def reset(self):
     self.pid.reset()
 
-  def update(self, active, CS, a_target, should_stop, accel_limits):
+  def update(self, active, CS, a_target, should_stop, accel_limits, stop_trajectory_active=False):
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
@@ -83,7 +83,8 @@ class LongControl:
 
     elif self.long_control_state == LongCtrlState.stopping and volt_enabled(self.CP):
       output_accel = self.volt_stopping.update(CS, a_target, previous_state != LongCtrlState.stopping,
-                                               self.last_output_accel, self.pid)
+                                               self.last_output_accel, self.pid,
+                                               trajectory_active=stop_trajectory_active and bool(self.CP.flags & VoltFlags.PERSONAL))
 
     elif self.long_control_state == LongCtrlState.stopping:
       output_accel = self.last_output_accel

@@ -1,7 +1,6 @@
 """Recorded reproduction, finite-stop experiments, and version-bound qualification."""
 
 import argparse
-from dataclasses import replace
 import json
 import hashlib
 from datetime import datetime
@@ -11,6 +10,7 @@ import numpy as np
 from openpilot.selfdrive.test.longitudinal_maneuvers.volt_plant import replay_targets, closed_loop_stop, metrics
 from openpilot.selfdrive.test.longitudinal_maneuvers.volt_replay import replay_commands, replay_traffic
 from openpilot.tools.profiling.volt_braking import atomic_json
+from openpilot.tools.profiling.volt_finish_metrics import physical_finish
 from openpilot.tools.profiling.volt_response_fit import fit_style, load_routes, prepare
 from openpilot.tools.profiling.volt_pressure_model import allocator_profile, evaluate_pressure_response
 from openpilot.selfdrive.car.volt_profile import make_bundle, source_hashes, VEHICLE_CHECKS
@@ -106,6 +106,13 @@ def validate(root, vehicle_evidence=None, kind='brake'):
         result = replay_traffic(event, fit, smooth, curve)
         trace = result.pop('samples')
         m = metrics(trace)
+        if kind == 'personal' and mode == 'personal':
+          finish = physical_finish(trace)
+          check(label + ' physical terminal finish',
+                finish['confirmed_stop'] is not None and finish['creep_seconds'] <= 1.25
+                and finish['terminal_accel'] is not None and finish['terminal_accel'] <= .15
+                and finish['terminal_jerk_p95'] is not None and finish['terminal_jerk_p95'] <= .5,
+                str(finish), 'traffic')
         case['traffic'][mode] = {**m, **result, 'target_gap': curve['gap'] if curve else None,
           'url': save(summary['id'], 'traffic-' + mode, trace, experiment='reconstructed_traffic', **result)}
         if smooth:
@@ -142,6 +149,14 @@ def validate(root, vehicle_evidence=None, kind='brake'):
       try:
         trace = closed_loop_stop(fit, speed, distance, smooth, grade, regen, delay, approach_profile=curve, scenario=name)
         m = metrics(trace)
+        if kind == 'personal' and mode == 'personal' and nominal:
+          finish = physical_finish(trace)
+          m.update(finish)
+          check(title + ': physical terminal finish',
+                finish['confirmed_stop'] is not None and finish['creep_seconds'] <= 1.25
+                and finish['terminal_accel'] is not None and finish['terminal_accel'] <= .15
+                and finish['terminal_jerk_p95'] is not None and finish['terminal_jerk_p95'] <= .5,
+                str(finish), category, stage)
         pair[mode] = m
         if smooth:
           good = m['minimum_gap'] >= .25 and m['solver_failures'] == 0
@@ -207,17 +222,24 @@ def validate(root, vehicle_evidence=None, kind='brake'):
         f'{style["collection"]["qualifying_examples"]} qualifying manual examples; target approximately 10. '
         + 'Requires three per fitted speed band and a reserved evaluation route.',
         'manual', 'release' if kind == 'personal' else 'diagnostic')
-  evaluation = approach.get('evaluation_rmse') if approach else None
-  check('Reserved manual route agreement', evaluation is not None and evaluation <= .5,
-        f'Unfitted manual-route deceleration RMSE {evaluation}; required ≤0.5 m/s².', 'manual', 'release' if kind == 'personal' else 'diagnostic')
+  functions = style['function_fit']
+  evaluated = [w for c in functions['cases'] if c['partition'] == 'evaluation' for w in c['windows']]
+  stage = 'release' if kind == 'personal' else 'diagnostic'
+  check('Reserved manual route function agreement', bool(evaluated) and all(w.get('similar', False) for w in evaluated),
+        'Each supported evaluation window: normalized speed RMSE ≤10%; duration error ≤max(1 second, 20%). '
+        + functions['evaluation_note'], 'manual', stage)
+  fitted = [w for c in functions['cases'] for w in c['windows'] if w.get('feasible')]
+  check('Function terminal smoothness', bool(fitted) and all(w['terminal_accel'] <= .05 and w['terminal_jerk'] <= .3 for w in fitted),
+        'Analytic final 100 ms: acceleration ≤0.05 m/s² and jerk ≤0.3 m/s³. Infeasible windows remain listed.',
+        'manual', 'offline' if kind == 'personal' else 'diagnostic')
+  check('Function creep duration', bool(fitted) and all(w['creep_seconds'] <= 1.25 for w in fitted),
+        'Time from 0.3 to 0.03 m/s ≤1.25 seconds.', 'manual', 'offline' if kind == 'personal' else 'diagnostic')
   check('Representative manual examples reviewed', bool(style['examples']) and all(e['reviewed'] for e in style['examples']),
         'Optional example review; final driver comfort is checked during the supervised vehicle tests.', 'manual', 'diagnostic')
 
   bundle = None
   if kind == 'brake' or approach:
     profile = allocator_profile(model)
-    if kind == 'personal':
-      profile = replace(profile, stop_speed=tuple(approach['speed']), stop_decel=tuple(approach['deceleration']))
     vehicle = json.loads(vehicle_evidence.read_text()) if vehicle_evidence else None
     if source_hashes() != tested_sources:
       raise RuntimeError('Controller or validation sources changed during the run; rerun before exporting qualification')
@@ -228,11 +250,11 @@ def validate(root, vehicle_evidence=None, kind='brake'):
     if not template.exists():
       atomic_json(template, {'profile_id': bundle['id'], 'checks': {name: {'pass': None, 'route': None, 'archive_sha256': None} for name in VEHICLE_CHECKS}})
   readiness = bundle['readiness'] if bundle else {'test_ready': False, 'vehicle_validated': False, 'road_ready': False}
-  result = {'version': 5, 'profile_kind': kind, 'summary': 'Brake control and personal approach learning are qualified separately.',
+  result = {'version': 6, 'profile_kind': kind, 'summary': 'Brake control and personal approach learning are qualified separately.',
             'deployment_ready': readiness['road_ready'], 'readiness': readiness, 'profile_id': bundle['id'] if bundle else None,
             'checks': checks, 'recorded_cases': recorded, 'scenarios': scenarios,
             'manual_reference': {'examples': style['examples'], 'stopping_candidate': style['stopping_candidate'],
-                                 'approach_candidate': approach, 'collection': style['collection'], 'split': style['split'],
+                                 'approach_candidate': approach, 'function_fit': functions, 'collection': style['collection'], 'split': style['split'],
                                  'duration_tolerance_seconds': .35,
                                  'limitation': 'Different traffic conditions; model comparisons remain provisional until response reproduction passes.'},
             'diagnostics': diagnostics,

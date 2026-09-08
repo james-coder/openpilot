@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import LegacyReview, { Trace } from './BrakingReview';
 import BrakingExperiments from './BrakingExperiments';
+import BrakingFunction from './BrakingFunction';
 import { DisplayControls, useDisplaySettings } from './DisplayControls';
 
 const MPH = 2.236936292;
@@ -344,6 +345,7 @@ export default function NativeBrakingReview() {
         {validation?.summary ||
           'Prototype validation is being prepared. Stock braking remains active on the device.'}
       </p>
+      <BrakingFunction event={event} cursor={cursor} jump={jump} selectEvent={id => { setScope('manual'); setId(id); }} />
       <BrakingExperiments
         validation={validation}
         event={event}

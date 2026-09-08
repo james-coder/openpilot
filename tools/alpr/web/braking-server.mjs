@@ -43,6 +43,11 @@ export function installBrakingRoutes(app, dataDir) {
     atomic(labels, data);
     res.json({ data, revision: revision(data) });
   });
+  app.get('/api/braking/function-fit', (_req, res) => {
+    const file = path.join(root, 'function-fit.json');
+    if (!fs.existsSync(file)) return res.sendStatus(404);
+    res.json(read(file));
+  });
   app.get('/api/braking/validation', (_req, res) => {
     const file = path.join(root, 'validation.json');
     if (!fs.existsSync(file)) return res.sendStatus(404);

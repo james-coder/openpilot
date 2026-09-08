@@ -16,6 +16,11 @@ def curve():
   return approach_curve(*curve_fixture())
 
 
+def polynomial_curve():
+  from openpilot.selfdrive.controls.lib.volt_polynomial import MODEL
+  return {'version': 2, 'model': MODEL, 'shape': [.45, .28], 'max_speed': 10., 'gap': 4.5}
+
+
 def checks():
   return [{'name': category, 'pass': True, 'category': category, 'stage': 'offline'} for category in
           ('response', 'traffic', 'nominal', 'stress', 'independent_response')] + [
@@ -23,7 +28,7 @@ def checks():
 
 
 def test_qualification_is_bound_to_sources_and_coefficients():
-  bundle = make_bundle(PROFILE, curve(), checks(), hashes={'fixture': '123'})
+  bundle = make_bundle(PROFILE, polynomial_curve(), checks(), hashes={'fixture': '123'})
   assert read_bundle(raw=json.dumps(bundle), hashes={'fixture': '123'})['readiness']['test_ready']
   assert read_bundle(raw=json.dumps(bundle), hashes={'fixture': 'changed'}) is None
   altered = deepcopy(bundle)
@@ -65,15 +70,15 @@ def test_startup_snapshot_reaches_both_control_layers_and_rejects_stale_sources(
   from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
 
   monkeypatch.setattr(profile_module, 'source_hashes', lambda: {'fixture': 'current'})
-  c = curve()
-  profile = replace(PROFILE, stop_speed=tuple(c['speed']), stop_decel=tuple(c['deceleration']), braking_ki=.3)
+  c = polynomial_curve()
+  profile = replace(PROFILE, braking_ki=.3)
   bundle = make_bundle(profile, c, checks())
   raw = json.dumps(bundle)
   monkeypatch.setattr(params, 'Params', lambda: SimpleNamespace(get=lambda *args, **kwargs: raw))
   cp = volt_params()
   assert configure(cp, 'test', profile=profile, test_ready=True) == 'test'
   assert LongControl(cp).volt_profile.braking_ki == .3
-  assert LongControl(cp).volt_stopping.profile.stop_decel == c['deceleration']
+  assert tuple(LongControl(cp).volt_stopping.profile.stop_decel) == PROFILE.stop_decel
   assert LongitudinalPlanner(cp).mpc.personal_curve == c
   monkeypatch.setattr(profile_module, 'source_hashes', lambda: {'fixture': 'changed'})
   with pytest.raises(RuntimeError, match='startup snapshot'):

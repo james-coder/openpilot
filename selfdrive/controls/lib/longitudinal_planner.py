@@ -70,6 +70,7 @@ class LongitudinalPlanner:
     self.prev_accel_clip = [ACCEL_MIN, ACCEL_MAX]
     self.output_a_target = 0.0
     self.output_should_stop = False
+    self.output_volt_trajectory_active = False
 
     self.v_desired_trajectory = np.zeros(CONTROL_N)
     self.a_desired_trajectory = np.zeros(CONTROL_N)
@@ -196,6 +197,9 @@ class LongitudinalPlanner:
       self.output_should_stop = True
       output_a_target = min(0., output_a_target)
 
+    self.output_volt_trajectory_active = bool(getattr(self.mpc, 'polynomial_active', False)
+      and not reset_state and not sm['selfdriveState'].experimentalMode and not sm['carState'].brakePressed)
+
     for idx in range(2):
       accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)
     self.output_a_target = np.clip(output_a_target, accel_clip[0], accel_clip[1])
@@ -221,6 +225,7 @@ class LongitudinalPlanner:
 
     longitudinalPlan.aTarget = float(self.output_a_target)
     longitudinalPlan.shouldStop = bool(self.output_should_stop)
+    longitudinalPlan.voltStopTrajectoryActive = bool(self.output_volt_trajectory_active)
     longitudinalPlan.allowBrake = True
     longitudinalPlan.allowThrottle = bool(self.allow_throttle)
 

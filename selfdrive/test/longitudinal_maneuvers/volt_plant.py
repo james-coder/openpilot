@@ -68,14 +68,15 @@ class VoltPlant:
     self.v = self.sensed_v = speed
     self.tick = 0
 
-  def step(self, target, should_stop=False, active=True, brake_pressed=False, recorded_command=None):
+  def step(self, target, should_stop=False, active=True, brake_pressed=False, recorded_command=None, stop_trajectory_active=False):
     self.state.vEgo = self.sensed_v
+    self.state.vEgoRaw = self.v
     self.state.aEgo = self.a
     self.state.standstill = self.v <= 0.0864
     self.state.brakePressed = brake_pressed
     # Match the normal controls contract: a pedal override removes actuation.
     self.cc.longActive = active and not brake_pressed
-    command = self.long.update(self.cc.longActive, self.state, target, should_stop, (-4.0, 2.0))
+    command = self.long.update(self.cc.longActive, self.state, target, should_stop, (-4.0, 2.0), stop_trajectory_active=stop_trajectory_active)
     self.cc.actuators.accel = float(command)
     self.cc.actuators.longControlState = self.long.long_control_state
     applied, _discarded_can = self.controller.update(self.cc.as_reader(), self.cs, int((1 + self.tick * DT) * 1e9))
@@ -163,7 +164,9 @@ def closed_loop_stop(
   plant = VoltPlant(fit, speed, smooth, grade, regen_factor, extra_delay, stopping_profile, controller_profile=controller_profile)
   planner = LongitudinalPlanner(plant.CP, init_v=speed)
   planner.mpc.set_personal_curve(approach_profile)
-  if approach_profile is not None and stopping_profile is None:
+  if approach_profile is not None and 'model' in approach_profile:
+    plant.CP.flags |= int(VoltFlags.PERSONAL)  # Offline fixture, after startup checks.
+  if approach_profile is not None and 'model' not in approach_profile and stopping_profile is None:
     from dataclasses import replace
     plant.long.volt_stopping = VoltStopping(replace(plant.controller.volt_profile,
       stop_speed=tuple(approach_profile['speed']), stop_decel=tuple(approach_profile['deceleration'])))
@@ -212,7 +215,8 @@ def closed_loop_stop(
       target, should_stop = planner.output_a_target, planner.output_should_stop
     override = scenario == 'pedal_override' and 3 <= elapsed < 3.5
     urgent = scenario == 'full_braking' and 2 <= elapsed < 3
-    row = plant.step(-4. if urgent else float(target), bool(should_stop), brake_pressed=override)
+    row = plant.step(-4. if urgent else float(target), bool(should_stop), brake_pressed=override,
+                     stop_trajectory_active=planner.output_volt_trajectory_active)
     row['gap'] = lead_x - plant.x
     row['personal_blend'] = planner.mpc.personal_blend
     row['solver_status'] = planner.mpc.solution_status
@@ -220,6 +224,10 @@ def closed_loop_stop(
     row['trajectory_reason'] = trajectory.reason if trajectory else 'stock'
     row['stop_time_remaining'] = trajectory.remaining_time if trajectory else None
     row['target_gap'] = approach_profile['gap'] if approach_profile else None
+    row['function_active'] = planner.output_volt_trajectory_active
+    if trajectory is not None and hasattr(trajectory.reference, 'evaluate'):
+      ref = trajectory.reference.evaluate([max(0., trajectory.elapsed-planner.dt)])[0]
+      row.update(function_v=float(ref[1]), function_a=float(ref[2]), function_j=float(ref[3]))
     trace.append(row)
     if scenario in ('stationary', 'engine_on', 'moving_stop') and k > 300 and plant.v < 0.01 and all(r['v'] < 0.01 for r in trace[-100:]):
       break

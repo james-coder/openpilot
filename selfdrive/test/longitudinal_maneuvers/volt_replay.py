@@ -115,7 +115,10 @@ def replay_traffic(event, fit, smooth=False, approach_profile=None, controller_p
   seed_plant(plant, rows[0])
   planner = LongitudinalPlanner(plant.CP, init_v=rows[0]['v'], init_a=rows[0]['a'])
   planner.mpc.set_personal_curve(approach_profile)
-  if approach_profile is not None:
+  if approach_profile is not None and 'model' in approach_profile:
+    from opendbc.car.gm.volt_longitudinal import VoltFlags
+    plant.CP.flags |= int(VoltFlags.PERSONAL)
+  if approach_profile is not None and 'model' not in approach_profile:
     from dataclasses import replace
     from openpilot.selfdrive.controls.lib.volt_stopping import VoltStopping
     plant.long.volt_stopping = VoltStopping(replace(plant.controller.volt_profile,
@@ -168,7 +171,7 @@ def replay_traffic(event, fit, smooth=False, approach_profile=None, controller_p
       sm['carControl'].orientationNED = [0., observation.get('controller_pitch', 0.), 0.]
       planner.update(sm)
       target, stop = planner.output_a_target, planner.output_should_stop
-    row = plant.step(float(target), bool(stop))
+    row = plant.step(float(target), bool(stop), stop_trajectory_active=planner.output_volt_trajectory_active)
     row.update(t=float(t), gap=origin + radar['leads'][0]['dRel'] + radar['leads'][0]['vLead'] * age - plant.x,
                recorded_v=observation['v'], recorded_a=observation['a'], recorded_gap=observation.get('d'),
                personal_blend=planner.mpc.personal_blend, solver_status=planner.mpc.solution_status)
@@ -177,6 +180,10 @@ def replay_traffic(event, fit, smooth=False, approach_profile=None, controller_p
     row['trajectory_reason'] = trajectory.reason if trajectory else 'stock'
     row['stop_time_remaining'] = trajectory.remaining_time if trajectory else None
     row['target_gap'] = approach_profile['gap'] if approach_profile else None
+    row['function_active'] = planner.output_volt_trajectory_active
+    if trajectory is not None and hasattr(trajectory.reference, 'evaluate'):
+      ref = trajectory.reference.evaluate([max(0., trajectory.elapsed-planner.dt)])[0]
+      row.update(function_v=float(ref[1]), function_a=float(ref[2]), function_j=float(ref[3]))
     trace.append(row)
   return {'samples': trace, 'start': times[0], 'secondary_changes': secondary_changes,
           'limitations': ['Lead motion is reconstructed from noisy radar range and wheel odometry.',

@@ -15,6 +15,26 @@ import zstandard
 from cereal import log
 from opendbc.can import CANParser
 from openpilot.tools.profiling.braking_audit import find_events
+from openpilot.selfdrive.locationd.helpers import Pose, PoseCalibrator
+
+EXTRACT_VERSION = 4
+
+
+def lead_snapshot(lead):
+  return {k: getattr(lead, k) for k in ('status', 'dRel', 'yRel', 'vRel', 'vLead', 'vLeadK', 'aLeadK', 'aLeadTau', 'radar', 'radarTrackId', 'modelProb')}
+
+
+def calibrated_motion(pose, calibrator):
+  result = {'imu_ax': pose.accelerationDevice.x if pose.accelerationDevice.valid else None,
+            'device_pitch': pose.orientationNED.y if pose.orientationNED.valid else None,
+            'calibration_valid': calibrator.calib_valid}
+  if calibrator.calib_valid and pose.inputsOK and pose.sensorsOK:
+    calibrated = calibrator.build_calibrated_pose(Pose.from_live_pose(pose))
+    if pose.orientationNED.valid and np.isfinite(calibrated.orientation.pitch):
+      result['vehicle_pitch'] = float(calibrated.orientation.pitch)
+    if pose.accelerationDevice.valid and np.isfinite(calibrated.acceleration.x):
+      result['vehicle_ax'] = float(calibrated.acceleration.x)
+  return result
 
 
 def extract_native(path):
@@ -30,6 +50,8 @@ def extract_native(path):
   frames = []
   clock = []
   params = {}
+  car_params = {}
+  calibrator = PoseCalibrator()
   tracks = []
   track_stamp = -1.0
   events = Counter()
@@ -55,6 +77,12 @@ def extract_native(path):
         frames.append({'camera': 'fcamera' if k == 'roadEncodeIdx' else 'ecamera', 'frame': r.segmentId, 't': r.timestampSof / 1e9, 'segment': segment})
     elif k == 'carParams':
       p = e.carParams
+      cp_data = p.to_dict()
+      car_params = {key: cp_data[key] for key in (
+        'carFingerprint', 'flags', 'networkLocation', 'openpilotLongitudinalControl', 'pcmCruise',
+        'stoppingControl', 'startingState', 'stopAccel', 'startAccel', 'stoppingDecelRate',
+        'vEgoStopping', 'vEgoStarting', 'longitudinalActuatorDelay', 'longitudinalTuning', 'wheelSpeedFactor',
+      ) if key in cp_data}
       params = {
         'car': p.carFingerprint,
         'stopping_rate': p.stoppingDecelRate,
@@ -76,6 +104,8 @@ def extract_native(path):
         continue
       r = e.carControl
       latest[k] = {'active': r.longActive, 'cmd': r.actuators.accel, 'cmd_state': str(r.actuators.longControlState)}
+      if len(r.orientationNED) == 3 and np.isfinite(r.orientationNED[1]):
+        latest[k]['controller_pitch'] = r.orientationNED[1]
     elif k == 'carOutput' and e.valid:
       r = e.carOutput.actuatorsOutput
       latest[k] = {'applied_accel': r.accel, 'applied_gas': r.gas, 'applied_brake': r.brake}
@@ -90,6 +120,8 @@ def extract_native(path):
         'source': str(r.longitudinalPlanSource),
         'plan_v0': r.speeds[0] if len(r.speeds) else None,
         'allow_throttle': r.allowThrottle,
+        'plan_speeds': list(r.speeds),
+        'plan_accels': list(r.accels),
       }
     elif k == 'radarState':
       r = e.radarState
@@ -106,9 +138,11 @@ def extract_native(path):
         'prob': a.modelProb,
         'lead2_d': b.dRel if b.status else None,
         'errors': [key for key, value in r.radarErrors.to_dict().items() if value],
+        'leads': [lead_snapshot(a), lead_snapshot(b)],
       }
     elif k == 'liveTracks':
-      tracks = [{'id': p.trackId, 'd': p.dRel, 'vr': p.vRel, 'y': p.yRel, 'measured': p.measured} for p in e.liveTracks.points]
+      tracks = [{'id': p.trackId, 'd': p.dRel, 'vr': p.vRel, 'y': p.yRel, 'measured': p.measured} for p in e.liveTracks.points] if e.valid else []
+      track_stamp = t
     elif k == 'modelV2':
       r = e.modelV2
       latest[k] = {
@@ -116,9 +150,13 @@ def extract_native(path):
         'model_stop': r.action.shouldStop,
         'model_leads': [{'prob': p.prob, 'd': p.x[0] if len(p.x) else None, 'v': p.v[0] if len(p.v) else None} for p in r.leadsV3],
       }
+    elif k == 'liveCalibration':
+      if e.valid and len(e.liveCalibration.rpyCalib) == 3:
+        calibrator.feed_live_calib(e.liveCalibration)
+      else:
+        calibrator.calib_valid = False
     elif k == 'livePose':
-      r = e.livePose
-      latest[k] = {'imu_ax': r.accelerationDevice.x if r.accelerationDevice.valid else None, 'pitch': r.orientationNED.y if r.orientationNED.valid else None}
+      latest[k] = calibrated_motion(e.livePose, calibrator)
     elif k in ('can', 'sendcan'):
       if k == 'can':
         updated_pt = pt.update([(e.logMonoTime, [(f.address, f.dat, f.src) for f in e.can if f.src == 0])])
@@ -154,15 +192,18 @@ def extract_native(path):
         'standstill': r.standstill,
         'valid': e.valid,
         'gear': str(r.gearShifter),
+        'v_cruise_kph': r.vCruise,
         'segment': segment,
       }
       for service, data in latest.items():
         if 0 <= t - stamps[service] <= 0.3:
           row.update(data)
       row['freshness'] = {key: round(t - stamp, 4) for key, stamp in stamps.items() if 0 <= t - stamp <= 0.3 and latest.get(key)}
+      row['sample_times'] = {key: stamp for key, stamp in stamps.items() if 0 <= t - stamp <= 0.3 and latest.get(key)}
       row['steering_angle'] = r.steeringAngleDeg
       if row.get('lead') and 0 <= t - track_stamp <= 0.3:
         row['raw_track'] = next((p for p in tracks if p['id'] == row.get('track')), None)
+        row['tracks_age'] = t - track_stamp
       rows.append(row)
     if k in latest:
       stamps[k] = t
@@ -172,6 +213,7 @@ def extract_native(path):
     'frames': frames,
     'clock': statistics.median(clock) if clock else None,
     'params': params,
+    'car_params': car_params,
     'begin': begin,
     'end': end,
     'events': dict(events),
@@ -247,6 +289,11 @@ def describe_event(rows):
   settled = [r['d'] for r in rows if 0.5 <= r['t'] <= 2 and r.get('radar_valid') and r.get('lead') and not r.get('errors') and r.get('d') is not None]
   tracks = {r.get('track') for r in final if r.get('lead') and r.get('radar_valid')}
   peak = min(approach, key=lambda r: r['a'])
+  running_min = low[0]['v']
+  rebound = 0.
+  for r in low:
+    running_min = min(running_min, r['v'])
+    rebound = max(rebound, r['v'] - running_min)
   return {
     'kind': kind,
     'control_coverage': coverage,
@@ -257,6 +304,8 @@ def describe_event(rows):
     'final_min_accel': min(r['a'] for r in final),
     'final_jerk_p95': float(np.percentile(final_jerk, 95)),
     'low_speed_seconds': -low[0]['t'],
+    'speed_rebound': rebound,
+    'braking_onset': next((r['t'] for r in approach if r['a'] < -.3), None),
     'settled_radar_gap': statistics.median(settled) if settled else None,
     'final_track_ids': sorted(t for t in tracks if t is not None),
     'radar_error_samples': sum(bool(r.get('errors')) for r in approach),
@@ -264,17 +313,30 @@ def describe_event(rows):
   }
 
 
-def export_review(raw, output, cache):
+def export_review(raw, output, cache, additional_raw=()):
   cache.mkdir(parents=True, exist_ok=True)
   routes = {}
   manifest = []
-  for path in sorted(raw.glob('*/rlog.zst')):
+  paths = {}
+  for root in (raw, *additional_raw):
+    for path in root.glob('*/rlog.zst'):
+      if path.parent.name in paths and path.resolve() != paths[path.parent.name].resolve():
+        raise ValueError('Duplicate route segment across archive roots')
+      paths[path.parent.name] = path
+  if not paths:
+    raise ValueError('No rlogs found; the existing review is unchanged')
+  if (output / 'index.json').exists():
+    existing_routes = {e['route'] for e in json.loads((output / 'index.json').read_text())['events']}
+    available_routes = {name.rsplit('--', 1)[0] for name in paths}
+    if existing_routes - available_routes:
+      raise ValueError('Retain existing review routes and add new trips with --additional-raw, or use a new review directory')
+  for path in sorted(paths.values()):
     digest = hashlib.sha256(path.read_bytes()).hexdigest()
     saved = cache / (path.parent.name + '.json.gz')
     data = json.loads(gzip.decompress(saved.read_bytes())) if saved.exists() else {}
-    if data.get('extract_version') != 2 or data.get('sha256') != digest:
+    if data.get('extract_version') != EXTRACT_VERSION or data.get('sha256') != digest:
       data = extract_native(path)
-      data['extract_version'] = 2
+      data['extract_version'] = EXTRACT_VERSION
       saved.write_bytes(gzip.compress(json.dumps(data, allow_nan=False).encode(), compresslevel=3))
     route = path.parent.name.rsplit('--', 1)[0]
     routes.setdefault(route, []).append(data)
@@ -291,7 +353,9 @@ def export_review(raw, output, cache):
     for candidate in find_events(coarse_rows(rows), route):
       stop = candidate['stop_mono_s']
       start = stop - candidate['retained_history_s']
-      event_rows = [{**r, 't': round(r['t'] - stop, 6)} for r in rows if start <= r['t'] <= stop + 2]
+      event_rows = [{**r, 't': round(r['t'] - stop, 6),
+                     'sample_times': {k: round(t - stop, 6) for k, t in r.get('sample_times', {}).items()}}
+                    for r in rows if start <= r['t'] <= stop + 2]
       event_frames = [{**f, 't': f['t'] - stop} for f in frames if start <= f['t'] <= stop + 2]
       key = route + '-' + candidate['id'].split('/')[-1]
       metrics = describe_event(event_rows)
@@ -317,11 +381,13 @@ def export_review(raw, output, cache):
         if abs(previous['stop_mono'] - stop) > 0.15:
           raise ValueError('Input set would reassign an existing event ID. Use a new review directory to preserve annotations.')
       prior_videos = previous.get('videos', {}) if event_path.exists() else {}
-      atomic_json(event_path, {**summary, 'samples': event_rows, 'frames': event_frames, 'videos': prior_videos})
+      source = next(s for s in segments if s['segment'] == event_rows[0]['segment'])
+      atomic_json(event_path, {**summary, 'samples': event_rows, 'frames': event_frames, 'videos': prior_videos,
+                              'car_params': source['car_params'], 'extract_version': EXTRACT_VERSION})
       summaries.append(summary)
   summaries.sort(key=lambda e: (e['kind'] != 'autonomous', e['stop_utc'] or ''))
   result = {
-    'version': 2,
+    'version': EXTRACT_VERSION,
     'segments': len(manifest),
     'routes': len(routes),
     'events': summaries,
@@ -337,7 +403,7 @@ def export_review(raw, output, cache):
   return result
 
 
-def export_video(raw, output):
+def export_video(raw, output, additional_raw=()):
   """Encode browser clips from indexed frames with their logged capture timestamps."""
   import av
   from fractions import Fraction
@@ -350,7 +416,9 @@ def export_video(raw, output):
       if not frames:
         continue
       sources = {f['segment'] for f in frames}
-      if any(not (raw / s / (camera + '.hevc')).exists() for s in sources):
+      locations = {s: next((root / s / (camera + '.hevc') for root in (raw, *additional_raw)
+                            if (root / s / (camera + '.hevc')).exists()), None) for s in sources}
+      if any(value is None for value in locations.values()):
         continue
       dest = output / 'media' / (event['id'] + '-' + camera + '.mp4')
       dest.parent.mkdir(parents=True, exist_ok=True)
@@ -364,7 +432,7 @@ def export_video(raw, output):
           stream.time_base = Fraction(1, 90000)
           for segment in sorted(sources, key=lambda s: int(s.rsplit('--', 1)[1])):
             selected = {f['frame']: f for f in frames if f['segment'] == segment}
-            with av.open(str(raw / segment / (camera + '.hevc')), format='hevc') as source:
+            with av.open(str(locations[segment]), format='hevc') as source:
               for i, frame in enumerate(source.decode(video=0)):
                 if i > max(selected):
                   break
@@ -390,12 +458,13 @@ def main():
   parser.add_argument('output', type=Path)
   parser.add_argument('--video-only', action='store_true')
   parser.add_argument('--video', action='store_true')
+  parser.add_argument('--additional-raw', type=Path, action='append', default=[])
   args = parser.parse_args()
   if not args.video_only:
-    result = export_review(args.raw, args.output, args.output / 'cache')
+    result = export_review(args.raw, args.output, args.output / 'cache', args.additional_raw)
     print(Counter(e['kind'] for e in result['events']))
   if args.video or args.video_only:
-    export_video(args.raw, args.output)
+    export_video(args.raw, args.output, args.additional_raw)
 
 
 if __name__ == '__main__':

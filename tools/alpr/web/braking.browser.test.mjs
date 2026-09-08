@@ -13,7 +13,7 @@ const review = path.join(fixture, 'braking', 'review');
 fs.mkdirSync(review, { recursive: true });
 for (const file of ['index.json', 'validation.json'])
   fs.copyFileSync(path.join(source, 'braking', 'review', file), path.join(review, file));
-for (const dir of ['events', 'media'])
+for (const dir of ['events', 'media', 'simulation'])
   fs.symlinkSync(path.join(source, 'braking', 'review', dir), path.join(review, dir));
 const server = createApp({ dataDir: fixture }).listen(0, '127.0.0.1');
 await new Promise((resolve) => server.once('listening', resolve));
@@ -26,7 +26,14 @@ try {
   await page.getByRole('heading', { name: 'What happens before the stop?' }).waitFor();
   await page.getByRole('heading', { name: 'Acceleration and braking', exact: false }).waitFor();
   await page.getByRole('heading', { name: 'A smoother stop must also finish promptly' }).waitFor();
-  assert.equal(await page.getByRole('columnheader', { name: 'With manual taper' }).count(), 1);
+  await page.getByRole('heading', { name: 'Reconstructed traffic: the planner runs again' }).waitFor();
+  assert.equal(await page.getByRole('columnheader', { name: 'Personal approach' }).count(), 1);
+  await page.getByLabel('Replay window').selectOption('finish');
+  await page.getByLabel('Replay window').selectOption('approach');
+  await page.waitForFunction(() => {
+    const paths = [...document.querySelectorAll('[aria-label="Replayed speed over time"] path[d]')];
+    return paths.length === 4 && paths.every((p) => p.getAttribute('d').length > 20);
+  });
   assert.equal(await page.locator('[aria-label="Recorded stop"] option').count(), 3);
   await page.getByLabel('Inspect braking time').fill('-1');
   await page.getByLabel('Brightness', { exact: true }).fill('1.5');

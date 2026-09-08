@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import time
 import numpy as np
 
 import cereal.messaging as messaging
@@ -133,7 +134,11 @@ class LongitudinalPlanner:
 
     self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
-    self.mpc.update(sm['radarState'], v_cruise, personality=sm['selfdriveState'].personality)
+    radar_age = float('inf')
+    if self.mpc.personal_curve is not None:
+      radar_age = (sm.get('radar_age', float('inf')) if isinstance(sm, dict) else
+                   time.monotonic() - sm.logMonoTime['radarState'] / 1e9 if sm.valid['radarState'] and sm.alive['radarState'] else float('inf'))
+    self.mpc.update(sm['radarState'], v_cruise, personality=sm['selfdriveState'].personality, radar_age=radar_age)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)

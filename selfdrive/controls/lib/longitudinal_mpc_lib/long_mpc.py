@@ -15,7 +15,7 @@ if __name__ == '__main__':  # generating code
 else:
   from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.c_generated_code.acados_ocp_solver_pyx import AcadosOcpSolverCython
 
-from casadi import SX, vertcat
+from casadi import SX, vertcat, if_else, fmin, fmax
 
 MODEL_NAME = 'long'
 LONG_MPC_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -27,7 +27,7 @@ MPC_SOURCES = (LongitudinalPlanSource.lead0, LongitudinalPlanSource.lead1, Longi
 
 X_DIM = 3
 U_DIM = 1
-PARAM_DIM = 8
+PARAM_DIM = 41  # 8 baseline parameters, blend/gap, 7 knots, 6 cubic intervals
 COST_E_DIM = 5
 COST_DIM = COST_E_DIM + 1
 CONSTR_DIM = 4
@@ -113,7 +113,7 @@ def gen_long_model():
   lead_danger_factor = SX.sym('lead_danger_factor')
   stop_distance = SX.sym('stop_distance')
   comfort_brake = SX.sym('comfort_brake')
-  model.p = vertcat(a_min, a_max, x_obstacle, a_prev, lead_t_follow, lead_danger_factor, stop_distance, comfort_brake)
+  model.p = vertcat(a_min, a_max, x_obstacle, a_prev, lead_t_follow, lead_danger_factor, stop_distance, comfort_brake, SX.sym('personal', 33))
 
   # dynamics model
   f_expl = vertcat(v_ego, a_ego, j_ego)
@@ -153,6 +153,19 @@ def gen_long_ocp():
   ocp.cost.yref_e = np.zeros((COST_E_DIM, ))
 
   desired_dist_comfort = get_safe_obstacle_distance(v_ego, lead_t_follow, ocp.model.p[6], ocp.model.p[7])
+  # Personal stopping distance is a shape-preserving integral of manual v/b(v).
+  # It changes the comfort cost only; the original safety expression below is independent.
+  p = ocp.model.p
+  v = fmax(0., v_ego)
+  personal_distance = 0.
+  for interval in reversed(range(6)):
+    delta = v - p[10 + interval]
+    coef = p[17 + interval * 4:21 + interval * 4]
+    value = ((coef[0] * delta + coef[1]) * delta + coef[2]) * delta + coef[3]
+    personal_distance = value if interval == 5 else if_else(v < p[11 + interval], value, personal_distance)
+  support_blend = fmin(1., fmax(0., (p[16] - v) / fmax(.1, p[16] * .2)))
+  blend = p[8] * support_blend
+  desired_dist_comfort = (1. - blend) * desired_dist_comfort + blend * (p[9] + personal_distance)
   # Personal comfort targets cannot reduce the original collision-distance penalty.
   desired_dist_safety = get_safe_obstacle_distance(v_ego, lead_t_follow)
 
@@ -180,7 +193,7 @@ def gen_long_ocp():
 
   x0 = np.zeros(X_DIM)
   ocp.constraints.x0 = x0
-  ocp.parameter_values = np.array([-1.2, 1.2, 0.0, 0.0, get_T_FOLLOW(), LEAD_DANGER_FACTOR, STOP_DISTANCE, COMFORT_BRAKE])
+  ocp.parameter_values = np.r_[[-1.2, 1.2, 0.0, 0.0, get_T_FOLLOW(), LEAD_DANGER_FACTOR, STOP_DISTANCE, COMFORT_BRAKE], np.zeros(33)]
 
 
   # We put all constraint cost weights to 0 and only set them at runtime
@@ -223,6 +236,7 @@ class LongitudinalMpc:
     self.stop_distance = float(np.clip(stop_distance, 4.5, 8.))
     self.comfort_brake = float(np.clip(comfort_brake, 1.5, 3.))
     self.jerk_scale = float(np.clip(jerk_scale, .5, 3.))
+    self.personal_curve = None
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.reset()
     self.source = LongitudinalPlanSource.cruise
@@ -257,6 +271,46 @@ class LongitudinalMpc:
     self.time_integrator = 0.0
     self.x0 = np.zeros(X_DIM)
     self.set_weights()
+    self.personal_track = None
+    self.personal_stable_time = self.personal_blend = 0.
+
+  def set_personal_curve(self, curve):
+    if curve is not None:
+      knots = np.asarray(curve['knots'])
+      coef = np.asarray(curve['coefficients'])
+      if (knots.shape != (7,) or coef.shape != (6, 4) or not np.isfinite(knots).all() or not np.isfinite(coef).all()
+          or knots[0] != 0. or not np.all(np.diff(knots) > 0.) or not .5 <= knots[-1] <= 20.
+          or not 4.5 <= curve['gap'] <= 8.):
+        raise ValueError('Invalid personal stopping-distance curve')
+      # Validate interval continuity, nonnegative distance, and monotonicity.
+      previous = 0.
+      for i in range(6):
+        values = np.polyval(coef[i], np.linspace(0., knots[i+1] - knots[i], 101))
+        if abs(values[0] - previous) > 1e-5 or min(values) < -1e-6 or np.min(np.diff(values)) < -1e-6:
+          raise ValueError('Personal stopping distance must be continuous and monotone')
+        previous = values[-1]
+    self.personal_curve = curve
+    self.personal_track = None
+    self.personal_stable_time = self.personal_blend = 0.
+
+  def update_personal(self, radarstate, age):
+    lead = radarstate.leadOne
+    valid = (self.personal_curve is not None and 0. <= age <= .3 and lead.status and lead.radar
+             and lead.radarTrackId >= 0 and abs(lead.vLead) < .5 and lead.modelProb >= .9)
+    if valid and self.personal_track == lead.radarTrackId:
+      self.personal_stable_time += self.dt
+    else:
+      self.personal_stable_time = 0.
+      self.personal_track = lead.radarTrackId if valid else None
+    # Uncertain/moving leads disable personalization immediately. Engagement blends in.
+    self.personal_blend = min(1., self.personal_blend + self.dt / .5) if valid and self.personal_stable_time >= .5 else 0.
+    self.params[:, 8:] = 0.
+    if self.personal_curve is not None:
+      c = self.personal_curve
+      self.params[:, 8] = self.personal_blend
+      self.params[:, 9] = c['gap']
+      self.params[:, 10:17] = c['knots']
+      self.params[:, 17:] = np.asarray(c['coefficients']).ravel()
 
   def set_cost_weights(self, cost_weights, constraint_cost_weights):
     W = np.asfortranarray(np.diag(cost_weights))
@@ -320,7 +374,7 @@ class LongitudinalMpc:
     lead_xv = self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau)
     return lead_xv
 
-  def update(self, radarstate, v_cruise, personality=log.LongitudinalPersonality.standard):
+  def update(self, radarstate, v_cruise, personality=log.LongitudinalPersonality.standard, radar_age=float('inf')):
     t_follow = get_T_FOLLOW(personality)
     v_ego = self.x0[1]
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
@@ -358,6 +412,7 @@ class LongitudinalMpc:
     self.params[:,5] = LEAD_DANGER_FACTOR
     self.params[:,6] = self.stop_distance
     self.params[:,7] = self.comfort_brake
+    self.update_personal(radarstate, radar_age)
 
     self.run()
     if (np.any(lead_xv_0[FCW_IDXS,0] - self.x_sol[FCW_IDXS,0] < CRASH_DISTANCE) and

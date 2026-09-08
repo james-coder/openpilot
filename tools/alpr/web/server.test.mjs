@@ -212,6 +212,16 @@ test('native braking details and decisions are isolated, revision-protected, and
   assert.equal((await fetch(url + '/api/braking')).status, 200);
   assert.equal((await fetch(url + '/api/braking/events/' + id)).status, 200);
   assert.equal((await fetch(url + '/api/braking/events/unknown')).status, 404);
+  fs.mkdirSync(path.join(root, 'simulation'));
+  fs.writeFileSync(
+    path.join(root, 'simulation', id + '-traffic-stock.json'),
+    JSON.stringify({ samples: [{ t: 0 }] }),
+  );
+  assert.deepEqual(await (await fetch(url + '/api/braking/simulation/' + id + '/traffic-stock')).json(), {
+    samples: [{ t: 0 }],
+  });
+  assert.equal((await fetch(url + '/api/braking/simulation/' + id + '/decisions')).status, 404);
+  assert.equal((await fetch(url + '/api/braking/simulation/' + id + '/traffic-personal')).status, 404);
   const before = await get();
   const original = await (await fetch(url + '/api/braking/decisions')).json();
   const send = (body) =>

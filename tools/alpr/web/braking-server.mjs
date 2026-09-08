@@ -48,6 +48,20 @@ export function installBrakingRoutes(app, dataDir) {
     if (!fs.existsSync(file)) return res.sendStatus(404);
     res.json(read(file));
   });
+  app.get('/api/braking/simulation/:id/:mode', (req, res) => {
+    const modes = [
+      'commands',
+      'targets-stock',
+      'targets-smooth',
+      'traffic-stock',
+      'traffic-smooth',
+      'traffic-personal',
+    ];
+    if (!validId(req.params.id) || !modes.includes(req.params.mode)) return res.sendStatus(404);
+    const file = path.join(root, 'simulation', req.params.id + '-' + req.params.mode + '.json');
+    if (!fs.existsSync(file)) return res.sendStatus(404);
+    res.json(read(file));
+  });
   app.use(
     '/braking-media',
     (req, res, next) => {

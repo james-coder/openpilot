@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import LegacyReview, { Trace } from './BrakingReview';
+import BrakingExperiments from './BrakingExperiments';
 import { DisplayControls, useDisplaySettings } from './DisplayControls';
 
 const MPH = 2.236936292;
@@ -343,44 +344,18 @@ export default function NativeBrakingReview() {
         {validation?.summary ||
           'Prototype validation is being prepared. Stock braking remains active on the device.'}
       </p>
-      {validation?.manual_reference?.examples?.length > 0 && (
-        <>
-          <h3>A smoother stop must also finish promptly</h3>
-          <p>
-            Your manual finishes spent{' '}
-            {n(Math.min(...validation.manual_reference.examples.map((e) => e.low_speed_seconds)))}–
-            {n(Math.max(...validation.manual_reference.examples.map((e) => e.low_speed_seconds)))} seconds
-            below 4.5 mph. Braking can be stronger earlier and still feel smoother when it eases toward
-            standstill.
-          </p>
-          <table className="braking-comparison">
-            <thead>
-              <tr>
-                <th>Low-speed phase</th>
-                <th>Recorded openpilot</th>
-                <th>Candidate model</th>
-                <th>With manual taper</th>
-              </tr>
-            </thead>
-            <tbody>
-              {validation.recorded_cases.map((c) => (
-                <tr key={c.event}>
-                  <th>{c.label}</th>
-                  <td>{n(c.recorded.low_speed_seconds, ' s')}</td>
-                  <td>{n(c.simulation.smooth.low_speed_seconds, ' s')}</td>
-                  <td>{n(c.simulation.manual_taper?.low_speed_seconds, ' s')}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <p>
-            The model still understates the recorded jolts. These experiments reuse recorded planner targets;
-            changing only the final taper has little effect when the crawl occurs before the stopping routine
-            takes over. Approach planning and low-speed brake response both need work. The manual taper is
-            fitted on one route and checked on the other. It remains an offline experiment.
-          </p>
-        </>
-      )}
+      <BrakingExperiments
+        validation={validation}
+        event={event}
+        cursor={cursor}
+        jump={jump}
+        decisions={decisions?.data}
+        reviewManual={(id) => {
+          setScope('manual');
+          setId(id);
+          window.scrollTo({ top: 0, behavior: 'smooth' });
+        }}
+      />
       {validation?.checks && (
         <details>
           <summary>Validation checks and remaining work</summary>

@@ -10,6 +10,7 @@ import numpy as np
 from opendbc.car.gm.volt_longitudinal import PROFILE
 from scipy.optimize import lsq_linear
 from scipy.signal import lfilter
+from scipy.interpolate import PchipInterpolator
 
 from openpilot.tools.profiling.volt_braking import atomic_json
 
@@ -33,9 +34,16 @@ def prepare(rows):
   t = np.array([r['t'] for r in rows])
   grid = np.arange(t[0], t[-1], 0.05)
 
-  def channel(key, default=0.0):
-    good = [(r['t'], r[key]) for r in rows if isinstance(r.get(key), (int, float))]
-    return np.interp(grid, *np.array(good).T) if good else np.full(len(grid), default)
+  def channel(key, default=0.0, discrete=False):
+    service = {'applied_brake': 'carOutput', 'applied_gas': 'carOutput', 'engine_rpm': 'engine'}.get(key)
+    good = sorted({r.get('sample_times', {}).get(service, r['t']): r[key] for r in rows if isinstance(r.get(key), (int, float))}.items())
+    if not good:
+      return np.full(len(grid), default)
+    ts, values = np.array(good).T
+    if discrete:
+      held = values[np.clip(np.searchsorted(ts, grid, side='right') - 1, 0, len(ts) - 1)]
+      return np.where(grid >= ts[0], held, default)
+    return np.interp(grid, ts, values)
 
   nearest = np.clip(np.searchsorted(t, grid, side='right') - 1, 0, len(rows) - 1)
 
@@ -53,6 +61,7 @@ def prepare(rows):
   manual = np.array([rows[i]['foot'] or rows[i]['regen'] or rows[i]['gas'] or not rows[i]['valid'] or grid[k] - t[i] > 0.1 for k, i in enumerate(nearest)])
   clear_manual = np.convolve(manual.astype(int), np.ones(41), mode='same') == 0
   mask = control_fresh & active.astype(bool) & brake_fresh & gas_fresh & clear_manual
+  mask &= np.array([rows[i].get('active') is True for i in nearest])
   v = channel('v')
   a = channel('a')
   mask &= (v > 0.4) & (v < 24) & (np.abs(channel('steering_angle')) < 30)
@@ -60,12 +69,17 @@ def prepare(rows):
     't': grid,
     'v': v,
     'a': a,
-    'brake': channel('applied_brake') / 400.0,
-    'regen': np.clip(-channel('applied_gas') / 650.0, 0, 1),
-    'gas': np.clip(channel('applied_gas') / 1018.0, 0, 1),
-    'engine': channel('engine_rpm') > 0,
+    'brake': channel('applied_brake', discrete=True) / 400.0,
+    'regen': np.clip(-channel('applied_gas', discrete=True) / 650.0, 0, 1),
+    'gas': np.clip(channel('applied_gas', discrete=True) / 1018.0, 0, 1),
+    'engine': channel('engine_rpm', discrete=True) > 0,
     'mask': mask,
-    'pitch': channel('pitch'),
+    'pitch': channel('controller_pitch'),
+    'pressure': channel('pressure') / 30000.0,
+    'pressure_valid': fresh('pressure')[0],
+    'pitch_valid': fresh('controller_pitch')[0],
+    'physical_a': channel('vehicle_ax'),
+    'physical_a_valid': fresh('vehicle_ax')[0],
   }
 
 
@@ -186,15 +200,76 @@ def fit_stopping_curve(examples, samples):
   }
 
 
+def study_split(root, index):
+  path = root / 'study-split.json'
+  routes = sorted({e['route'] for e in index['events']})
+  split = json.loads(path.read_text()) if path.exists() else {'version': 1, 'regression_routes': routes, 'holdout_route': None}
+  if split['holdout_route'] is None:
+    eligible = [r for r in routes if r not in split['regression_routes']
+                and sum(e['recommended_manual'] and e['route'] == r for e in index['events']) >= 3]
+    if eligible:
+      split['holdout_route'] = eligible[0]
+  atomic_json(path, split)
+  return split
+
+
+def approach_curve(examples, samples, split):
+  training = [e for e in examples if e['route'] != split['holdout_route']]
+  # During the seed experiment keep the already inspected second route for regression scoring.
+  if split['holdout_route'] is None and training:
+    training = [e for e in training if e['route'] == min(e['route'] for e in training)]
+  speed, decel, support = [0.0], [0.18], []
+  for lo, hi in ((0.3, 0.5), (0.5, 1), (1, 2), (2, 5), (5, 10), (10, 20)):
+    per_event, velocities = [], []
+    for e in training:
+      rows = [r for r in samples[e['id']] if lo <= r['v'] < hi and -3.0 <= r['a'] < -0.05]
+      if len(rows) >= 10:
+        per_event.append(float(np.median([-r['a'] for r in rows])))
+        velocities.append(float(np.median([r['v'] for r in rows])))
+    support.append({'speed_bin': [lo, hi], 'events': len(per_event)})
+    if not per_event:
+      break  # Never extrapolate through an unsupported speed range.
+    speed.append(float(np.median(velocities)))
+    decel.append(float(np.clip(np.median(per_event), 0.18, 2.5)))
+  if len(speed) < 3:
+    return None
+  grid = np.linspace(0, speed[-1], 1001)
+  b = np.interp(grid, speed, decel)
+  integrand = grid / b
+  distance = np.r_[0, np.cumsum((integrand[1:] + integrand[:-1]) * np.diff(grid) / 2)]
+  # Fixed six intervals keep the generated MPC interface independent of sample count.
+  knots = np.linspace(0, speed[-1], 7)
+  values = np.interp(knots, grid, distance)
+  spline = PchipInterpolator(knots, values)
+  gaps = [e['gap'] for e in training if e['gap'] is not None]
+  observed_gap = float(np.median(gaps)) if gaps else None
+  gap = float(np.clip(observed_gap if observed_gap is not None else PROFILE.stop_distance, 4.5, 8))
+  test = [e for e in examples if e not in training]
+  residuals = [-r['a'] - np.interp(r['v'], speed, decel) for e in test for r in samples[e['id']]
+               if 0.3 <= r['v'] <= speed[-1] and r['a'] < -0.05]
+  return {
+    'version': 1, 'speed': speed, 'deceleration': decel,
+    'knots': knots.tolist(), 'distance': values.tolist(), 'coefficients': spline.c.T.tolist(),
+    'gap': gap, 'observed_gap': observed_gap, 'support': support,
+    'train_ids': [e['id'] for e in training], 'evaluation_ids': [e['id'] for e in test],
+    'evaluation_rmse': float(np.sqrt(np.mean(np.square(residuals)))) if residuals else None,
+    'blind_holdout': split['holdout_route'] is not None,
+    'supported_for_release': all(s['events'] >= 3 for s in support) and split['holdout_route'] is not None,
+    'validated': False, 'runtime_applied': False,
+  }
+
+
 def fit_style(root):
   index = json.loads((root / 'index.json').read_text())
   decisions = json.loads((root / 'decisions.json').read_text()) if (root / 'decisions.json').exists() else {}
+  split = study_split(root, index)
   examples, samples = [], {}
   for e in index['events']:
     if not e['recommended_manual'] or decisions.get(e['id']) == 'exclude':
       continue
     event = json.loads((root / 'events' / (e['id'] + '.json')).read_text())
-    rows = [r for r in event['samples'] if -8 <= r['t'] <= 0 and r.get('active') is False and r.get('valid') and r['foot']]
+    rows = [r for r in event['samples'] if -35 <= r['t'] <= 0 and r.get('active') is False and r.get('valid') and r['foot']
+            and abs(r.get('steering_angle', 0)) < 25]
     # Human braking only: exclude the first second after leaving active control.
     last_active = max((r['t'] for r in event['samples'] if r.get('active')), default=-100)
     rows = [r for r in rows if r['t'] > last_active + 1]
@@ -221,6 +296,9 @@ def fit_style(root):
     'speed_bins': [[0, 0.5], [0.5, 1], [1, 2], [2, 5], [5, 10], [10, 20]],
     'median_settled_radar_gap': float(np.median(gaps)) if gaps else None,
     'stopping_candidate': fit_stopping_curve(examples, samples),
+    'approach_candidate': approach_curve(examples, samples, split),
+    'split': split,
+    'collection': {'target_examples': 10, 'qualifying_examples': len(examples), 'review_ids': [e['id'] for e in examples if not e['reviewed']][:5]},
     'validated': False,
     'runtime_applied': False,
     'reason': (
@@ -234,9 +312,16 @@ def main():
   parser.add_argument('review', type=Path)
   args = parser.parse_args()
   routes = load_routes(args.review / 'cache')
+  style = fit_style(args.review)  # Reserve a new route before any fitting sees its measurements.
+  routes = {k: v for k, v in routes.items() if k != style['split']['holdout_route']}
   fit = fit_response(routes)
+  from openpilot.tools.profiling.volt_pressure_model import fit_pressure_response
+  names = sorted(routes)
+  pressure = fit_pressure_response(prepare(routes[names[0]]), prepare(routes[names[1]]), names[0], names[1])
+  fit['pressure_model'] = pressure
+  fit['version'] = 2
   atomic_json(args.review / 'response-fit.json', fit)
-  atomic_json(args.review / 'style-fit.json', fit_style(args.review))
+  atomic_json(args.review / 'style-fit.json', style)
   print(json.dumps(fit, indent=2))
 
 

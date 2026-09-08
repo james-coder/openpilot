@@ -27,7 +27,7 @@ try {
   await page.getByRole('heading', { name: 'Acceleration and braking', exact: false }).waitFor();
   await page.getByRole('heading', { name: 'A smoother stop must also finish promptly' }).waitFor();
   await page.getByRole('heading', { name: 'Reconstructed traffic: the planner runs again' }).waitFor();
-  assert.equal(await page.getByRole('columnheader', { name: 'Personal approach' }).count(), 1);
+  assert.equal(await page.getByRole('columnheader', { name: 'Personal stop' }).count(), 1);
   await page.getByLabel('Replay window').selectOption('finish');
   await page.getByLabel('Replay window').selectOption('approach');
   await page.waitForFunction(() => {

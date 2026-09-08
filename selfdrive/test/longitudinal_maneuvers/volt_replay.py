@@ -3,6 +3,7 @@
 import math
 import numpy as np
 from cereal import log
+from cereal import car
 import cereal.messaging as messaging
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
 from openpilot.selfdrive.test.longitudinal_maneuvers.volt_plant import VoltPlant, DT
@@ -32,6 +33,8 @@ def seed_plant(plant, row):
   plant.estimator.v_ego_kf.set_x([[row['v']], [row['a']]])
   plant.long.pid.i = row.get('i', 0.)
   plant.long.last_output_accel = row.get('cmd', 0.)
+  if row.get('state') in ('off', 'pid', 'stopping', 'starting'):
+    plant.long.long_control_state = getattr(car.CarControl.Actuators.LongControlState, row['state'])
   if plant.dynamics is not None:
     plant.dynamics.pressure = max(0, row.get('pressure', 0.) / 30000)
     plant.dynamics.regen = max(0, -row.get('applied_gas', 0.)) / 650
@@ -96,7 +99,7 @@ def traffic_window(event):
   return window
 
 
-def replay_traffic(event, fit, smooth=False, approach_profile=None):
+def replay_traffic(event, fit, smooth=False, approach_profile=None, controller_profile=None):
   rows = traffic_window(event)
   times = np.array([r['t'] for r in rows])
   all_rows = event['samples']
@@ -105,10 +108,18 @@ def replay_traffic(event, fit, smooth=False, approach_profile=None):
   ego_x = np.r_[0., np.cumsum((speed[1:] + speed[:-1]) * np.diff(world_times) / 2)]
   ego_x -= np.interp(times[0], world_times, ego_x)
   radar_records = channel(rows, 'radarState', ['leads'])
-  plant = VoltPlant(fit, speed=rows[0]['vraw'], smooth=smooth, recorded_params=event.get('car_params'))
+  model_records = channel(rows, 'modelV2', ['gas_press_probs'])
+  control_records = channel(rows, 'controlsState', ['force_decel'])
+  parameter_records = channel(rows, 'liveParameters', ['angle_offset'])
+  plant = VoltPlant(fit, speed=rows[0]['vraw'], smooth=smooth, recorded_params=event.get('car_params'), controller_profile=controller_profile)
   seed_plant(plant, rows[0])
   planner = LongitudinalPlanner(plant.CP, init_v=rows[0]['v'], init_a=rows[0]['a'])
   planner.mpc.set_personal_curve(approach_profile)
+  if approach_profile is not None:
+    from dataclasses import replace
+    from openpilot.selfdrive.controls.lib.volt_stopping import VoltStopping
+    plant.long.volt_stopping = VoltStopping(replace(plant.controller.volt_profile,
+      stop_speed=tuple(approach_profile['speed']), stop_decel=tuple(approach_profile['deceleration'])))
   names = ('carState', 'controlsState', 'selfdriveState', 'liveParameters', 'carControl', 'modelV2', 'radarState')
   sm = {name: getattr(messaging.new_message(name), name) for name in names}
   sm['selfdriveState'].enabled = True
@@ -127,6 +138,12 @@ def replay_traffic(event, fit, smooth=False, approach_profile=None):
     stamp = t - age
     origin = float(np.interp(stamp, world_times, ego_x))
     if k % 5 == 0:
+      model, _ = at(model_records, t)
+      controls, _ = at(control_records, t)
+      parameters, _ = at(parameter_records, t)
+      sm['modelV2'].meta.disengagePredictions.gasPressProbs = model['gas_press_probs']
+      sm['controlsState'].forceDecel = controls['force_decel']
+      sm['liveParameters'].angleOffsetDeg = parameters['angle_offset']
       for i, lead in enumerate(radar['leads']):
         out = sm['radarState'].leadOne if i == 0 else sm['radarState'].leadTwo
         for key, value in lead.items():
@@ -155,6 +172,11 @@ def replay_traffic(event, fit, smooth=False, approach_profile=None):
     row.update(t=float(t), gap=origin + radar['leads'][0]['dRel'] + radar['leads'][0]['vLead'] * age - plant.x,
                recorded_v=observation['v'], recorded_a=observation['a'], recorded_gap=observation.get('d'),
                personal_blend=planner.mpc.personal_blend, solver_status=planner.mpc.solution_status)
+    row['allow_throttle'] = planner.allow_throttle
+    trajectory = getattr(planner.mpc, 'stop_trajectory', None)
+    row['trajectory_reason'] = trajectory.reason if trajectory else 'stock'
+    row['stop_time_remaining'] = trajectory.remaining_time if trajectory else None
+    row['target_gap'] = approach_profile['gap'] if approach_profile else None
     trace.append(row)
   return {'samples': trace, 'start': times[0], 'secondary_changes': secondary_changes,
           'limitations': ['Lead motion is reconstructed from noisy radar range and wheel odometry.',

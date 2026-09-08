@@ -89,6 +89,13 @@ def test_archive_verification_requires_all_files_and_rejects_corruption(tmp_path
   source.write_text(json.dumps(manifest))
   archive(raw, [route], local_manifest=source)
   assert json.loads((tmp_path / 'archive-manifest.json').read_text())['verified']
+  full_manifest = (tmp_path / 'archive-manifest.json').read_bytes()
+  log_source = tmp_path / 'logs-remote.json'
+  log_source.write_text(json.dumps(manifest[:2]))
+  archive(raw, [route], local_manifest=log_source, logs_only=True)
+  logs = json.loads((tmp_path / 'logs-manifest.json').read_text())
+  assert logs['verified'] and logs['coverage'] == 'logs' and len(logs['files']) == 2
+  assert (tmp_path / 'archive-manifest.json').read_bytes() == full_manifest
   (segment / 'rlog.zst').write_bytes(b'changed')
   with pytest.raises(ValueError, match='Hash mismatch'):
     archive(raw, [route], local_manifest=source)

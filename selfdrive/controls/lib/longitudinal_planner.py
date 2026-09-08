@@ -53,6 +53,11 @@ class LongitudinalPlanner:
     profile_args = ({'stop_distance': PROFILE.stop_distance, 'comfort_brake': PROFILE.comfort_brake,
                      'jerk_scale': PROFILE.jerk_scale} if personal_enabled(CP) else {})
     self.mpc = LongitudinalMpc(dt=dt, **profile_args)
+    from openpilot.selfdrive.car.volt_profile import runtime_bundle
+    from opendbc.car.gm.volt_longitudinal import VoltFlags
+    bundle = runtime_bundle(CP)
+    if bundle and CP.flags & VoltFlags.PERSONAL:
+      self.mpc.set_personal_curve(bundle['curve'])
     self.fcw = False
     self.dt = dt
     self.allow_throttle = True
@@ -134,11 +139,22 @@ class LongitudinalPlanner:
 
     self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
+    trajectory = getattr(self.mpc, 'stop_trajectory', None)
+    if trajectory is not None and trajectory.reference is not None and self.mpc.personal_blend:
+      # A timed physical trajectory must start at the measured vehicle state;
+      # integrating the previous desired state can run ahead of the car and
+      # release braking early even while the finite stop reference is valid.
+      self.mpc.set_cur_state(v_ego, sm['carState'].aEgo)
     radar_age = float('inf')
     if self.mpc.personal_curve is not None:
       radar_age = (sm.get('radar_age', float('inf')) if isinstance(sm, dict) else
                    time.monotonic() - sm.logMonoTime['radarState'] / 1e9 if sm.valid['radarState'] and sm.alive['radarState'] else float('inf'))
-    self.mpc.update(sm['radarState'], v_cruise, personality=sm['selfdriveState'].personality, radar_age=radar_age)
+      if sm['selfdriveState'].experimentalMode:
+        radar_age = float('inf')
+    if reset_state and getattr(self.mpc, 'stop_trajectory', None) is not None:
+      self.mpc.stop_trajectory.reset()
+    self.mpc.update(sm['radarState'], v_cruise, personality=sm['selfdriveState'].personality, radar_age=radar_age,
+                    measured_state=(v_ego, sm['carState'].aEgo), personal_active=not reset_state and not sm['selfdriveState'].experimentalMode)
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
     self.a_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.a_solution)
@@ -160,6 +176,7 @@ class LongitudinalPlanner:
     output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
     output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
+    previous_should_stop = self.output_should_stop
     if sm['selfdriveState'].experimentalMode:
       output_a_target = min(output_a_target_e2e, output_a_target_mpc)
       self.output_should_stop = output_should_stop_e2e or output_should_stop_mpc
@@ -168,6 +185,14 @@ class LongitudinalPlanner:
     else:
       output_a_target = output_a_target_mpc
       self.output_should_stop = output_should_stop_mpc
+
+    trajectory = getattr(self.mpc, 'stop_trajectory', None)
+    if (trajectory is not None and trajectory.reference is not None and self.mpc.personal_blend
+        and (sm['carState'].standstill or previous_should_stop and v_ego < self.CP.vEgoStopping)):
+      # Finish an already initiated stop through low-speed estimator noise.
+      # A moving/lost/changed lead clears the trajectory in the MPC update.
+      self.output_should_stop = True
+      output_a_target = min(0., output_a_target)
 
     for idx in range(2):
       accel_clip[idx] = np.clip(accel_clip[idx], self.prev_accel_clip[idx] - 0.05, self.prev_accel_clip[idx] + 0.05)

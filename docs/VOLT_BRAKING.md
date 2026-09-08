@@ -1,171 +1,203 @@
-# Volt braking investigation and locked candidate
+# Volt stopping candidate and qualification
 
-The September 7 recordings show controller overshoot earlier in the approach,
-followed by weak braking, speed rebound, and an abrupt final stop. Manual finishes
-spend approximately 1.46–1.83 seconds below 2 m/s, versus 2.86–4.16 seconds in the
-three autonomous recordings. These are different traffic situations, not matched
-trials. Stronger deceleration earlier can still produce a smoother final stop.
+The September 7 recordings show weak low-speed braking, speed rebound, and an
+abrupt finish. The original manual examples take approximately 1.46–1.83 seconds
+from 2 to 0.3 m/s, versus 2.86–4.16 seconds for the three autonomous stops. These
+are different traffic situations, not matched trials. The factory ASCM is
+physically powered down while openpilot is engaged in this installation.
 
-The factory ASCM is physically powered down while openpilot is engaged in this
-installation. Openpilot supplies the brake and powertrain commands. ASCM naming
-in platform/DBC files describes the supported architecture, not another active
-controller. This work does not change the hardware installation.
+The candidate combines a finite stopping trajectory with earlier friction
+compensation as regeneration fades. It remains default-off. The actual current
+qualification, failed checks, and replay traces are available at
+`http://192.168.99.189:8088/#braking`. Offline improvement alone does not establish
+that the car brakes better. No candidate software or settings were installed on
+the device during development.
 
-## Release status
+## September 8 result
 
-This is a **locked, default-off prototype**, not a driving update.
-`VoltLongitudinalMode` defaults to `stock`; the startup configurator refuses
-Smooth and Personal while the versioned profiles remain unvalidated. The
-workstation fits are never automatically loaded onto the car. No on-device
-software, settings, or CAN commands were changed during this investigation.
+The packaged candidate is `c75f28f6049d703b`. It passes 55 of 78 report checks;
+12 offline qualification checks fail, so neither Test nor Personal is available.
+This count includes diagnostic comparisons and must not be read as a safety score.
 
-The pressure model improves low-speed response identification but still does not
-reproduce the complete recorded response. The personal planner does not yet
-consistently match manual finishing pace. The no-regen fallback avoids the
-simulated contact observed without it, but that stress-case finish remains too
-abrupt. The report keeps those failures visible and `deployment_ready` false.
-Physical holding, rollback, engine-on/regen-limit behavior, and new independent
-manual examples remain outstanding.
+| Recorded stop | Recorded low-speed phase | Candidate replay | Candidate final jerk |
+| --- | ---: | ---: | ---: |
+| 08:58:59 | 2.86 s | 1.68 s | 1.75 m/s³ |
+| 10:27:10 | 3.03 s | 1.77 s | 4.37 m/s³ |
+| 10:30:01 | 4.16 s | 2.34 s | 1.26 m/s³ |
 
-Review: `http://192.168.99.189:8088/#braking`.
+The second replay still exceeds the 1.82 m/s³ manual jerk ceiling and stops at
+3.94 m, outside the 4.5 ±0.5 m target. Reduced-regen stress finishes also exceed
+the comfort limit. All simulated traffic/scenario minimum-distance and solver
+checks pass, including holding and lead pull-away, but comfort remains incomplete.
 
-## Data and measurement corrections
+Recorded-command reproduction predicts stopping 1.53–4.23 seconds too early.
+The reserved route has no qualifying low-speed autonomous response samples;
+its manual curve error is 0.63 m/s² against the provisional 0.5 limit. These
+limitations block qualification even though average acceleration error is small.
+More tuning against this plant cannot establish real braking quality. The next
+required evidence is a better identified low-speed pressure/regen response,
+followed by controlled physical validation after the offline gates pass.
 
-Extraction version 4 retains exact service timestamps, both complete radar
-leads, cruise settings, control parameters, native telemetry, and camera frame
-indices. Raw tracks now receive their freshness timestamp and are attached only
-while fresh. `imu_ax` and `device_pitch` remain explicitly device-frame values;
-`vehicle_ax`/`vehicle_pitch` use the same PoseCalibrator as controlsd.
-`controller_pitch` is the calibrated orientation actually published in carControl.
-Invalid calibration never becomes an assumed flat-road measurement.
+Verification: 100 controller/extraction/replay/GM tests with 23 subtests;
+4 upstream longitudinal tests with 58 maneuver subtests; web server and browser
+tests; production web build; Ruff and whitespace checks. Unit tests establish
+implementation behavior, not driving qualification.
 
-Commands are held from their original message timestamps, without interpolation
-that borrows a future command. An initial incomplete retained window is trimmed
-to its first complete observation; internal observation gaps over 0.3 seconds
-reject a replay. Native and simulated jerk use the same centered 0.2-second
-difference and -3 to +0.5-second finishing window. Final low-speed duration counts
-only the last contiguous phase. Braking onset means the first acceleration below
--0.3 m/s² **within the retained window**, not proof that braking began there.
+## Controller behavior
 
-Event identities, both road-camera clips, manual decisions, and ALPR annotations
-are preserved. The original 204 files remain in the checksummed archive outside
-Git. Additional archive roots can be included without replacing the first routes.
+A fresh stationary radar lead with stable identity for 0.5 seconds, age at most
+0.3 seconds, and model probability at least 0.9 can activate personalization.
+A finite position/speed/acceleration reference ends at the fitted gap. Its clock
+advances even when the car lags behind; small radar/odometry corrections adjust
+the endpoint without restarting that clock. The reference supplies MPC comfort
+costs while retaining collision penalties, actuator limits, and override behavior.
+Unsupported speeds, infeasible comfort stops, stale observations, changed or
+moving leads, and a closer secondary lead use the baseline planner.
 
-## Three distinct experiments
+The manual speed/deceleration curve is shared by the planner and final stopping
+controller. Positive integral correction diminishes with speed so it cannot
+cancel the final taper. A completed stationary-lead stop holds through estimator
+noise. Lead pull-away still permits the normal starting transition.
 
-1. **Recorded commands:** replay actual gas/regen and friction commands through
-   the response model. Check pressure, acceleration, speed, peak deceleration,
-   final jerk, and stop timing. This is the model-reproduction gate.
-2. **Recorded planner targets:** rerun the controller against the old targets.
-   This remains a diagnostic; it cannot establish a better planner's behavior.
-3. **Reconstructed traffic:** integrate recorded wheel odometry and radar range
-   into lead motion, then run the real planner, LongControl, and GM CarController
-   using the simulated ego speed and distance. Both observed leads are retained.
-   A primary track change trims the window; ambiguous final identities and gaps
-   reject it. The 10:27 window begins after its vision-to-radar track transition.
+The friction allocator uses a bounded inverse pressure model with nonlinear
+command response and speed-dependent gain. It anticipates speed loss across the
+response horizon when crediting regen and allocating friction. A delayed-demand
+observer progressively reduces regen credit when measured braking falls short;
+it does not wait for a fixed 0.8-second deficit and then switch. This is feedback
+compensation, not an identified battery-state model. Engine-on and unknown engine
+states receive conservative regen credit. Stock command limits, minimum holding
+brake, urgent full braking, and pedal override remain in force.
 
-Traffic replay assumes the lead does not react to the simulated ego vehicle.
-Radar/odometry noise and the response-model errors limit interpretation. It does
-not prove a counterfactual road outcome. Generated CAN messages are discarded;
-the simulator never opens a CAN socket. Its forward-speed clamp does not validate
-rollback resistance. A finish outside the recorded window is not established.
+## Data and replay
 
-## Response and personal-profile fitting
+Extraction version 5 preserves original service timestamps, both radar leads,
+cruise settings, model throttle probabilities, force-deceleration state, live
+steering offset, calibrated vehicle acceleration/pitch, pressure, engine state,
+and actuator commands. Unknown or stale telemetry is not silently treated as a
+fresh zero. Commands use causal zero-order hold. Replay rejects internal gaps
+rather than borrowing future measurements.
 
-The host-only pressure model separates application/release dynamics and command
-deadband, with a speed-dependent pressure gain. Low-speed samples receive an
-explicit, reported fit weight. A second stage relates measured pressure, a
-monotone regen-fade hypothesis, creep, and calibrated grade to vehicle-frame IMU
-acceleration. Pressure values are raw CAN units normalized by 30000, not physical
-pressure. The simulator uses GM wheel-speed quantization and the production speed
-Kalman filter, rather than an arbitrary acceleration filter.
+Three experiments answer different questions:
 
-The offline candidate inverts the training calibration with bounded commands and
-speed-dependent friction gain/deadband. The on-device profile constants stay at
-their locked baseline. The candidate retains bounded integral correction,
-feedback during stopping, stock minimum holding force, and full-braking command
-authority while moving. A persistent response deficit under a stable braking
-command reduces credited regeneration after 0.8 seconds; the credit remains
-bounded between zero and one and resets on disengagement. This is a feedback
-fallback, not an identified battery-state model. Its comfort and physical behavior
-remain subject to the same release gates.
+1. Recorded CAN commands through the plant test response-model reproduction.
+2. Recorded planner targets through the controller are a diagnostic comparison.
+3. Reconstructed lead motion runs the real planner, LongControl, and GM
+   CarController against simulated ego motion. Both leads and native throttle
+   gating are retained; controller state is seeded from the recording.
 
-Manual samples fit a bounded speed/deceleration curve. Integrating v/b(v) yields
-stopping distance; a monotone cubic representation enters the MPC **comfort**
-objective. The collision-distance penalty and emergency limits are unchanged.
-Personalization requires a radar lead with stable identity for 0.5 seconds,
-observation age ≤0.3 seconds, lead speed below 0.5 m/s, and model probability ≥0.9.
-It blends in over 0.5 seconds, tapers out at the supported speed limit, and disables
-immediately for stale, moving, or changed leads. The observed manual gap is
-constrained to the existing 4.5–8 m profile range; actual outcomes are reported
-separately. Unsupported speeds retain the baseline objective.
+Traffic reconstruction assumes the lead does not react to the simulated ego
+vehicle. Generated CAN messages are discarded; replay never opens a CAN socket.
+A stop outside the retained recording window is incomplete, with no fabricated
+finish duration, jerk, or settled gap. A forward-speed clamp cannot prove physical
+rollback resistance; grade checks additionally inspect holding-force margin.
 
-Only two manual examples currently qualify. The first route seeds the offline
-fit and the second is regression evaluation. `study-split.json` records already
-inspected routes and automatically reserves the first new route with at least
-three qualifying manual stops **before fitting**. That reservation is immutable.
-The approach fit excludes it, reports support by independent event/speed band,
-and requires at least three training examples per fitted band for release support.
-Manual stops teach style; they are not openpilot command-response calibration.
-The current approximately ten-example collection target is not itself a proof
-of calibration quality. Review offers at most five automatically selected clips
-at a time and never marks unreviewed examples as approved.
+The original 51 segments contain 204 verified log/video files. Six newer trips
+add 211 segments and 422 verified rlog/qlog files (2,232,547,658 bytes). New road
+video is selected separately to avoid delaying log analysis. Recordings, clips,
+checksums, reports, and annotations stay outside Git under
+`/mnt/algo14/comma3-alpr/braking`. Event IDs and entered decisions are preserved.
 
-## Review interfaces
+## Fitting and independent evidence
 
-The existing native event, decision, and validation APIs remain compatible.
-The validation report now separates reproduction, fixed-target diagnostics,
-traffic cases, scenario checks, collection support, and model limitations.
-`GET /api/braking/simulation/:id/:mode` serves only the allowlisted command,
-target, and traffic traces. Invalid identifiers/modes return 404. The browser
-compares recorded, stock-model, brake-candidate, and personal-approach speed,
-acceleration, and gap over the whole approach or final five seconds. It shows
-stop completion, duration, jerk, rebound, gap, and retained-window onset separately.
+Pressure fitting separates application and release lag, command deadband,
+nonlinearity, and speed-dependent gain. Physical response fitting combines
+calibrated acceleration, predicted pressure, and integrated wheel-speed change
+within uninterrupted autonomous episodes. Engine-unknown observations are
+excluded. Pressure is normalized raw CAN data, not a physical pressure unit.
+Regen fade is selected within a bounded monotone family.
 
-## Reproduce locally
+The primary model pools training routes. A second model uses a route subset;
+validation changes the plant while keeping controller calibration fixed. The
+report explicitly labels inspected regression data. A reserved route is excluded
+from fitting. `study-split.json` preserves that reservation; before fitting newly
+archived trips, it selects the new route with the most qualifying manual stops
+(ties use route order). Sparse reservation does not relax release support gates.
 
-Use the existing workstation environment and host-only requirements in
-`tools/profiling/requirements-braking.txt`. Keep recordings/reports on `/mnt/algo14`.
+The September 8 archive has nine qualifying manual stops: seven for fitting and
+two on the reserved trip `00000027--420d6be12e`. Manual stops teach style, not
+openpilot command response. Support is counted by independent event and speed
+band. The held-out curve error is reported separately, and held-out examples do
+not set the tuning acceptance envelope. Review offers a small selection of
+examples without automatically marking them representative.
+
+## Version-bound startup and rollback
+
+`selfdrive/car/volt_candidate.json` contains calibration, the manual curve,
+controller/validation source hashes, qualification checks, and optional physical
+evidence. Its identity binds coefficients and source files; adding evaluation
+evidence does not change the tested controller identity. Changing implementation
+or coefficients invalidates qualification. Validation refuses to export if those
+sources changed while it ran.
+
+The parked settings UI offers **Stock**, **Test**, and **Personal**:
+
+- Stock is the default and rollback choice.
+- Test requires all offline response, traffic, nominal, stress, and independent
+  response gates. It is intended for supervised empty-area checks.
+- Personal additionally requires release support and version-matched physical
+  evidence for stopping, holding, override, grade, engine-on, reduced regen,
+  driver comfort, and runtime deadlines.
+
+Card verifies the bundle and snapshots the selected calibration once at startup
+in `VoltLongitudinalActiveBundle`. Planner and controller use that same snapshot.
+Missing or stale bundles cannot silently enable an experimental profile. No
+fitting, network access, or file reads occur inside the control loop.
+
+Physical evidence is a reviewed attestation, not an automatic driving-quality
+classifier. Each check names a route and recording SHA-256; placeholders are
+rejected. Do not mark a check passed without inspecting the matching recording
+and source version. `vehicle-checks-<profile-id>.json` templates are never
+silently overwritten.
+
+## CPU and scheduling verification
+
+Source was checked locally and on the parked comma3: card, controlsd, and
+selfdrived use core 4/FIFO 53; plannerd and radard share core 5/FIFO 51; modeld uses
+core 7/FIFO 54; camerad uses core 6; pandad uses core 3/FIFO 54; UI uses core 0.
+The finite trajectory builder adds work on the planner/radar core. Its bounded
+50 ms integration grid and at most three distance corrections replace repeated
+NumPy calls and an iterative search in its inner loop.
+
+An ephemeral parked-device helper benchmark on core 2, ordinary scheduling and
+niceness 19, measured worst construction times of about 1.1 ms at 2–5 m/s and
+4.7 ms at the tested supported maximum, versus about 32 ms before optimization.
+The device had only cores 0–3 online while offroad. This verifies helper cost,
+not whole-process timing on core 5. Actual planner/radar deadlines, thermals, and
+memory must be checked during controlled operation. Affinity does not isolate
+shared thermal or memory resources. No device CPU configuration was changed.
+
+## Acceptance and reproduction
+
+Response reproduction requires peak-acceleration error ≤0.5 m/s², jerk at
+70–130% of the recording, stop timing within 0.5 seconds, and acceleration/speed
+RMSE ≤0.5. Routine finishing must meet manual duration ±0.35 seconds, the manual
+jerk ceiling, rebound ≤0.05 m/s, completed stop, and target gap ±0.5 m together.
+No contact or solver failure is necessary but insufficient. Slow approaches,
+cut-in, lead loss/pull-away, stop/resume, grades, additional delay, no regen,
+engine-on, override, and urgent braking remain explicit scenarios.
+
+Use the existing workstation environment. Build the 41-parameter MPC solver
+and Params extension before running the revised planner:
 
 ```sh
-.venv/bin/python tools/profiling/volt_braking.py \
-  /mnt/algo14/comma3-alpr/braking/2026-09-07/raw \
-  /mnt/algo14/comma3-alpr/braking/review
-# For new trips, repeat with --additional-raw /path/to/new/archive/raw --video.
-.venv/bin/python tools/profiling/volt_response_fit.py \
-  /mnt/algo14/comma3-alpr/braking/review
 PATH="$PWD/.venv/bin:$PATH" .venv/bin/scons --minimal -j8 \
+  common/params_pyx.so \
   selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so
-.venv/bin/python tools/profiling/validate_volt_braking.py \
-  /mnt/algo14/comma3-alpr/braking/review
-.venv/bin/pytest -n0 -q tools/profiling/tests/test_volt_replay.py \
-  tools/profiling/tests/test_volt_style.py tools/profiling/tests/test_volt_braking.py \
-  selfdrive/controls/tests/test_volt_stopping.py selfdrive/controls/tests/test_longcontrol.py \
-  opendbc_repo/opendbc/car/gm/tests
-.venv/bin/pytest -n0 -q selfdrive/test/longitudinal_maneuvers/test_longitudinal.py
+.venv/bin/python -m tools.profiling.volt_braking \
+  /mnt/algo14/comma3-alpr/braking/2026-09-07/raw \
+  /mnt/algo14/comma3-alpr/braking/review \
+  --additional-raw /mnt/algo14/comma3-alpr/braking/2026-09-08/raw
+.venv/bin/python -m tools.profiling.volt_response_fit /mnt/algo14/comma3-alpr/braking/review
+.venv/bin/python -m tools.profiling.validate_volt_braking /mnt/algo14/comma3-alpr/braking/review
+.venv/bin/python -m tools.profiling.export_volt_candidate /mnt/algo14/comma3-alpr/braking/review
+.venv/bin/pytest -n0 -q tools/profiling/tests/test_volt_*.py \
+  selfdrive/controls/tests/test_volt_stopping.py \
+  selfdrive/controls/tests/test_longcontrol.py opendbc_repo/opendbc/car/gm/tests
 npm --prefix tools/alpr/web test
 npm --prefix tools/alpr/web run build
 node tools/alpr/web/braking.browser.test.mjs
 ```
 
-The MPC parameter count changes from 8 to 41, so rebuild its generated solver
-before running the revised planner. There is no cereal or panda safety-schema
-change. The browser test uses isolated decisions and read-only recording fixtures.
-
-## Acceptance and controlled validation
-
-Reproduction requires peak-acceleration error ≤0.5 m/s², final jerk 70–130% of the
-recording, stop timing within 0.5 seconds, and acceleration/speed RMSE ≤0.5 in their
-respective units. Average error alone cannot release a profile. Routine finishing
-pace uses the manual duration range ±0.35 seconds, manual jerk ceiling, speed
-rebound ≤0.05 m/s, and a completed stop. These are provisional design targets.
-
-Scenarios include stationary/decelerating leads, cut-in, lead loss, pull-away,
-stop/resume, grades, extra delay, missing regen, engine-on, pedal override, and
-full-braking requests. No contact/solver failure is necessary but not sufficient;
-reduced-braking scenarios also retain explicit comfort checks.
-
-Only after offline gates pass should a separately reviewed controlled vehicle
-trial evaluate actual response, holding, rollback, and brake limits. Ordinary
-traffic deployment follows physical validation and a reviewed profile release.
-Stock remains the default and the offroad rollback option.
+Packaging a bundle does not install it or select Test. Failed offline checks keep
+Test unavailable. Normal traffic use requires subsequent physical validation;
+the user has agreed to supervised empty-area stopping tests after qualification.

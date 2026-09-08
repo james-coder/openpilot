@@ -17,7 +17,7 @@ from opendbc.can import CANParser
 from openpilot.tools.profiling.braking_audit import find_events
 from openpilot.selfdrive.locationd.helpers import Pose, PoseCalibrator
 
-EXTRACT_VERSION = 4
+EXTRACT_VERSION = 5
 
 
 def lead_snapshot(lead):
@@ -111,7 +111,8 @@ def extract_native(path):
       latest[k] = {'applied_accel': r.accel, 'applied_gas': r.gas, 'applied_brake': r.brake}
     elif k == 'controlsState' and e.valid:
       r = e.controlsState
-      latest[k] = {'state': str(r.longControlState), 'p': r.upAccelCmd, 'i': r.uiAccelCmd, 'f': r.ufAccelCmd}
+      latest[k] = {'state': str(r.longControlState), 'p': r.upAccelCmd, 'i': r.uiAccelCmd, 'f': r.ufAccelCmd,
+                   'force_decel': r.forceDecel}
     elif k == 'longitudinalPlan' and e.valid:
       r = e.longitudinalPlan
       latest[k] = {
@@ -148,8 +149,11 @@ def extract_native(path):
       latest[k] = {
         'model_a': r.action.desiredAcceleration,
         'model_stop': r.action.shouldStop,
+        'gas_press_probs': list(r.meta.disengagePredictions.gasPressProbs),
         'model_leads': [{'prob': p.prob, 'd': p.x[0] if len(p.x) else None, 'v': p.v[0] if len(p.v) else None} for p in r.leadsV3],
       }
+    elif k == 'liveParameters':
+      latest[k] = {'angle_offset': e.liveParameters.angleOffsetDeg} if e.valid else {}
     elif k == 'liveCalibration':
       if e.valid and len(e.liveCalibration.rpyCalib) == 3:
         calibrator.feed_live_calib(e.liveCalibration)

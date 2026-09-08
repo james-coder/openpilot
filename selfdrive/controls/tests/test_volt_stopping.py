@@ -113,6 +113,16 @@ def test_stationary_noise_does_not_ratchet_holding_brake():
   assert gas == -650 and brake >= 133
 
 
+def test_carried_positive_integral_cannot_cancel_the_final_taper():
+  lc = LongControl(volt_params(True))
+  cs = car.CarState.new_message(vEgo=0.2, aEgo=-0.3)
+  lc.update(True, cs, -0.3, True, (-4.0, 2.0))
+  lc.pid.i = PROFILE.integral_limit
+  result = lc.update(True, cs, -0.3, True, (-4.0, 2.0))
+  assert result < -0.15
+  assert lc.pid.i <= PROFILE.integral_limit * cs.vEgo / 2
+
+
 @pytest.mark.parametrize('pitch', [-0.1, -0.05, 0.0, 0.05, 0.1, float('nan')])
 def test_grade_feedforward_is_finite_bounded_and_continuous(pitch):
   params = CarControllerParams(volt_params())

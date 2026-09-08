@@ -54,7 +54,10 @@ class LongControl:
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
-    self.volt_stopping = VoltStopping()
+    from openpilot.selfdrive.car.volt_profile import runtime_bundle
+    bundle = runtime_bundle(CP)
+    self.volt_profile = bundle['calibration'] if bundle else PROFILE
+    self.volt_stopping = VoltStopping(self.volt_profile)
     self.stock_ki = self.pid._k_i
 
   def reset(self):
@@ -66,7 +69,9 @@ class LongControl:
     self.pid.pos_limit = accel_limits[1]
 
     volt_braking = volt_enabled(self.CP) and (a_target < 0. or should_stop or self.last_output_accel < 0.)
-    self.pid._k_i = [[0.], [PROFILE.braking_ki]] if volt_braking else self.stock_ki
+    profile = self.volt_profile
+    positive_limit = profile.integral_limit * float(np.clip(CS.vEgo / 2., 0., 1.))
+    self.pid._k_i = [[0.], [profile.braking_ki]] if volt_braking else self.stock_ki
     previous_state = self.long_control_state
     self.long_control_state = long_control_state_trans(self.CP, active, self.long_control_state, CS.vEgo,
                                                        should_stop, CS.brakePressed,
@@ -95,13 +100,13 @@ class LongControl:
       if volt_braking:
         # Bumpless departure from stop control and bounded delayed correction.
         if previous_state == LongCtrlState.stopping:
-          self.pid.i = float(np.clip(self.last_output_accel-a_target, -PROFILE.integral_limit, PROFILE.integral_limit))
-        self.pid.i = float(np.clip(self.pid.i, -PROFILE.integral_limit, PROFILE.integral_limit))
+          self.pid.i = float(np.clip(self.last_output_accel-a_target, -profile.integral_limit, positive_limit))
+        self.pid.i = float(np.clip(self.pid.i, -profile.integral_limit, positive_limit))
       error = a_target - CS.aEgo
       output_accel = self.pid.update(error, speed=CS.vEgo,
                                      feedforward=a_target)
       if volt_braking:
-        self.pid.i = float(np.clip(self.pid.i, -PROFILE.integral_limit, PROFILE.integral_limit))
+        self.pid.i = float(np.clip(self.pid.i, -profile.integral_limit, positive_limit))
         output_accel = self.pid.p + self.pid.i + self.pid.f
 
     if volt_braking and active and not CS.standstill and a_target <= accel_limits[0]:

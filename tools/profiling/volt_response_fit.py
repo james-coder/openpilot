@@ -21,9 +21,9 @@ def basis(v):
   return np.column_stack([np.interp(v, SPEED, np.eye(len(SPEED))[i]) for i in range(len(SPEED))])
 
 
-def load_routes(cache):
+def load_routes(cache, route=None):
   grouped = {}
-  for path in sorted(cache.glob('*.json.gz')):
+  for path in sorted(cache.glob((route + '--' if route else '') + '*.json.gz')):
     data = json.loads(gzip.decompress(path.read_bytes()))
     grouped.setdefault(data['segment'].rsplit('--', 1)[0], []).extend(data['rows'])
   return {key: sorted({r['t']: r for r in rows}.values(), key=lambda r: r['t']) for key, rows in grouped.items()}
@@ -33,9 +33,12 @@ def prepare(rows):
   # Uniform grid only for fitting the dynamic plant; original samples stay intact.
   t = np.array([r['t'] for r in rows])
   grid = np.arange(t[0], t[-1], 0.05)
+  services = {'applied_brake': 'carOutput', 'applied_gas': 'carOutput', 'engine_rpm': 'engine',
+              'controller_pitch': 'carControl', 'active': 'carControl', 'pressure': 'can_368',
+              'vehicle_ax': 'livePose', 'regen_raw': 'can_560'}
 
   def channel(key, default=0.0, discrete=False):
-    service = {'applied_brake': 'carOutput', 'applied_gas': 'carOutput', 'engine_rpm': 'engine'}.get(key)
+    service = services.get(key)
     good = sorted({r.get('sample_times', {}).get(service, r['t']): r[key] for r in rows if isinstance(r.get(key), (int, float))}.items())
     if not good:
       return np.full(len(grid), default)
@@ -48,7 +51,8 @@ def prepare(rows):
   nearest = np.clip(np.searchsorted(t, grid, side='right') - 1, 0, len(rows) - 1)
 
   def fresh(key):
-    records = [(r['t'], r[key]) for r in rows if isinstance(r.get(key), (int, float, bool))]
+    records = sorted({r.get('sample_times', {}).get(services.get(key), r['t']): r[key]
+                      for r in rows if isinstance(r.get(key), (int, float, bool))}.items())
     if not records:
       return np.zeros(len(grid), dtype=bool), np.zeros(len(grid))
     ts, values = np.array(records).T
@@ -64,7 +68,7 @@ def prepare(rows):
   mask &= np.array([rows[i].get('active') is True for i in nearest])
   v = channel('v')
   a = channel('a')
-  mask &= (v > 0.4) & (v < 24) & (np.abs(channel('steering_angle')) < 30)
+  mask &= (v > 0.1) & (v < 24) & (np.abs(channel('steering_angle')) < 30)
   return {
     't': grid,
     'v': v,
@@ -73,6 +77,8 @@ def prepare(rows):
     'regen': np.clip(-channel('applied_gas', discrete=True) / 650.0, 0, 1),
     'gas': np.clip(channel('applied_gas', discrete=True) / 1018.0, 0, 1),
     'engine': channel('engine_rpm', discrete=True) > 0,
+    'engine_valid': fresh('engine_rpm')[0],
+    'vraw': channel('vraw'),
     'mask': mask,
     'pitch': channel('controller_pitch'),
     'pressure': channel('pressure') / 30000.0,
@@ -98,6 +104,22 @@ def features(data, delay, tau):
   brake = lag(data['brake'])
   b = basis(v)
   return np.column_stack([lag(data['gas']), -brake, -b * regen[:, None], np.clip(1 - v / 2.0, 0, 1), np.ones(len(v))])
+
+
+def combine_prepared(parts):
+  """Pool fitting grids with an invalid four-second reset between drives."""
+  if not parts:
+    raise ValueError('No training routes')
+  result = {}
+  for key in parts[0]:
+    if key == 't':
+      continue
+    values = []
+    for part in parts:
+      values.extend((np.zeros(80, dtype=part[key].dtype), part[key]))
+    result[key] = np.concatenate(values)
+  result['t'] = np.arange(len(result['v'])) * .05
+  return result
 
 
 def fit_response(routes):
@@ -205,8 +227,8 @@ def study_split(root, index):
   routes = sorted({e['route'] for e in index['events']})
   split = json.loads(path.read_text()) if path.exists() else {'version': 1, 'regression_routes': routes, 'holdout_route': None}
   if split['holdout_route'] is None:
-    eligible = [r for r in routes if r not in split['regression_routes']
-                and sum(e['recommended_manual'] and e['route'] == r for e in index['events']) >= 3]
+    counts = {r: sum(e['recommended_manual'] and e['route'] == r for e in index['events']) for r in routes}
+    eligible = sorted((r for r in routes if r not in split['regression_routes'] and counts[r]), key=lambda r: (-counts[r], r))
     if eligible:
       split['holdout_route'] = eligible[0]
   atomic_json(path, split)
@@ -215,9 +237,8 @@ def study_split(root, index):
 
 def approach_curve(examples, samples, split):
   training = [e for e in examples if e['route'] != split['holdout_route']]
-  # During the seed experiment keep the already inspected second route for regression scoring.
-  if split['holdout_route'] is None and training:
-    training = [e for e in training if e['route'] == min(e['route'] for e in training)]
+  # Both old trips have already been inspected. Use their manual examples for
+  # the candidate; only a newly reserved route is a blind evaluation.
   speed, decel, support = [0.0], [0.18], []
   for lo, hi in ((0.3, 0.5), (0.5, 1), (1, 2), (2, 5), (5, 10), (10, 20)):
     per_event, velocities = [], []
@@ -298,7 +319,8 @@ def fit_style(root):
     'stopping_candidate': fit_stopping_curve(examples, samples),
     'approach_candidate': approach_curve(examples, samples, split),
     'split': split,
-    'collection': {'target_examples': 10, 'qualifying_examples': len(examples), 'review_ids': [e['id'] for e in examples if not e['reviewed']][:5]},
+    'collection': {'target_examples': 10, 'qualifying_examples': len(examples),
+                   'review_ids': [e['id'] for e in examples if not e['reviewed'] and e['route'] != split['holdout_route']][:5]},
     'validated': False,
     'runtime_applied': False,
     'reason': (
@@ -317,9 +339,18 @@ def main():
   fit = fit_response(routes)
   from openpilot.tools.profiling.volt_pressure_model import fit_pressure_response
   names = sorted(routes)
-  pressure = fit_pressure_response(prepare(routes[names[0]]), prepare(routes[names[1]]), names[0], names[1])
+  prepared = {name: prepare(routes[name]) for name in names}
+  pressure = fit_pressure_response(combine_prepared(list(prepared.values())), prepared[names[-1]], 'pooled-training', names[-1])
+  pressure['train_routes'] = names
+  pressure['holdout_kind'] = 'inspected regression; not independent of calibration'
   fit['pressure_model'] = pressure
-  fit['version'] = 2
+  alternate_names = names[1::2]
+  alternate = fit_pressure_response(combine_prepared([prepared[name] for name in alternate_names]), prepared[names[0]],
+                                   'route-subset', names[0])
+  alternate['train_routes'] = alternate_names
+  alternate['holdout_kind'] = 'unfitted route; previously inspected'
+  fit['independent_pressure_model'] = alternate
+  fit['version'] = 3
   atomic_json(args.review / 'response-fit.json', fit)
   atomic_json(args.review / 'style-fit.json', style)
   print(json.dumps(fit, indent=2))

@@ -273,6 +273,8 @@ class LongitudinalMpc:
     self.set_weights()
     self.personal_track = None
     self.personal_stable_time = self.personal_blend = 0.
+    if getattr(self, 'stop_trajectory', None) is not None:
+      self.stop_trajectory.reset()
 
   def set_personal_curve(self, curve):
     if curve is not None:
@@ -289,7 +291,14 @@ class LongitudinalMpc:
         if abs(values[0] - previous) > 1e-5 or min(values) < -1e-6 or np.min(np.diff(values)) < -1e-6:
           raise ValueError('Personal stopping distance must be continuous and monotone')
         previous = values[-1]
+      speed, decel = np.asarray(curve['speed']), np.asarray(curve['deceleration'])
+      if (speed.ndim != 1 or len(speed) < 2 or speed.shape != decel.shape or not np.isfinite(speed).all()
+          or not np.isfinite(decel).all() or speed[0] != 0 or not np.all(np.diff(speed) > 0)
+          or not np.all((decel >= .1) & (decel <= 2.5))):
+        raise ValueError('Invalid personal deceleration curve')
     self.personal_curve = curve
+    from openpilot.selfdrive.controls.lib.volt_trajectory import StopTrajectory
+    self.stop_trajectory = StopTrajectory(curve) if curve is not None else None
     self.personal_track = None
     self.personal_stable_time = self.personal_blend = 0.
 
@@ -333,6 +342,8 @@ class LongitudinalMpc:
     a_change_cost = A_CHANGE_COST if prev_accel_constraint else 0
     cost_weights = [X_EGO_OBSTACLE_COST, X_EGO_COST, V_EGO_COST, A_EGO_COST, jerk_factor * a_change_cost, jerk_factor * J_EGO_COST]
     constraint_cost_weights = [LIMIT_COST, LIMIT_COST, LIMIT_COST, DANGER_ZONE_COST]
+    self.normal_cost_weights = cost_weights
+    self.constraint_cost_weights = constraint_cost_weights
     self.set_cost_weights(cost_weights, constraint_cost_weights)
 
   def set_cur_state(self, v, a):
@@ -374,7 +385,8 @@ class LongitudinalMpc:
     lead_xv = self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau)
     return lead_xv
 
-  def update(self, radarstate, v_cruise, personality=log.LongitudinalPersonality.standard, radar_age=float('inf')):
+  def update(self, radarstate, v_cruise, personality=log.LongitudinalPersonality.standard, radar_age=float('inf'), measured_state=None,
+             personal_active=True):
     t_follow = get_T_FOLLOW(personality)
     v_ego = self.x0[1]
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
@@ -413,6 +425,34 @@ class LongitudinalMpc:
     self.params[:,6] = self.stop_distance
     self.params[:,7] = self.comfort_brake
     self.update_personal(radarstate, radar_age)
+    if not personal_active:
+      # Observe lead identity while disengaged, but do not start a stop clock.
+      self.personal_blend = 0.
+      self.params[:, 8] = 0.
+
+    trajectory = getattr(self, 'stop_trajectory', None)
+    if trajectory is not None:
+      lead = radarstate.leadOne
+      secondary = radarstate.leadTwo
+      clear = not secondary.status or secondary.dRel >= lead.dRel
+      if self.personal_blend and clear:
+        measured_v, measured_a = measured_state if measured_state is not None else self.x0[1:3]
+        reference = trajectory.update(T_IDXS, measured_v, measured_a, lead.dRel, self.dt)
+        if reference is not None:
+          weights = list(self.normal_cost_weights)
+          weights[1:4] = np.array([20., 60., 30.]) * self.personal_blend
+          self.set_cost_weights(weights, self.constraint_cost_weights)
+          self.yref[:, 1:4] = reference
+          for i in range(N):
+            self.solver.cost_set(i, 'yref', self.yref[i])
+          self.solver.cost_set(N, 'yref', self.yref[N][:COST_E_DIM])
+        else:
+          self.params[:, 8] = 0.
+          self.set_cost_weights(self.normal_cost_weights, self.constraint_cost_weights)
+      else:
+        trajectory.reset()
+        self.params[:, 8] = 0.
+        self.set_cost_weights(self.normal_cost_weights, self.constraint_cost_weights)
 
     self.run()
     if (np.any(lead_xv_0[FCW_IDXS,0] - self.x_sol[FCW_IDXS,0] < CRASH_DISTANCE) and

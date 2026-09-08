@@ -31,7 +31,7 @@ def volt_params(smooth=False, recorded=None):
         setattr(cp.longitudinalTuning, field, values)
     else:
       setattr(cp, key, value)
-  cp.flags &= ~int(VoltFlags.SMOOTH | VoltFlags.PERSONAL)
+  cp.flags &= ~int(VoltFlags.SMOOTH | VoltFlags.PERSONAL | VoltFlags.TEST)
   if smooth:
     # Simulation only: startup configure() refuses unvalidated profiles.
     cp.flags |= int(VoltFlags.SMOOTH)
@@ -39,7 +39,8 @@ def volt_params(smooth=False, recorded=None):
 
 
 class VoltPlant:
-  def __init__(self, fit, speed=0.0, smooth=False, grade=0.0, regen_factor=1.0, extra_delay=0.0, stopping_profile=None, recorded_params=None):
+  def __init__(self, fit, speed=0.0, smooth=False, grade=0.0, regen_factor=1.0, extra_delay=0.0, stopping_profile=None, recorded_params=None,
+               controller_profile=None):
     if stopping_profile is not None and not smooth:
       raise ValueError('A simulated stopping profile requires the candidate controller')
     self.CP = volt_params(smooth, recorded_params)
@@ -50,7 +51,8 @@ class VoltPlant:
       self.long.volt_stopping = VoltStopping(stopping_profile)
     self.controller = CarController(DBC[CAR.CHEVROLET_VOLT], self.CP)
     if smooth and 'pressure_model' in fit:
-      self.controller.volt_profile = allocator_profile(fit['pressure_model'])
+      self.controller.volt_profile = controller_profile or allocator_profile(fit['pressure_model'])
+      self.long.volt_profile = self.controller.volt_profile
     self.state = car.CarState.new_message(vEgo=speed)
     self.cs = SimpleNamespace(
       out=self.state, loopback_lka_steering_cmd_ts_nanos=0, loopback_lka_steering_cmd_updated=False, pt_lka_steering_cmd_counter=0, volt_engine_running=False
@@ -123,6 +125,8 @@ class VoltPlant:
       'i': float(self.long.pid.i),
       'state': str(self.long.long_control_state),
       'pressure': self.dynamics.pressure * 30000 if self.dynamics is not None else None,
+      'hold_margin': self.dynamics.hold_margin if self.dynamics is not None else None,
+      'regen_credit_scale': self.controller.volt_regen_response.scale,
       'active': self.cc.longActive,
       'should_stop': bool(should_stop),
     }
@@ -154,11 +158,15 @@ def replay_targets(event, fit, smooth=False, stopping_profile=None):
 
 def closed_loop_stop(
   fit, speed=10.0, distance=45.0, smooth=False, grade=0.0, regen_factor=1.0, extra_delay=0.0, personality=log.LongitudinalPersonality.standard,
-  stopping_profile=None, approach_profile=None, scenario='stationary',
+  stopping_profile=None, approach_profile=None, scenario='stationary', controller_profile=None,
 ):
-  plant = VoltPlant(fit, speed, smooth, grade, regen_factor, extra_delay, stopping_profile)
+  plant = VoltPlant(fit, speed, smooth, grade, regen_factor, extra_delay, stopping_profile, controller_profile=controller_profile)
   planner = LongitudinalPlanner(plant.CP, init_v=speed)
   planner.mpc.set_personal_curve(approach_profile)
+  if approach_profile is not None and stopping_profile is None:
+    from dataclasses import replace
+    plant.long.volt_stopping = VoltStopping(replace(plant.controller.volt_profile,
+      stop_speed=tuple(approach_profile['speed']), stop_decel=tuple(approach_profile['deceleration'])))
   sm = {name: getattr(messaging.new_message(name), name) for name in ('carState', 'controlsState', 'selfdriveState', 'liveParameters', 'carControl', 'modelV2')}
   sm['selfdriveState'].enabled = True
   sm['selfdriveState'].personality = personality
@@ -208,6 +216,10 @@ def closed_loop_stop(
     row['gap'] = lead_x - plant.x
     row['personal_blend'] = planner.mpc.personal_blend
     row['solver_status'] = planner.mpc.solution_status
+    trajectory = getattr(planner.mpc, 'stop_trajectory', None)
+    row['trajectory_reason'] = trajectory.reason if trajectory else 'stock'
+    row['stop_time_remaining'] = trajectory.remaining_time if trajectory else None
+    row['target_gap'] = approach_profile['gap'] if approach_profile else None
     trace.append(row)
     if scenario in ('stationary', 'engine_on', 'moving_stop') and k > 300 and plant.v < 0.01 and all(r['v'] < 0.01 for r in trace[-100:]):
       break
@@ -215,7 +227,21 @@ def closed_loop_stop(
 
 
 def metrics(trace):
-  stopped = next((i for i in range(1, len(trace) - 100) if trace[i]['v'] < 0.3 and max(r['v'] for r in trace[i : i + 100]) < 0.5), len(trace) - 1)
+  if not trace:
+    raise ValueError('No simulated observations')
+  tail = [r for r in trace if r['t'] >= trace[-1]['t'] - 1.]
+  complete = tail[-1]['t'] - tail[0]['t'] >= .98 and all(abs(r['v']) < .05 for r in tail)
+  candidates = [i for i in range(1, len(trace) - 100)
+                if trace[i]['v'] < .3 <= trace[i-1]['v'] and max(r['v'] for r in trace[i:i+100]) < .5]
+  stopped = candidates[-1] if candidates and complete else None
+  if stopped is None:
+    return {
+      'min_accel': min(r['a'] for r in trace), 'final_jerk_p95': None, 'low_speed_seconds': None,
+      'speed_rebound': None, 'stopped': False, 'stop_time': None, 'settled_gap': None,
+      'minimum_gap': min(r['gap'] for r in trace) if 'gap' in trace[0] else None,
+      'braking_onset': next((r['t'] for r in trace if r['a'] < -.3), None),
+      'solver_failures': sum(r.get('solver_status', 0) != 0 for r in trace),
+    }
   end = trace[stopped]['t']
   low_start = stopped
   while low_start > 0 and trace[low_start - 1]['v'] < 2 and trace[low_start]['t'] - trace[low_start - 1]['t'] < 0.1:
@@ -232,7 +258,7 @@ def metrics(trace):
     'final_jerk_p95': float(np.percentile(abs(jerk), 95)) if len(jerk) else None,
     'low_speed_seconds': end - low[0]['t'],
     'speed_rebound': rebound,
-    'stopped': trace[-1]['v'] < 0.05,
+    'stopped': True,
     'minimum_gap': min((r.get('gap', float('inf')) for r in trace), default=None) if 'gap' in trace[0] else None,
     'stop_time': end,
     'settled_gap': float(np.median([r['gap'] for r in trace if end + .5 <= r['t'] <= end + 2]))

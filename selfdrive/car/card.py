@@ -139,9 +139,23 @@ class Car:
 
     from opendbc.car.gm.volt_longitudinal import configure as configure_volt, supported as volt_supported, PROFILE
     if volt_supported(self.CP) and not REPLAY:
-      mode = configure_volt(self.CP, self.params.get("VoltLongitudinalMode", return_default=True))
-      self.params.put("VoltLongitudinalProfile", f"{PROFILE.version}:{mode}", block=True)
-      cloudlog.info("Volt longitudinal profile", version=PROFILE.version, mode=mode, validated=PROFILE.validated)
+      from openpilot.selfdrive.car.volt_profile import BUNDLE_PATH, read_bundle
+      try:
+        raw_bundle = BUNDLE_PATH.read_text()
+      except OSError:
+        raw_bundle = None
+      bundle = read_bundle(raw=raw_bundle) if raw_bundle else None
+      profile = bundle['calibration'] if bundle else PROFILE
+      mode = configure_volt(self.CP, self.params.get("VoltLongitudinalMode", return_default=True), profile=profile,
+                            test_ready=bool(bundle and bundle['readiness']['test_ready']))
+      if mode != 'stock' and bundle:
+        self.params.put('VoltLongitudinalActiveBundle', raw_bundle, block=True)
+        if controller_available:
+          self.CI.CC.volt_profile = profile
+      else:
+        self.params.remove('VoltLongitudinalActiveBundle')
+      self.params.put("VoltLongitudinalProfile", f"{profile.version}:{mode}", block=True)
+      cloudlog.info("Volt longitudinal profile", version=profile.version, mode=mode, validated=profile.validated)
 
     # Write previous route's CarParams
     prev_cp = self.params.get("CarParamsPersistent")

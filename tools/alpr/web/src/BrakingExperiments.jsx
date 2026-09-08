@@ -4,7 +4,7 @@ import { Trace } from './BrakingReview';
 const modes = [
   ['stock', 'Stock model', '#0369a1'],
   ['smooth', 'Brake candidate', '#b45309'],
-  ['personal', 'Personal approach', '#7e22ce'],
+  ['personal', 'Personal stop', '#7e22ce'],
 ];
 const n = (v, unit = '') => (Number.isFinite(v) ? `${v.toFixed(2)}${unit}` : 'unavailable');
 
@@ -50,6 +50,7 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
   }, [result]);
   const reference = validation?.manual_reference;
   if (!reference) return null;
+  const trainingExamples = reference.examples.filter((e) => e.route !== reference.split?.holdout_route);
   const rows = (event?.samples || []).filter((r, i) => i % 5 === 0 && (window === 'approach' || r.t >= -5));
   const chart = (title, unit, key, recordedKey = key, multiplier = 1) =>
     rows.length > 1 && (
@@ -79,6 +80,13 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
   return (
     <section aria-label="Braking experiments">
       <h3>A smoother stop must also finish promptly</h3>
+      {validation.readiness && (
+        <p role="status">
+          Supervised tests: <strong>{validation.readiness.test_ready ? 'Ready' : 'Not ready'}</strong>.
+          {' '}Vehicle checks: <strong>{validation.readiness.vehicle_validated ? 'Passed' : 'Pending'}</strong>.
+          {' '}Normal driving: <strong>{validation.readiness.road_ready ? 'Validated' : 'Not validated'}</strong>.
+        </p>
+      )}
       <div className="review-toolbar">
         {(reference.collection?.review_ids || [])
           .filter((id) => !['representative', 'exclude'].includes(decisions?.[id]))
@@ -90,9 +98,9 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
       </div>
       <p>
         {reference.collection?.qualifying_examples ?? reference.examples.length} qualifying manual examples
-        toward a target of {reference.collection?.target_examples ?? 10}. Your observed final phase below 4.5
-        mph: {n(Math.min(...reference.examples.map((e) => e.low_speed_seconds)))}–
-        {n(Math.max(...reference.examples.map((e) => e.low_speed_seconds)))} s.
+        toward a target of {reference.collection?.target_examples ?? 10}. The {trainingExamples.length} fitting examples
+        finish the phase below 4.5 mph in {n(Math.min(...trainingExamples.map((e) => e.low_speed_seconds)))}–
+        {n(Math.max(...trainingExamples.map((e) => e.low_speed_seconds)))} s.
         {reference.split?.holdout_route
           ? ' A new route is reserved for independent evaluation.'
           : ' A new recorded trip is still needed for independent evaluation.'}
@@ -101,8 +109,8 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
         <p>
           Observed manual gap: {n(reference.approach_candidate.observed_gap, ' m')}. The experimental planner
           target is bounded to {n(reference.approach_candidate.gap, ' m')} by the existing profile limits;
-          actual simulated gaps are shown separately below. The curve has limited manual support and is not
-          enabled on the car.
+          actual simulated gaps are shown separately below. The controller aims to meet timing, smoothness,
+          and gap targets together. This page reports qualification, not the mode currently selected on the car.
         </p>
       )}
       {result && (
@@ -132,6 +140,10 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
           {chart('Replayed speed', 'mph', 'v', 'v', 2.236936292)}
           {chart('Replayed acceleration', 'm/s²', 'a')}
           {chart('Replayed lead gap', 'm', 'gap', 'd')}
+          <p>
+            A completed stop requires a full second at rest. Unfinished replays have no final stopping time
+            or settled-gap measurement; they are not extended beyond the recorded lead observations.
+          </p>
           <table className="braking-comparison">
             <thead>
               <tr>

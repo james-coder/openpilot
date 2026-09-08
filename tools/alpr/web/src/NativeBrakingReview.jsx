@@ -362,7 +362,7 @@ export default function NativeBrakingReview() {
           <ul>
             {validation.checks.map((c) => (
               <li key={c.name}>
-                {c.pass ? 'Pass' : 'Pending / failed'} · {c.name}: {c.detail}
+                {c.pass ? 'Pass' : 'Pending / failed'} · {c.stage === 'diagnostic' ? 'Comparison only · ' : ''}{c.name}: {c.detail}
               </li>
             ))}
           </ul>

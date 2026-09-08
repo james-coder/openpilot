@@ -155,6 +155,24 @@ def test_stock_planner_does_not_require_new_replay_metadata():
   assert planner.mpc.personal_blend == 0.
 
 
+def test_closer_secondary_lead_clears_the_personal_objective():
+  mpc = LongitudinalMpc()
+  mpc.set_personal_curve(approach_curve(*curve_fixture()))
+  radar = log.RadarState.new_message()
+  lead = radar.leadOne
+  lead.status, lead.radar, lead.radarTrackId, lead.modelProb = True, True, 1, 1.
+  lead.dRel, lead.vLead, lead.aLeadTau = 25., 0., 1.5
+  for _ in range(30):
+    mpc.update_personal(radar, .05)
+  mpc.set_cur_state(5., 0.)
+  mpc.update(radar, 5., radar_age=.05)
+  assert mpc.stop_trajectory.reference is not None and mpc.params[0, 8] > 0
+  radar.leadTwo.status, radar.leadTwo.dRel, radar.leadTwo.aLeadTau = True, 15., 1.5
+  mpc.update(radar, 5., radar_age=.05)
+  assert mpc.stop_trajectory.reference is None
+  assert np.all(mpc.params[:, 8] == 0.)
+
+
 def test_traffic_window_refuses_ambiguous_final_identity():
   rows = [{'t': float(t), 'valid': True, 'radar_valid': True, 'lead': True,
            'leads': [{'status': True, 'radar': True, 'radarTrackId': 1 if t < -1 else 2}]} for t in np.arange(-12., 2., .01)]

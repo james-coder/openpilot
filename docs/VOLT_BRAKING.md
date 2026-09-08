@@ -9,20 +9,27 @@ Review: http://192.168.99.189:8088/#braking
 
 ## Current checkpoint
 
-Candidate `be7d59f9e381e077` remains unqualified: 55 of 87 report checks pass,
-with 21 offline failures. These include recorded-command response reproduction,
-traffic finishing pace/gaps, terminal motion, and grade/reduced-regen cases.
-Counts include diagnostic comparisons and are not a safety score.
+The current candidate remains unqualified. The packaged
+`selfdrive/car/volt_candidate.json` and the local review contain its source-bound
+check results. Previous checkpoint `be7d59f9e381e077` is preserved under
+`review/history/be7d59f9e381e077/`; its force-based finish metrics are not directly
+comparable to the corrected motion metrics. Report check counts include diagnostic
+comparisons and are not a safety score.
 
-| Recorded traffic | Personal-model low-speed phase | Final jerk p95 | Settled gap |
-| --- | --- | --- | --- |
-| 08:58 | Incomplete within recording | Unavailable | Unavailable |
-| 10:27 | 2.81 s | 0.95 m/s³ | 3.90 m |
-| 10:30 | Incomplete within recording | Unavailable | Unavailable |
+Checkpoint `d4b26a2de7fe714d` passes 58/96 report checks with 26 offline failures.
+All three recorded command approaches can now be reproduced without treating
+raw pedal jitter as intervention, but their modeled stop-time errors are
+−1.68, −0.59 and −3.63 seconds. The response model still fails qualification.
+The personal traffic simulations retain minimum radar gaps of 3.38, 3.66 and
+4.61 m; the first and third do not settle within their recorded windows. These
+results establish neither a collision nor a validated real-world stopping response.
 
 The smoother mathematical target is not yet a qualified brake response.
-No candidate was installed or selected on the device. Stock remains the rollback
-and default selection; Test and Personal remain unavailable under these results.
+No candidate was installed or selected on the device. The fork's stock tuning
+remains the default selection; **it does not restore an unpowered factory ASCM**.
+Test and Personal remain unavailable. A separate collision-protection category
+now blocks qualification even if all comfort checks pass. See
+[the factory research, offline envelope and required integration](VOLT_COLLISION_PROTECTION.md).
 
 ## Fitted function
 
@@ -75,8 +82,9 @@ with zero.
 
 The polynomial uses the existing position/speed/acceleration tracking weights
 and sets the comfort gap to 4.5 m only while valid. The old speed-bin distance
-lookup is disabled for this model. Existing collision constraints and full
-braking authority remain. The generated solver's 41-parameter interface stays
+lookup is disabled for this model. Existing soft collision costs and bounded
+braking requests remain; they are not an independently validated AEB fallback.
+The generated solver's 41-parameter interface stays
 unchanged; legacy lookup fields are zero for polynomial references.
 
 `LongitudinalPlan.voltStopTrajectoryActive` defaults false. Controls accepts it
@@ -86,10 +94,12 @@ without the legacy minimum-deceleration taper. Stronger braking requests still
 bypass comfort slew limits. Existing bounded feedback and bumpless transitions
 remain.
 
-Personal stationary hold requires the standstill flag and raw wheel speed below
-0.03 m/s for 200 ms. Creep and grade compensation remain during the moving taper;
-existing stationary holding force follows confirmation. No new CAN brake mode
-is enabled. Holding and rollback behaviour still require physical validation.
+The personal candidate preloads friction near standstill using the identified
+response horizon and a friction-only creep/grade floor. It retains holding demand
+after confirmation even if wheel-speed flags flicker. The confirmed-stop CAN flag
+separately requires standstill and raw wheel speed below 0.03 m/s for 200 ms.
+Disengagement or leaving the stopping state resets holding. No new CAN brake mode
+is enabled. Holding and rollback behavior still require physical validation.
 
 ## Qualification and resources
 
@@ -103,8 +113,25 @@ uses normalized speed RMSE ≤10% and duration error ≤max(1 s, 20%) on evaluat
 windows. The original manual finishing-pace envelope and rebound limit remain.
 New gates also measure 0.3-to-0.03 m/s time ≤1.25 s and provisional physical
 terminal acceleration ≤0.15 m/s² / jerk p95 ≤0.5 m/s³ over the final 250 ms.
-Physical metrics use force-based acceleration before the plant's forward-speed
-clamp. Incomplete traffic stops are not extended beyond observed lead motion.
+Physical metrics use signed wheel motion and actual kinematic acceleration.
+Static friction can oppose either creep or gravity; insufficient holding permits
+rollback. Holding capacity is separate from acceleration, and there is no
+forward-speed clamp hiding rollback. Incomplete traffic stops are not extended
+beyond observed lead motion.
+
+Identification and replay share causal, freshness-limited observations and a
+timestamped exponential response kernel, including fractional command delays.
+Independent continuous episodes preserve real actuator prehistory and exclude
+initialization from scoring. Pedal filtering follows this gateway Volt's decoded
+threshold of 8, while also requiring brakePressed, gas and regen-paddle flags to
+be clear. Brief raw values below 8 alone are not classified as driver braking.
+Unknown inputs remain excluded. Command replay applies recorded pitch and engine
+state to both physical and controller layers.
+
+The response model adds a bounded interaction between brake command and negative
+gas demand. A route-separated diagnostic compares its ability to explain the raw
+regen signal; this is an association, not a calibrated torque measurement. The
+controller's combined regenerative credit retains the previous 1.5 m/s² envelope.
 
 The existing response diagnosis remains unresolved: low-speed autonomous data
 are sparse, pressure/regen signal interpretation needs verification, and the
@@ -112,7 +139,8 @@ reserved route has no qualifying autonomous low-speed response. Manual motion
 fits are not pooled with autonomous commands to manufacture calibration.
 The controller is held fixed when exercising the independent response model.
 
-Scheduling was checked against the device: plannerd/radard share core 5/FIFO 51;
+The production scheduling configuration was checked in source and previously on
+the device: plannerd/radard share core 5/FIFO 51;
 controlsd/card/selfdrived share core 4/FIFO 53; modeld uses core 7/FIFO 54. Function
 generation adds work to radar's shared core. Startup warms numerical kernels;
 normal updates only evaluate the polynomial.
@@ -123,16 +151,23 @@ device became unreachable before the revised implementation could be measured.
 `function-timing-pending.json` identifies the unmeasured source. Old timing must
 not be presented as qualification of the current source. Whole planner/radar
 and controls deadlines plus shared memory/thermal effects remain physical checks.
+Current-source whole-process runtime evidence is now an offline qualification
+gate, including cold start, samples over at least 60 seconds, no deadline misses,
+and thermal/memory observations. Old-source and helper-only measurements fail it.
 
-Verification: 121 Python tests with 23 subtests; 4 upstream longitudinal tests
+Verification: 160 Python tests with 23 subtests; 4 upstream longitudinal tests
 with 58 maneuver subtests; 11 web tests; production build; browser checks for
 video synchronization, function navigation, brightness persistence and isolated
-annotation saves; generated C++ schema/library build; Ruff and whitespace checks. These do not establish road readiness.
+annotation saves; Ruff and whitespace checks. The existing generated C++ schema
+was built at the previous checkpoint and is unchanged here. These checks do not
+establish road readiness.
 
 ## Reproduce
 
 ```sh
 .venv/bin/python -m tools.profiling.volt_function_fit /mnt/algo14/comma3-alpr/braking/review
+.venv/bin/python -m tools.profiling.volt_response_fit /mnt/algo14/comma3-alpr/braking/review
+.venv/bin/python -m tools.profiling.volt_brake_diagnostics /mnt/algo14/comma3-alpr/braking/review
 .venv/bin/python -m tools.profiling.validate_volt_braking /mnt/algo14/comma3-alpr/braking/review --kind personal
 .venv/bin/python -m tools.profiling.export_volt_candidate /mnt/algo14/comma3-alpr/braking/review
 .venv/bin/pytest -n0 -q tools/profiling/tests/test_volt_*.py selfdrive/controls/tests/test_volt_stopping.py selfdrive/controls/tests/test_longcontrol.py opendbc_repo/opendbc/car/gm/tests

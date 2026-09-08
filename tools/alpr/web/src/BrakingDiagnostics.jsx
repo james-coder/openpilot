@@ -59,6 +59,14 @@ export default function BrakingDiagnostics({ diagnostics, event, reproduction })
         </table>
       </details>
       <p>Measurements still needed:</p>
+      {diagnostics.regen_command_audit?.joint_brake_gas_and_speed && (
+        <p>
+          Reported regen on the evaluation route: gas-and-speed prediction error{' '}
+          {n(diagnostics.regen_command_audit.gas_and_speed.evaluation_rmse_raw)} raw units;
+          {' '}including the brake command gives {n(diagnostics.regen_command_audit.joint_brake_gas_and_speed.evaluation_rmse_raw)}.
+          {' '}This tests a signal association; it does not calibrate motor torque or establish how the EBCM allocates braking.
+        </p>
+      )}
       <ul>{diagnostics.missing_measurements.map((text) => <li key={text}>{text}</li>)}</ul>
     </section>
   );

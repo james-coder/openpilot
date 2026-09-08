@@ -3,6 +3,7 @@
 import argparse
 import json
 import hashlib
+import re
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -10,7 +11,8 @@ import numpy as np
 from openpilot.selfdrive.test.longitudinal_maneuvers.volt_plant import replay_targets, closed_loop_stop, metrics
 from openpilot.selfdrive.test.longitudinal_maneuvers.volt_replay import replay_commands, replay_traffic
 from openpilot.tools.profiling.volt_braking import atomic_json
-from openpilot.tools.profiling.volt_finish_metrics import physical_finish
+from openpilot.tools.profiling.volt_finish_metrics import physical_finish, holding_metrics
+from openpilot.tools.profiling.volt_collision import experiments as collision_experiments
 from openpilot.tools.profiling.volt_response_fit import fit_style, load_routes, prepare
 from openpilot.tools.profiling.volt_pressure_model import allocator_profile, evaluate_pressure_response
 from openpilot.selfdrive.car.volt_profile import make_bundle, source_hashes, VEHICLE_CHECKS
@@ -38,7 +40,30 @@ def finish_detail(m):
           + f'rebound {number(m["speed_rebound"], " m/s")}; settled gap {number(m["settled_gap"], " m")}.')
 
 
-def validate(root, vehicle_evidence=None, kind='brake'):
+RUNTIME_PROCESSES = {'plannerd': (5, 51, 50.), 'radard': (5, 51, 50.), 'controlsd': (4, 53, 10.),
+                     'card': (4, 53, 10.), 'selfdrived': (4, 53, 10.), 'modeld': (7, 54, 50.)}
+
+
+def runtime_preflight_valid(evidence, identity, sources):
+  """A helper-only benchmark cannot qualify shared production process budgets."""
+  try:
+    if (evidence['profile_id'] != identity or evidence['sources'] != sources or evidence['device'] != 'comma3'
+        or not re.fullmatch(r'[0-9a-f]{64}', evidence['archive_sha256'])
+        or not np.isfinite(evidence['duration_seconds']) or evidence['duration_seconds'] < 60
+        or evidence['includes_cold_start'] is not True or evidence['includes_candidate_work'] is not True
+        or evidence['thermal_throttling'] is not False or evidence['memory_pressure'] is not False):
+      return False
+    for name, (core, priority, period) in RUNTIME_PROCESSES.items():
+      row = evidence['processes'][name]
+      if (row['core'] != core or row['fifo_priority'] != priority or row['deadline_misses'] != 0
+          or not 0 < row['maximum_cycle_ms'] < period or not np.isfinite(row['samples']) or row['samples'] < 60000 / period):
+        return False
+    return True
+  except (KeyError, TypeError, ValueError):
+    return False
+
+
+def validate(root, vehicle_evidence=None, kind='brake', baseline=None):
   if kind not in ('brake', 'personal'):
     raise ValueError('Unknown candidate kind')
   tested_sources = source_hashes()
@@ -61,9 +86,13 @@ def validate(root, vehicle_evidence=None, kind='brake'):
 
   diagnostics = json.loads((root / 'brake-diagnostics.json').read_text()) if (root / 'brake-diagnostics.json').exists() else None
   diagnostics_valid = (diagnostics and diagnostics.get('source_sha256') == tested_sources['tools/profiling/volt_brake_diagnostics.py']
+                       and diagnostics.get('sources') == tested_sources
                        and diagnostics.get('model_sha256') == hashlib.sha256(json.dumps(fit['pressure_model'], sort_keys=True).encode()).hexdigest())
-  if kind == 'brake':
-    check('Pressure diagnostic provenance', bool(diagnostics_valid), 'Cached diagnosis must match the response model and current diagnostic source.')
+  check('Pressure diagnostic provenance', bool(diagnostics_valid), 'Cached diagnosis must match the response model and current sources.')
+  expected_fit = {Path(name).name: tested_sources[name] for name in tested_sources
+                  if Path(name).name in ('volt_response_fit.py', 'volt_pressure_model.py', 'volt_actuator.py', 'volt_observations.py')}
+  check('Response identification provenance', fit.get('identification_sources') == expected_fit,
+        'Response parameters must be identified by the current causal preparation and integration code.')
   if not diagnostics_valid:
     diagnostics = None
 
@@ -113,10 +142,11 @@ def validate(root, vehicle_evidence=None, kind='brake'):
                 and finish['terminal_accel'] is not None and finish['terminal_accel'] <= .15
                 and finish['terminal_jerk_p95'] is not None and finish['terminal_jerk_p95'] <= .5,
                 str(finish), 'traffic')
-        case['traffic'][mode] = {**m, **result, 'target_gap': curve['gap'] if curve else None,
+        hold = holding_metrics(trace)
+        case['traffic'][mode] = {**m, **hold, **result, 'target_gap': curve['gap'] if curve else None,
           'url': save(summary['id'], 'traffic-' + mode, trace, experiment='reconstructed_traffic', **result)}
         if smooth:
-          check(label + ' ' + mode + ' traffic margins', m['minimum_gap'] >= .25 and m['solver_failures'] == 0,
+          check(label + ' ' + mode + ' traffic margins', m['minimum_gap'] >= .25 and m['solver_failures'] == 0 and hold['rollback_distance'] <= 1e-6,
                 f'Minimum gap {m["minimum_gap"]:.2f} m; solver failures {m["solver_failures"]}.', 'traffic', stage)
           check(label + ' ' + mode + ' finishing pace', matches_manual_finish(m, references), finish_detail(m), 'traffic', stage)
           if mode == qualifying_mode and kind == 'brake':
@@ -149,6 +179,8 @@ def validate(root, vehicle_evidence=None, kind='brake'):
       try:
         trace = closed_loop_stop(fit, speed, distance, smooth, grade, regen, delay, approach_profile=curve, scenario=name)
         m = metrics(trace)
+        hold = holding_metrics(trace)
+        m.update(hold)
         if kind == 'personal' and mode == 'personal' and nominal:
           finish = physical_finish(trace)
           m.update(finish)
@@ -159,7 +191,7 @@ def validate(root, vehicle_evidence=None, kind='brake'):
                 str(finish), category, stage)
         pair[mode] = m
         if smooth:
-          good = m['minimum_gap'] >= .25 and m['solver_failures'] == 0
+          good = m['minimum_gap'] >= .25 and m['solver_failures'] == 0 and hold['rollback_distance'] <= 1e-6
           if name in ('stationary', 'slow_approach', 'moving_stop', 'stop_resume', 'engine_on'):
             good &= m['stopped']
           if name == 'pedal_override':
@@ -169,7 +201,9 @@ def validate(root, vehicle_evidence=None, kind='brake'):
           if name in ('pull_away', 'stop_resume'):
             good &= max((r['physical_v'] for r in trace if 10 <= r['t'] <= 15), default=0.) > 1.
           if name == 'stationary' and grade != 0 and m['stopped']:
-            good &= all(r['hold_margin'] is not None and r['hold_margin'] >= 0 for r in trace if r['t'] > trace[-1]['t'] - 1.)
+            held = hold['holding_observed'] and hold['minimum_hold_margin'] >= 0 and hold['rollback_distance'] <= 1e-6
+            good &= held
+            check(title + ': continuous holding', held, str(hold), 'holding', stage)
           check(title + ': ' + mode, good,
                 f'Minimum gap {m["minimum_gap"]:.2f} m; stopped {m["stopped"]}; solver failures {m["solver_failures"]}.', category, stage)
           if nominal:
@@ -237,9 +271,25 @@ def validate(root, vehicle_evidence=None, kind='brake'):
   check('Representative manual examples reviewed', bool(style['examples']) and all(e['reviewed'] for e in style['examples']),
         'Optional example review; final driver comfort is checked during the supervised vehicle tests.', 'manual', 'diagnostic')
 
+  collision = collision_experiments()
+  # An offline equation is not a sensor-to-actuator emergency-braking system.
+  # Keep this explicit even if every comfort and synthetic maneuver passes.
+  check('End-to-end collision protection', False,
+        'The ASCM is unpowered. The independent stopping envelope is offline only; target selection, '
+        + 'degraded operation and actuator arbitration are not connected or validated. FCW and soft MPC costs are insufficient.', 'collision')
+  check('Emergency braking authority and response', False,
+        'CAN brake limit 400 is not proof of full physical braking. Emergency response, achievable deceleration, '
+        + 'range geometry and grip/grade/regen bounds require instrumented evidence; the comfort fit cannot supply them.', 'collision')
+
   bundle = None
   if kind == 'brake' or approach:
     profile = allocator_profile(model)
+    identity = make_bundle(profile, approach if kind == 'personal' else None, [], hashes=tested_sources, kind=kind)['id']
+    preflight_path = root / 'runtime-preflight.json'
+    preflight = json.loads(preflight_path.read_text()) if preflight_path.exists() else {}
+    check('Current-source device runtime preflight', runtime_preflight_valid(preflight, identity, tested_sources),
+          'Requires current-candidate comma 3 measurements under the verified production CPU/FIFO configuration, '
+          + 'including cold start, whole process deadlines, and memory/thermal observations. Helper-only or old-source timing is insufficient.', 'runtime')
     vehicle = json.loads(vehicle_evidence.read_text()) if vehicle_evidence else None
     if source_hashes() != tested_sources:
       raise RuntimeError('Controller or validation sources changed during the run; rerun before exporting qualification')
@@ -250,7 +300,17 @@ def validate(root, vehicle_evidence=None, kind='brake'):
     if not template.exists():
       atomic_json(template, {'profile_id': bundle['id'], 'checks': {name: {'pass': None, 'route': None, 'archive_sha256': None} for name in VEHICLE_CHECKS}})
   readiness = bundle['readiness'] if bundle else {'test_ready': False, 'vehicle_validated': False, 'road_ready': False}
-  result = {'version': 6, 'profile_kind': kind, 'summary': 'Brake control and personal approach learning are qualified separately.',
+  groups = []
+  for name, categories in [('Response accuracy', {'response', 'independent_response'}),
+                            ('Stopping comfort and distance', {'traffic', 'nominal', 'stress', 'manual'}),
+                            ('Hill holding', {'holding'}), ('Collision protection', {'collision'})]:
+    relevant = [c for c in checks if c['category'] in categories and c['stage'] == 'offline']
+    groups.append({'name': name, 'status': 'passed' if relevant and all(c['pass'] for c in relevant) else 'blocked',
+                   'failed_checks': [c['name'] for c in relevant if not c['pass']]})
+  groups.append({'name': 'Device timing and physical tests', 'status': 'passed' if readiness['vehicle_validated'] else 'pending',
+                 'failed_checks': []})
+  result = {'version': 8, 'metric_version': 2, 'qualification_groups': groups, 'collision_experiments': collision,
+            'profile_kind': kind, 'summary': 'Corrected causal response, signed motion, and continuous holding checks.',
             'deployment_ready': readiness['road_ready'], 'readiness': readiness, 'profile_id': bundle['id'] if bundle else None,
             'checks': checks, 'recorded_cases': recorded, 'scenarios': scenarios,
             'manual_reference': {'examples': style['examples'], 'stopping_candidate': style['stopping_candidate'],
@@ -259,6 +319,12 @@ def validate(root, vehicle_evidence=None, kind='brake'):
                                  'limitation': 'Different traffic conditions; model comparisons remain provisional until response reproduction passes.'},
             'diagnostics': diagnostics,
             'response_model': model, 'independent_response_model': independent, 'reserved_response': blind_response}
+  if baseline:
+    previous = json.loads(baseline.read_text())
+    result['previous_checkpoint'] = {'profile_id': previous.get('profile_id'), 'metric_version': previous.get('metric_version', 1),
+                                    'recorded_cases': previous.get('recorded_cases', []),
+                                    'note': 'Prior candidate used different response physics. '
+                                    + 'Terminal force and motion metrics are not interchangeable.'}
   atomic_json(root / 'validation.json', result)
   print(json.dumps({'passed': sum(c['pass'] for c in checks), 'total': len(checks), **readiness}))
   return result
@@ -269,5 +335,6 @@ if __name__ == '__main__':
   p.add_argument('review', type=Path)
   p.add_argument('--vehicle-evidence', type=Path)
   p.add_argument('--kind', choices=('brake', 'personal'), default='brake')
+  p.add_argument('--baseline', type=Path)
   args = p.parse_args()
-  validate(args.review, args.vehicle_evidence, args.kind)
+  validate(args.review, args.vehicle_evidence, args.kind, args.baseline)

@@ -1,15 +1,15 @@
 """Offline identification, with a complete route held out. Never changes runtime profiles."""
 
 import argparse
-from collections import Counter
 import gzip
+import hashlib
+import inspect
 import json
 from pathlib import Path
 
 import numpy as np
 from opendbc.car.gm.volt_longitudinal import PROFILE
 from scipy.optimize import lsq_linear
-from scipy.signal import lfilter
 from scipy.interpolate import PchipInterpolator
 
 from openpilot.tools.profiling.volt_braking import atomic_json
@@ -30,95 +30,86 @@ def load_routes(cache, route=None):
 
 
 def prepare(rows):
-  # Uniform grid only for fitting the dynamic plant; original samples stay intact.
-  t = np.array([r['t'] for r in rows])
-  grid = np.arange(t[0], t[-1], 0.05)
-  services = {'applied_brake': 'carOutput', 'applied_gas': 'carOutput', 'engine_rpm': 'engine',
-              'controller_pitch': 'carControl', 'active': 'carControl', 'pressure': 'can_368',
-              'vehicle_ax': 'livePose', 'regen_raw': 'can_560'}
+  from openpilot.tools.profiling.volt_observations import sample_rows
+  grid = np.arange(rows[0]['t'], rows[-1]['t'], .05)
+  return prepare_observations(sample_rows(rows, grid))
 
-  def channel(key, default=0.0, discrete=False):
-    service = services.get(key)
-    good = sorted({r.get('sample_times', {}).get(service, r['t']): r[key] for r in rows if isinstance(r.get(key), (int, float))}.items())
-    if not good:
-      return np.full(len(grid), default)
-    ts, values = np.array(good).T
-    if discrete:
-      held = values[np.clip(np.searchsorted(ts, grid, side='right') - 1, 0, len(ts) - 1)]
-      return np.where(grid >= ts[0], held, default)
-    return np.interp(grid, ts, values)
 
-  nearest = np.clip(np.searchsorted(t, grid, side='right') - 1, 0, len(rows) - 1)
-
-  def fresh(key):
-    records = sorted({r.get('sample_times', {}).get(services.get(key), r['t']): r[key]
-                      for r in rows if isinstance(r.get(key), (int, float, bool))}.items())
-    if not records:
-      return np.zeros(len(grid), dtype=bool), np.zeros(len(grid))
-    ts, values = np.array(records).T
-    pos = np.clip(np.searchsorted(ts, grid, side='right') - 1, 0, len(ts) - 1)
-    return (grid - ts[pos] >= 0) & (grid - ts[pos] <= 0.3), values[pos]
-
-  control_fresh, active = fresh('active')
-  brake_fresh, _ = fresh('applied_brake')
-  gas_fresh, _ = fresh('applied_gas')
-  manual = np.array([rows[i]['foot'] or rows[i]['regen'] or rows[i]['gas'] or not rows[i]['valid'] or grid[k] - t[i] > 0.1 for k, i in enumerate(nearest)])
-  clear_manual = np.convolve(manual.astype(int), np.ones(41), mode='same') == 0
-  mask = control_fresh & active.astype(bool) & brake_fresh & gas_fresh & clear_manual
-  mask &= np.array([rows[i].get('active') is True for i in nearest])
-  v = channel('v')
-  a = channel('a')
-  mask &= (v > 0.1) & (v < 24) & (np.abs(channel('steering_angle')) < 30)
+def prepare_observations(data):
+  from openpilot.tools.profiling.volt_observations import autonomous_mask, runs, WARMUP
+  grid = data['t']
+  continuous = autonomous_mask(data, float(np.median(np.diff(grid))))
+  ids = np.full(len(grid), -1, dtype=int)
+  warm = np.zeros(len(grid), dtype=bool)
+  for number, part in enumerate(runs(continuous)):
+    ids[part] = number
+    warm[part] = grid[part] - grid[part[0]] >= WARMUP - 1e-6
   return {
-    't': grid,
-    'v': v,
-    'a': a,
-    'brake': channel('applied_brake', discrete=True) / 400.0,
-    'regen': np.clip(-channel('applied_gas', discrete=True) / 650.0, 0, 1),
-    'gas': np.clip(channel('applied_gas', discrete=True) / 1018.0, 0, 1),
-    'engine': channel('engine_rpm', discrete=True) > 0,
-    'engine_valid': fresh('engine_rpm')[0],
-    'vraw': channel('vraw'),
-    'mask': mask,
-    'pitch': channel('controller_pitch'),
-    'pressure': channel('pressure') / 30000.0,
-    'pressure_valid': fresh('pressure')[0],
-    'pitch_valid': fresh('controller_pitch')[0],
-    'physical_a': channel('vehicle_ax'),
-    'physical_a_valid': fresh('vehicle_ax')[0],
+    't': grid, 'episode': ids,
+    'v': data['v'], 'vraw': data['vraw'], 'a': data['a'],
+    'brake': data['applied_brake'] / 400.,
+    'regen': np.clip(-data['applied_gas'] / 650., 0, 1),
+    'gas': np.clip(data['applied_gas'] / 1018., 0, 1),
+    'regen_raw': data['regen_raw'], 'brake_mode': data['brake_mode'],
+    'engine': data['engine_rpm'] > 0, 'engine_valid': np.isfinite(data['engine_rpm']),
+    'mask': continuous & warm & (data['vraw'] > .1) & (data['vraw'] < 24),
+    'pitch': data['controller_pitch'], 'pitch_valid': np.isfinite(data['controller_pitch']),
+    'pressure': data['pressure'] / 30000., 'pressure_valid': np.isfinite(data['pressure']),
+    'physical_a': data['vehicle_ax'], 'physical_a_valid': np.isfinite(data['vehicle_ax']),
   }
 
 
 def features(data, delay, tau):
-  dt = 0.05
-  alpha = dt / (tau + dt)
-
-  def lag(x):
-    delayed = np.interp(data['t'] - delay, data['t'], x)
-    return lfilter([alpha], [1.0, -(1 - alpha)], delayed)
-
+  from openpilot.tools.profiling.volt_pressure_model import episode_lag
   v = data['v']
-  # Engine-on and off are separate coefficients only if observed; no assumption
-  # about the factory ASCM enters these command-to-response features.
-  regen = lag(data['regen'])
-  brake = lag(data['brake'])
-  b = basis(v)
-  return np.column_stack([lag(data['gas']), -brake, -b * regen[:, None], np.clip(1 - v / 2.0, 0, 1), np.ones(len(v))])
+  regen = episode_lag(data, 'regen', delay, tau)
+  brake = episode_lag(data, 'brake', delay, tau)
+  return np.column_stack([episode_lag(data, 'gas', delay, tau), -brake, -basis(v) * regen[:, None],
+                          np.clip(1 - v / 2., 0, 1), np.ones(len(v))])
 
 
 def combine_prepared(parts):
-  """Pool fitting grids with an invalid four-second reset between drives."""
+  """Pool independent episodes without inventing zero-command interludes."""
   if not parts:
     raise ValueError('No training routes')
-  result = {}
-  for key in parts[0]:
-    if key == 't':
-      continue
-    values = []
-    for part in parts:
-      values.extend((np.zeros(80, dtype=part[key].dtype), part[key]))
-    result[key] = np.concatenate(values)
+  result = {key: np.concatenate([p[key] for p in parts]) for key in parts[0] if key not in ('t', 'episode')}
+  ids, offset = [], 0
+  for part in parts:
+    local = part['episode']
+    ids.append(np.where(local >= 0, local + offset, -1))
+    offset += int(local.max(initial=-1)) + 1
+  result['episode'] = np.concatenate(ids)
   result['t'] = np.arange(len(result['v'])) * .05
+  return result
+
+
+def prepared_routes(root, excluded=()):
+  """Prepare one route at a time; cache arrays against source and archive bytes."""
+  from openpilot.tools.profiling import volt_observations
+  paths = sorted((root / 'cache').glob('*.json.gz'))
+  names = sorted({p.name.rsplit('--', 1)[0] for p in paths} - set(excluded))
+  result = {}
+  directory = root / 'response-cache'
+  directory.mkdir(parents=True, exist_ok=True)
+  implementation = (inspect.getsource(prepare) + inspect.getsource(prepare_observations)).encode() + Path(volt_observations.__file__).read_bytes()
+  for name in names:
+    digest = hashlib.sha256(implementation)
+    for path in paths:
+      if path.name.startswith(name + '--'):
+        digest.update(path.name.encode())
+        digest.update(path.read_bytes())
+    cached = directory / f'{name}-{digest.hexdigest()[:24]}.npz'
+    if cached.exists():
+      with np.load(cached, allow_pickle=False) as values:
+        data = dict(values)
+    else:
+      data = prepare(load_routes(root / 'cache', name)[name])
+      temporary = cached.with_suffix('.tmp')
+      with temporary.open('wb') as stream:
+        np.savez_compressed(stream, **data)
+      temporary.replace(cached)
+    result[name] = data
+    print(f'{name}: {int(data["mask"].sum())} qualified fitting samples', flush=True)
   return result
 
 
@@ -126,7 +117,7 @@ def fit_response(routes):
   names = sorted(routes)
   if len(names) < 2:
     raise ValueError('Two routes are required for an independent holdout')
-  train, holdout = prepare(routes[names[0]]), prepare(routes[names[1]])
+  train, holdout = routes[names[0]], routes[names[1]]
   bounds = ([0.5, 0.5] + [0.0] * len(SPEED) + [0.0, -0.5], [4.0, 8.0] + [2.0] * len(SPEED) + [0.5, 0.3])
   candidates = []
   for delay in (0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6):
@@ -169,7 +160,9 @@ def fit_response(routes):
     'train': train_score,
     'holdout': test_score,
     'engine_samples': {
-      name: dict(Counter('on' if r.get('engine_rpm', 0) > 0 else 'off_or_unknown' for r in rows if r.get('active'))) for name, rows in routes.items()
+      name: {'on': int((data['engine'] & data['engine_valid']).sum()),
+             'off': int((~data['engine'] & data['engine_valid']).sum()), 'unknown': int((~data['engine_valid']).sum())}
+      for name, data in routes.items()
     },
     'validated': False,
     'limitations': [
@@ -336,13 +329,14 @@ def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('review', type=Path)
   args = parser.parse_args()
-  routes = load_routes(args.review / 'cache')
+  identification_files = [Path(__file__), Path(__file__).with_name('volt_observations.py'),
+                          Path(__file__).with_name('volt_actuator.py'), Path(__file__).with_name('volt_pressure_model.py')]
+  sources = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in identification_files}
   style = fit_style(args.review)  # Reserve a new route before any fitting sees its measurements.
-  routes = {k: v for k, v in routes.items() if k != style['split']['holdout_route']}
-  fit = fit_response(routes)
+  prepared = prepared_routes(args.review, [style['split']['holdout_route']])
+  fit = fit_response(prepared)
   from openpilot.tools.profiling.volt_pressure_model import fit_pressure_response
-  names = sorted(routes)
-  prepared = {name: prepare(routes[name]) for name in names}
+  names = sorted(prepared)
   pressure = fit_pressure_response(combine_prepared(list(prepared.values())), prepared[names[-1]], 'pooled-training', names[-1])
   pressure['train_routes'] = names
   pressure['holdout_kind'] = 'inspected regression; not independent of calibration'
@@ -353,7 +347,10 @@ def main():
   alternate['train_routes'] = alternate_names
   alternate['holdout_kind'] = 'unfitted route; previously inspected'
   fit['independent_pressure_model'] = alternate
-  fit['version'] = 3
+  fit['version'] = 4
+  if sources != {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in identification_files}:
+    raise RuntimeError('Identification sources changed during fitting; rerun before publishing')
+  fit['identification_sources'] = sources
   atomic_json(args.review / 'response-fit.json', fit)
   atomic_json(args.review / 'style-fit.json', style)
   print(json.dumps(fit, indent=2))

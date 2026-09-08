@@ -23,7 +23,7 @@ def polynomial_curve():
 
 def checks():
   return [{'name': category, 'pass': True, 'category': category, 'stage': 'offline'} for category in
-          ('response', 'traffic', 'nominal', 'stress', 'independent_response')] + [
+          ('response', 'traffic', 'nominal', 'stress', 'independent_response', 'runtime', 'collision')] + [
             {'name': 'manual', 'pass': True, 'category': 'manual', 'stage': 'release'}]
 
 
@@ -35,6 +35,26 @@ def test_qualification_is_bound_to_sources_and_coefficients():
   altered['profile']['brake_gain'] *= 1.1
   assert read_bundle(raw=json.dumps(altered), hashes={'fixture': '123'}) is None
   assert not read_bundle(raw=json.dumps(bundle), hashes={'fixture': '123'})['calibration'].validated
+  assert not qualification([c for c in checks() if c['category'] != 'runtime'], 'fixture')['test_ready']
+  assert not qualification([c for c in checks() if c['category'] != 'collision'], 'fixture')['test_ready']
+
+
+def test_runtime_preflight_rejects_helper_only_stale_and_missed_deadline_evidence():
+  from openpilot.tools.profiling.validate_volt_braking import runtime_preflight_valid, RUNTIME_PROCESSES
+  evidence = {'profile_id': 'fixture', 'sources': {}, 'device': 'comma3', 'archive_sha256': 'a' * 64,
+              'duration_seconds': 60., 'includes_cold_start': True, 'includes_candidate_work': True,
+              'thermal_throttling': False, 'memory_pressure': False,
+              'processes': {name: dict(core=core, fifo_priority=priority, maximum_cycle_ms=period/2,
+                                      deadline_misses=0, samples=60000/period)
+                            for name, (core, priority, period) in RUNTIME_PROCESSES.items()}}
+  assert runtime_preflight_valid(evidence, 'fixture', {})
+  assert not runtime_preflight_valid(evidence, 'changed', {})
+  assert not runtime_preflight_valid(evidence, 'fixture', {'source': 'changed'})
+  for change in ({'duration_seconds': float('nan')}, {'includes_candidate_work': False},
+                 {'processes': {'helper': {}}}, {'thermal_throttling': True}, {'memory_pressure': True}):
+    assert not runtime_preflight_valid({**evidence, **change}, 'fixture', {})
+  evidence['processes']['radard']['deadline_misses'] = 1
+  assert not runtime_preflight_valid(evidence, 'fixture', {})
 
 
 def test_physical_evidence_cannot_validate_another_profile_or_skip_missing_checks():
@@ -129,7 +149,7 @@ def test_unknown_engine_and_held_telemetry_are_not_fresh_measurements():
           for t in np.arange(0., 3., .01)]
   data = prepare(rows)
   assert not data['engine_valid'].any()
-  assert not data['pressure_valid'][data['t'] > .3].any()
+  assert not data['pressure_valid'][data['t'] > .3 + 1e-6].any()
 
 
 def test_nonlinear_pressure_reproduction_uses_the_same_kernel_and_bounded_inverse():
@@ -145,9 +165,11 @@ def test_nonlinear_pressure_reproduction_uses_the_same_kernel_and_bounded_invers
   assert actual == pytest.approx(expected)
   assert allocator_profile(f).brake_power == 2.
   known = np.ones(len(command), dtype=bool)
-  data = {'t': np.arange(len(command)) * .05, 'v': np.full(len(command), 5.), 'brake': command,
+  expected = np.r_[0., expected[:-1]]  # Measurements are at interval starts.
+  data = {'t': np.arange(len(command)) * .05, 'v': np.full(len(command), 5.), 'vraw': np.full(len(command), 5.),
+          'episode': np.zeros(len(command), dtype=int), 'brake': command,
           'pressure': expected, 'physical_a': -2 * expected, 'gas': np.zeros(len(command)), 'regen': np.zeros(len(command)),
-          'pitch': np.zeros(len(command)), 'engine': ~known, 'engine_valid': known, 'mask': known,
+          'pitch': np.zeros(len(command)), 'engine': ~known, 'engine_valid': known, 'mask': np.arange(len(command)) * .05 >= 1.2,
           'pressure_valid': known, 'pitch_valid': known, 'physical_a_valid': known}
   evaluation = evaluate_pressure_response(data, f)
   assert evaluation['rmse'] == pytest.approx(0., abs=1e-12)
@@ -162,6 +184,7 @@ def test_independent_plant_does_not_recalibrate_the_controller():
   plant = VoltPlant(f, speed=5., smooth=True, controller_profile=controller)
   assert plant.controller.volt_profile is controller
   assert plant.long.volt_profile is controller
+  assert plant.long.volt_stopping.profile is controller
 
 
 def test_brake_bundle_needs_no_personal_curve_and_never_sets_personal_flag(monkeypatch):

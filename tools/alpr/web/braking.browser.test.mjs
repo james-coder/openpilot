@@ -26,6 +26,9 @@ try {
   await page.getByRole('heading', { name: 'What happens before the stop?' }).waitFor();
   await page.getByRole('heading', { name: 'Acceleration and braking', exact: false }).waitFor();
   await page.getByRole('heading', { name: 'A smoother stop must also finish promptly' }).waitFor();
+  await page.getByLabel('Collision protection research').waitFor();
+  assert.equal(await page.getByLabel('Collision protection research').locator('tbody tr').count(), 7);
+  await page.getByRole('columnheader', { name: 'Minimum gap at limit' }).waitFor();
   await page.getByRole('heading', { name: 'Reconstructed traffic: the planner runs again' }).waitFor();
   assert.equal(await page.getByRole('columnheader', { name: 'Brake candidate' }).count(), 1);
   const brakeOnly = JSON.parse(fs.readFileSync(path.join(review, 'validation.json'))).profile_kind === 'brake';

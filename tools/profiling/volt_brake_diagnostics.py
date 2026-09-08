@@ -7,7 +7,10 @@ from pathlib import Path
 import numpy as np
 from scipy.optimize import lsq_linear
 from openpilot.tools.profiling.volt_braking import atomic_json
-from openpilot.tools.profiling.volt_pressure_model import PressureDynamics
+from openpilot.tools.profiling.volt_pressure_model import PressureDynamics, response_features
+from openpilot.tools.profiling.volt_response_fit import prepare_observations
+from openpilot.tools.profiling.volt_observations import sample_rows, autonomous_mask
+from openpilot.selfdrive.car.volt_profile import source_hashes
 
 DT = .05
 FIELDS = {
@@ -23,19 +26,7 @@ def event_arrays(event):
   origin = event['stop_mono']
   ticks = np.arange(np.ceil((rows[0]['t'] + origin) / DT), np.floor((rows[-1]['t'] + origin) / DT) + 1, dtype=np.int64)
   t = ticks * DT - origin
-  data = {'t': t, 'ticks': ticks}
-  for key, service in FIELDS.items():
-    records = sorted({r.get('sample_times', {}).get(service, r['t']) if service else r['t']: float(r[key])
-                      for r in rows if isinstance(r.get(key), (int, float, bool)) and np.isfinite(r[key])}.items())
-    values = np.full(len(t), np.nan)
-    if records:
-      times, observed = np.asarray(records).T
-      positions = np.searchsorted(times, t, side='right') - 1
-      bounded = np.maximum(0, positions)
-      fresh = (positions >= 0) & (t - times[bounded] <= (.1 if service is None else .3) + 1e-6)
-      values[fresh] = observed[bounded[fresh]]
-    data[key] = values
-  return data
+  return {**sample_rows(rows, t), 'ticks': ticks}
 
 
 def cached_event(path, cache):
@@ -63,11 +54,7 @@ def runs(mask, minimum=2):
 def masks(data):
   valid = ((data['valid'] == 1) & np.isfinite(data['vraw']) & np.isfinite(data['pressure'])
            & np.isfinite(data['controller_pitch']) & (np.abs(data['steering_angle']) < 25))
-  pedals_clear = (data['foot'] == 0) & (data['pedal'] == 0) & (data['gas'] == 0) & (data['regen'] == 0)
-  # Preserve the existing one-second intervention guard. Unknown inputs are not clear pedals.
-  guarded = np.convolve((~pedals_clear).astype(int), np.ones(41), mode='same') == 0 if len(valid) >= 41 else np.zeros(len(valid), bool)
-  autonomous = (valid & guarded & (data['active'] == 1) & np.isfinite(data['applied_brake'])
-                & np.isfinite(data['applied_gas']) & np.isin(data['brake_mode'], [1, 10, 13]))
+  autonomous = autonomous_mask(data, DT)
   moving = (data['vraw'] > .1) & (data['vraw'] < 2)
   # Measured pressure can identify physical response during manual braking;
   # it must never be paired with openpilot's inactive brake command as training input.
@@ -80,15 +67,19 @@ def pressure_prediction(data, model, onset_delay=0., onset_rise=None):
   mask, _ = masks(data)
   output = np.full(len(mask), np.nan)
   for part in runs(mask):
-    first = part[0]
+    eligible = part[data['t'][part] >= data['t'][part[0]] + model['pressure']['delay'] + DT - 1e-8]
+    if not len(eligible):
+      continue
+    first = eligible[0]
     dynamics = PressureDynamics(model, dt=DT)
-    dynamics.pressure = data['pressure'][first] / 30000
-    for i in range(len(dynamics.brakes)):
-      dynamics.brakes[i] = data['applied_brake'][first] / 400
+    history = [(data['t'][i], data['applied_brake'][i] / 400.) for i in part if i <= first]
+    dynamics.pressure_lag.seed(data['t'][first], history, data['pressure'][first] / 30000.)
+    dynamics.gas_lag.time = dynamics.regen_lag.time = data['t'][first]
+    output[first] = data['pressure'][first]
     previous_command = data['applied_brake'][first]
     onset = False
     wait = 0
-    for i in part:
+    for i, after in zip(eligible[:-1], eligible[1:], strict=True):
       command = data['applied_brake'][i]
       if command > 0 and previous_command <= 0 and dynamics.pressure < .01:
         onset, wait = True, round(onset_delay / DT)
@@ -100,10 +91,10 @@ def pressure_prediction(data, model, onset_delay=0., onset_rise=None):
           dynamics.pressure = old_pressure
           wait -= 1
         elif onset_rise is not None:
-          dynamics.pressure = old_pressure + (dynamics.pressure - old_pressure) * (model['pressure']['rise'] + DT) / (onset_rise + DT)
+          dynamics.pressure = old_pressure + (dynamics.pressure - old_pressure) * (-np.expm1(-DT/onset_rise)) / (-np.expm1(-DT/model['pressure']['rise']))
       if command <= 0 or dynamics.pressure >= .05:
         onset = False
-      output[i] = dynamics.pressure * 30000
+      output[after] = dynamics.pressure * 30000
   return output
 
 
@@ -111,28 +102,22 @@ def rmse(values):
   return float(np.sqrt(np.mean(np.square(values)))) if len(values) else None
 
 
-def motion_error(data, predicted_pressure, model):
-  autonomous, _ = masks(data)
+def motion_error(data, model, predicted_pressure):
+  """Measurement-conditioned force diagnosis, never free-running qualification."""
+  prepared = prepare_observations(data)
+  X = response_features(prepared, model['regen_delay'], *model['regen_fade_speed'], coupled=len(model['coefficients']) > 5)
+  measured = X @ model['coefficients'] - 9.81 * np.sin(data['controller_pitch'])
+  calculated = measured + model['coefficients'][1] * (data['pressure'] - predicted_pressure) / 30000.
+  mask = prepared['mask'] & (data['engine_rpm'] == 0) & np.isfinite(measured) & np.isfinite(calculated)
   stages = []
-  for part in runs(autonomous & (data['engine_rpm'] == 0) & (data['vraw'] > .1), minimum=20):
-    dynamics = PressureDynamics(model, dt=DT)
-    start = part[0]
-    dynamics.regen = max(0., -data['applied_gas'][start] / 650)
-    dynamics.gas = max(0., data['applied_gas'][start] / 1018)
-    for k in range(len(dynamics.regens)):
-      dynamics.regens[k] = dynamics.regen
-    calculated, measured = [], []
-    for i in part:
-      a = dynamics.step(data['applied_gas'][i], data['applied_brake'][i], data['vraw'][i], data['controller_pitch'][i])
-      other = a + model['coefficients'][1] * dynamics.pressure
-      calculated.append(other - model['coefficients'][1] * predicted_pressure[i] / 30000)
-      measured.append(other - model['coefficients'][1] * data['pressure'][i] / 30000)
+  for part in runs(mask, minimum=20):
     velocity = data['vraw'][part]
-    def error(accel, velocity=velocity):
-      predicted = velocity[0] + np.r_[0., np.cumsum((np.asarray(accel)[1:] + np.asarray(accel)[:-1]) * DT / 2)]
+    def error(accel, velocity=velocity, part=part):
+      predicted = velocity[0] + np.r_[0., np.cumsum((accel[part][1:] + accel[part][:-1]) * DT / 2)]
       return {'speed_rmse': rmse(predicted - velocity), 'end_speed_error': float(predicted[-1] - velocity[-1])}
-    stages.append({'start': float(data['t'][start]), 'end': float(data['t'][part[-1]]),
-                   'command_pressure_to_motion': error(calculated), 'measured_pressure_to_motion': error(measured)})
+    stages.append({'start': float(data['t'][part[0]]), 'end': float(data['t'][part[-1]]),
+                   'command_pressure_to_motion': error(calculated), 'measured_pressure_to_motion': error(measured),
+                   'conditioned_on': 'observed speed, pitch and initial velocity'})
   return stages
 
 
@@ -157,6 +142,43 @@ def physical_fit(items, source):
     errors.append(float(predicted_change - (data['vraw'][part[-1]] - data['vraw'][part[0]])))
   return {'samples': len(y), 'seconds': len(y) * DT, 'coefficients': fit.x.tolist(), 'acceleration_rmse': rmse(X @ fit.x - y),
           'episode_count': len(errors), 'episode_velocity_change_rmse': rmse(errors), 'converged': bool(fit.success)}
+
+
+def regen_command_audit(items, evaluation_route):
+  """Test a joint-command association without assigning units to raw regen.
+
+  Fit on other routes and evaluate this route unchanged. Conditioning on speed
+  and negative-gas demand distinguishes a brake-command association from the
+  already modeled speed fade; it does not establish causal EBCM semantics.
+  """
+  partitions = {'training': [], 'evaluation': []}
+  associations = []
+  for event, data in items:
+    mask = masks(data)[0] & np.isfinite(data['regen_raw']) & (data['vraw'] > .3) & (data['vraw'] < 10)
+    if mask.sum() < 20:
+      continue
+    speed = data['vraw'][mask]
+    X = np.column_stack([np.ones(len(speed)), speed / 10., (speed / 10.)**2, data['applied_gas'][mask] / 650.])
+    brake, y = data['applied_brake'][mask] / 400., data['regen_raw'][mask]
+    residual_y = y - X @ np.linalg.lstsq(X, y, rcond=None)[0]
+    residual_brake = brake - X @ np.linalg.lstsq(X, brake, rcond=None)[0]
+    correlation = float(np.corrcoef(residual_y, residual_brake)[0, 1]) if min(np.std(residual_y), np.std(residual_brake)) > 1e-8 else None
+    associations.append({'id': event['id'], 'partial_correlation': correlation, 'samples': len(y),
+                         'regen_with_brake_and_zero_pressure_samples': int((mask & (data['pressure'] < 300)
+                                                                                 & (data['regen_raw'] > 0) & (data['applied_brake'] > 0)).sum())})
+    partitions['evaluation' if event['route'] == evaluation_route else 'training'].append((X, brake, y))
+  result = {'events': associations, 'evaluation_route': evaluation_route, 'runtime_applied': False,
+            'interpretation': 'Raw-signal association, not torque calibration or proof of EBCM allocation semantics.'}
+  if all(partitions.values()):
+    train, test = (tuple(np.concatenate([p[i] for p in partitions[name]]) for i in range(3)) for name in ('training', 'evaluation'))
+    for name, joint in (('gas_and_speed', False), ('joint_brake_gas_and_speed', True)):
+      X, b, y = train
+      design = np.column_stack([X, b]) if joint else X
+      coefficient = np.linalg.lstsq(design, y, rcond=None)[0]
+      X, b, y = test
+      evaluated = np.column_stack([X, b]) if joint else X
+      result[name] = {'coefficients': coefficient.tolist(), 'evaluation_rmse_raw': rmse(evaluated @ coefficient - y), 'samples': len(y)}
+  return result
 
 
 def diagnose(root):
@@ -189,7 +211,7 @@ def diagnose(root):
                                                 & (d['applied_brake'][:-1] <= 0) & (d['pressure'][:-1] < 300))),
                    'command_pressure_rmse_raw': rmse((predictions[e['id']] - d['pressure'])[valid]),
                    'low_pressure_rmse_raw': rmse((predictions[e['id']] - d['pressure'])[valid & low]),
-                   'motion_episodes': motion_error(d, predictions[e['id']], model),
+                   'motion_episodes': motion_error(d, model, predictions[e['id']]),
                    'brake_modes': sorted(np.unique(d['brake_mode'][auto]).astype(int).tolist())})
   # Select on training routes only. A leave-route-out score is reported separately;
   # it is diagnostic and never silently substitutes a new runtime calibration.
@@ -224,8 +246,10 @@ def diagnose(root):
     missing.append('At least three independent autonomous zero-pressure application transitions are needed to identify onset delay.')
   missing.append('Verify the meaning and actuation-state dependence of the raw pressure/regen signals before pooling manual and autonomous response.')
   result = {'version': 1, 'source_sha256': hashlib.sha256(Path(__file__).read_bytes()).hexdigest(),
+            'sources': source_hashes(),
             'model_sha256': hashlib.sha256(json.dumps(model, sort_keys=True).encode()).hexdigest(),
             'events': events, 'pressure_onset_experiment': onset,
+            'regen_command_audit': regen_command_audit(training, evaluation_route),
             'physical_response': {source: physical_fit(training, source) for source in ('autonomous', 'manual')},
             'takeover_events': sum(e['kind'] == 'takeover' for e in events),
             'takeover_low_seconds': sum(int((masks(d)[0] & (d['vraw'] > .1) & (d['vraw'] < 2)).sum()) * DT

@@ -49,6 +49,6 @@ def test_pressure_onset_experiment_delays_application_without_changing_release()
   data = event_arrays(fixture())
   baseline = pressure_prediction(data, model)
   delayed = pressure_prediction(data, model, onset_delay=.2, onset_rise=.2)
-  assert np.max(delayed[data['t'] < 1.15]) == 0.
-  assert np.max(baseline[data['t'] < 1.15]) > 0.
+  assert np.nanmax(delayed[data['t'] < 1.15]) == 0.
+  assert np.nanmax(baseline[data['t'] < 1.15]) > 0.
   assert delayed[-1] == pytest.approx(baseline[-1], rel=.01)

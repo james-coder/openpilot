@@ -19,6 +19,7 @@ from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.selfdrive.controls.lib.volt_stopping import VoltStopping
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
 from openpilot.tools.profiling.volt_pressure_model import PressureDynamics, allocator_profile
+from openpilot.tools.profiling.volt_actuator import friction_motion
 
 DT = 0.01
 
@@ -53,6 +54,7 @@ class VoltPlant:
     if smooth and 'pressure_model' in fit:
       self.controller.volt_profile = controller_profile or allocator_profile(fit['pressure_model'])
       self.long.volt_profile = self.controller.volt_profile
+      self.long.volt_stopping = VoltStopping(stopping_profile or self.controller.volt_profile)
     self.state = car.CarState.new_message(vEgo=speed)
     self.cs = SimpleNamespace(
       out=self.state, loopback_lka_steering_cmd_ts_nanos=0, loopback_lka_steering_cmd_updated=False, pt_lka_steering_cmd_counter=0, volt_engine_running=False
@@ -72,17 +74,19 @@ class VoltPlant:
     self.state.vEgo = self.sensed_v
     self.state.vEgoRaw = self.v
     self.state.aEgo = self.a
-    self.state.standstill = self.v <= 0.0864
+    self.state.standstill = abs(self.v) <= 0.0864
     self.state.brakePressed = brake_pressed
     # Match the normal controls contract: a pedal override removes actuation.
     self.cc.longActive = active and not brake_pressed
-    command = self.long.update(self.cc.longActive, self.state, target, should_stop, (-4.0, 2.0), stop_trajectory_active=stop_trajectory_active)
-    self.cc.actuators.accel = float(command)
-    self.cc.actuators.longControlState = self.long.long_control_state
-    applied, _discarded_can = self.controller.update(self.cc.as_reader(), self.cs, int((1 + self.tick * DT) * 1e9))
+    self.cc.orientationNED = [0., float(np.arctan(self.grade)), 0.]
     if recorded_command is not None:
-      applied.gas, applied.brake = recorded_command['applied_gas'], recorded_command['applied_brake']
+      applied = SimpleNamespace(gas=recorded_command['applied_gas'], brake=recorded_command['applied_brake'])
       command = recorded_command.get('cmd', 0.)
+    else:
+      command = self.long.update(self.cc.longActive, self.state, target, should_stop, (-4.0, 2.0), stop_trajectory_active=stop_trajectory_active)
+      self.cc.actuators.accel = float(command)
+      self.cc.actuators.longControlState = self.long.long_control_state
+      applied, _discarded_can = self.controller.update(self.cc.as_reader(), self.cs, int((1 + self.tick * DT) * 1e9))
     self.command_delay.append((applied.gas, applied.brake))
     gas, brake = self.command_delay.popleft()
     alpha = DT / (self.fit['tau'] + DT)
@@ -100,12 +104,13 @@ class VoltPlant:
     )
     if self.dynamics is not None:
       physical_accel = self.dynamics.step(applied.gas, applied.brake, self.v, np.arctan(self.grade), self.regen_factor)
-    previous = self.v
-    physical_accel = float(physical_accel)
-    self.v = max(0.0, self.v + physical_accel * DT)
-    # Contact at rest prevents integrating negative forward speed; rollback is
-    # assessed as insufficient holding force, not hidden by this clamp.
-    self.x += (previous + self.v) * 0.5 * DT
+      drive, capacity = self.dynamics.drive_accel, self.dynamics.brake_capacity
+    else:
+      capacity = max(0., self.coef[1] * self.brake + regen_capacity * self.regen * self.regen_factor)
+      drive = self.coef[0] * self.gas + self.coef[-2] * max(0., 1 - abs(self.v) / 2.) + self.coef[-1] - self.grade * 9.81
+    force_accel = float(physical_accel)
+    self.v, displacement, physical_accel = friction_motion(self.v, float(drive), float(capacity), DT)
+    self.x += displacement
     # Match the GM wheel-speed quantization and production KF, rather than
     # fitting comfort metrics through an arbitrary acceleration low-pass filter.
     wheel_quantum = 0.0311 / 3.6 * self.CP.wheelSpeedFactor
@@ -118,6 +123,10 @@ class VoltPlant:
       'physical_v': self.v,
       'a': self.a,
       'physical_accel': physical_accel,
+      'force_accel': force_accel,
+      'brake_capacity': float(capacity),
+      'standstill': abs(self.v) <= .0864,
+      'metric_version': 2,
       'x': self.x,
       'target': target,
       'cmd': float(command),
@@ -208,7 +217,7 @@ def closed_loop_stop(
       radar.leadOne.aLeadK = lead_a
       sm['carState'].vEgo = plant.sensed_v
       sm['carState'].aEgo = plant.a
-      sm['carState'].standstill = plant.v <= 0.0864
+      sm['carState'].standstill = abs(plant.v) <= 0.0864
       sm['carState'].vCruise = speed * 3.6
       sm['controlsState'].longControlState = plant.long.long_control_state
       planner.update(sm)
@@ -229,7 +238,7 @@ def closed_loop_stop(
       ref = trajectory.reference.evaluate([max(0., trajectory.elapsed-planner.dt)])[0]
       row.update(function_v=float(ref[1]), function_a=float(ref[2]), function_j=float(ref[3]))
     trace.append(row)
-    if scenario in ('stationary', 'engine_on', 'moving_stop') and k > 300 and plant.v < 0.01 and all(r['v'] < 0.01 for r in trace[-100:]):
+    if scenario in ('stationary', 'engine_on', 'moving_stop') and k > 300 and abs(plant.v) < 0.01 and all(abs(r['v']) < 0.01 for r in trace[-100:]):
       break
   return trace
 
@@ -240,7 +249,7 @@ def metrics(trace):
   tail = [r for r in trace if r['t'] >= trace[-1]['t'] - 1.]
   complete = tail[-1]['t'] - tail[0]['t'] >= .98 and all(abs(r['v']) < .05 for r in tail)
   candidates = [i for i in range(1, len(trace) - 100)
-                if trace[i]['v'] < .3 <= trace[i-1]['v'] and max(r['v'] for r in trace[i:i+100]) < .5]
+                if abs(trace[i]['v']) < .3 <= abs(trace[i-1]['v']) and max(abs(r['v']) for r in trace[i:i+100]) < .5]
   stopped = candidates[-1] if candidates and complete else None
   if stopped is None:
     return {
@@ -252,7 +261,7 @@ def metrics(trace):
     }
   end = trace[stopped]['t']
   low_start = stopped
-  while low_start > 0 and trace[low_start - 1]['v'] < 2 and trace[low_start]['t'] - trace[low_start - 1]['t'] < 0.1:
+  while low_start > 0 and abs(trace[low_start - 1]['v']) < 2 and trace[low_start]['t'] - trace[low_start - 1]['t'] < 0.1:
     low_start -= 1
   low = trace[low_start:stopped + 1]
   # Match the native review: centered 0.2 s difference, -3 to +0.5 s.

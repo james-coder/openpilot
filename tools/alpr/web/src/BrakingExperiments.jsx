@@ -27,6 +27,7 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
   const [error, setError] = useState('');
   const [window, setWindow] = useState('approach');
   const result = validation?.recorded_cases?.find((c) => c.event === event?.id);
+  const previous = validation?.previous_checkpoint?.recorded_cases?.find(c => c.event === event?.id)?.traffic?.personal;
   useEffect(() => {
     const controller = new AbortController();
     setTraces({});
@@ -96,6 +97,48 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
           {' '}Normal driving: <strong>{validation.readiness.road_ready ? 'Validated' : 'Not validated'}</strong>.
         </p>
       )}
+      {validation.collision_experiments && (
+        <details aria-label="Collision protection research" open>
+          <summary>Collision protection: not available in this candidate</summary>
+          <p>The ASCM is unpowered. The fork’s stock tuning does not restore factory emergency braking.
+            A forward-collision warning and a smooth stop do not establish collision protection.</p>
+          <p>{validation.collision_experiments.note}</p>
+          <p>These examples evaluate braking before a comfort curve ends. A negative minimum gap means
+            the assumed maximum braking is already insufficient. “Mitigation” still requests the assumed
+            braking limit; it does not claim avoidance. None of these requests reaches the car.</p>
+          <div style={{ overflowX: 'auto' }}>
+            <table className="braking-comparison">
+              <thead><tr><th>Hypothetical situation</th><th>Initial gap</th><th>Speed</th>
+                <th>Response delay + age</th><th>Assumed net braking limit</th><th>Decision</th>
+                <th>Required braking</th><th>Minimum gap at limit</th></tr></thead>
+              <tbody>{validation.collision_experiments.cases.map(c => <tr key={c.name}>
+                <td>{c.name}</td><td>{n(c.gap, ' m')}</td><td>{n(c.ego_speed, ' m/s')}</td>
+                <td>{n(c.assumptions.response_seconds + c.age, ' s')}</td>
+                <td>{n(c.assumptions.ego_brake, ' m/s²')}</td><td>{c.result.state.replaceAll('_', ' ')}</td>
+                <td>{n(c.result.required_brake, ' m/s²')}</td><td>{n(c.result.minimum_gap_at_limit, ' m')}</td>
+              </tr>)}</tbody>
+            </table>
+          </div>
+          <p>Research references: <a href="https://www.chevrolet.com/ownercenter/content/dam/gmownercenter/gmna/dynamic/manuals/2017/Chevrolet/Volt/2k17volt1stPrint.pdf#page=211">2017 Volt manual, page 210</a>,
+            {' '}<a href="https://xr793.com/wp-content/uploads/2017/07/2017-Chevrolet-Volt.pdf#page=20">Chevrolet equipment brochure</a>,
+            {' '}<a href="https://techlink.mynetworkcontent.com/wp-content/uploads/2017/11/GM_TechLink_19_October_2017.pdf#page=4">GM guidance distinguishing ACC braking</a>,
+            {' '}<a href="https://patents.google.com/patent/US20130110368A1/en">GM collision-braking patent</a>,
+            {' '}<a href="https://autowarefoundation.github.io/autoware_universe/main/control/autoware_autonomous_emergency_braking/">Autoware AEB</a>.</p>
+        </details>
+      )}
+      {validation.qualification_groups && (
+        <div aria-label="Braking qualification by cause">
+          <h3>What still needs to pass</h3>
+          {validation.qualification_groups.map(group => (
+            <details key={group.name} open={group.status === 'blocked'}>
+              <summary>{group.name}: {group.status}</summary>
+              {group.failed_checks.length > 0 && <ul>{group.failed_checks.map(name => <li key={name}>{name}</li>)}</ul>}
+              {group.status === 'pending' && <p>Current-source device measurements are required.</p>}
+            </details>
+          ))}
+          <p>Motion metrics now include signed speed and static friction. Holding capacity is reported separately from acceleration.</p>
+        </div>
+      )}
       <p>{validation.profile_kind === 'brake'
         ? 'Current candidate: brake control with the existing planner and following distance. Personal approach learning is deferred.'
         : 'Current candidate: a fitted polynomial stopping function and brake control.'}</p>
@@ -152,10 +195,20 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
           {chart('Replayed speed', 'mph', 'v', 'v', 2.236936292)}
           {chart('Replayed acceleration', 'm/s²', 'a')}
           {chart('Replayed lead gap', 'm', 'gap', 'd')}
+          {validation.metric_version >= 2 && <>
+            {chart('Actual simulated motion', 'm/s²', 'physical_accel', 'vehicle_ax')}
+            {chart('Stationary holding margin', 'm/s²', 'hold_margin', 'unavailable')}
+          </>}
           <p>
             A completed stop requires a full second at rest. Unfinished replays have no final stopping time
             or settled-gap measurement; they are not extended beyond the recorded lead observations.
           </p>
+          {previous && <details>
+            <summary>Previous candidate for this stop</summary>
+            <p>{validation.previous_checkpoint.note}</p>
+            <p>Completed: {previous.stopped ? 'yes' : 'no'}; low-speed phase: {n(previous.low_speed_seconds, ' s')};
+              {' '}settled gap: {n(previous.settled_gap, ' m')}; final jerk p95: {n(previous.final_jerk_p95, ' m/s³')}.</p>
+          </details>}
           <table className="braking-comparison">
             <thead>
               <tr>
@@ -187,6 +240,7 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
                 ['Speed rebound', 'speed_rebound', ' m/s'],
                 ['Settled gap', 'settled_gap', ' m'],
                 ['Braking onset relative to recorded stop', 'braking_onset', ' s'],
+                ['Simulated rollback distance', 'rollback_distance', ' m'],
               ].map(([label, key, unit]) => (
                 <tr key={key}>
                   <th>{label}</th>

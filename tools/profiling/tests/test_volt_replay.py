@@ -27,13 +27,14 @@ def test_causal_hold_never_uses_future_command():
 def test_command_replay_trims_an_initial_incomplete_window():
   fit = {'delay': 0., 'tau': .1, 'speed': [0., 5.], 'coefficients': [1., 3., 0., 1., .1, 0.]}
   rows = []
-  for t in np.arange(0., .2, .01):
-    row = {'t': float(t), 'vraw': 1., 'v': 1., 'a': 0., 'valid': True, 'active': True, 'foot': False, 'regen': False, 'gas': False}
+  for t in np.arange(0., 3., .01):
+    row = {'t': float(t), 'vraw': 1., 'v': 1., 'a': 0., 'valid': True, 'active': True, 'foot': False, 'regen': False, 'gas': False, 'pedal': 0.,
+           'steering_angle': 0., 'pressure': 0., 'brake_mode': 1, 'controller_pitch': .02, 'engine_rpm': 0.}
     if t >= .03:
       row.update(applied_gas=0., applied_brake=0.)
     rows.append(row)
   result = replay_commands({'samples': rows}, fit)
-  assert result[0]['t'] == pytest.approx(.03)
+  assert result[0]['t'] == pytest.approx(1.24)
 
 
 def test_pressure_simulation_matches_fitting_kernel():

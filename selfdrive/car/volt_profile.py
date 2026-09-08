@@ -19,10 +19,14 @@ SOURCE_FILES = (
   'selfdrive/test/longitudinal_maneuvers/volt_plant.py', 'selfdrive/test/longitudinal_maneuvers/volt_replay.py',
   'tools/profiling/volt_pressure_model.py', 'tools/profiling/volt_response_fit.py', 'tools/profiling/validate_volt_braking.py',
   'tools/profiling/volt_brake_diagnostics.py', 'tools/profiling/volt_function_fit.py', 'tools/profiling/volt_finish_metrics.py',
+  'tools/profiling/volt_actuator.py', 'tools/profiling/volt_observations.py',
+  'tools/profiling/volt_collision.py', 'opendbc/safety/modes/gm.h',
   'selfdrive/controls/lib/volt_polynomial.py', 'selfdrive/controls/controlsd.py', 'cereal/log.capnp',
+  'common/realtime.py', 'selfdrive/controls/plannerd.py', 'selfdrive/controls/radard.py',
+  'selfdrive/selfdrived/selfdrived.py', 'selfdrive/modeld/modeld.py',
 )
 VEHICLE_CHECKS = ('walking_stop', 'moderate_stop', 'holding', 'pedal_override', 'grade', 'engine_on', 'reduced_regen',
-                  'driver_comfort', 'runtime_deadlines')
+                  'driver_comfort', 'runtime_deadlines', 'emergency_brake_authority', 'collision_target_validation')
 
 
 def digest(value):
@@ -37,7 +41,7 @@ def qualification(checks, identity, vehicle=None):
   offline = [c for c in checks if c.get('stage') == 'offline']
   release = [c for c in checks if c.get('stage') == 'release']
   # Empty reports and old schemas cannot accidentally unlock a profile.
-  required = {'response', 'traffic', 'nominal', 'stress', 'independent_response'}
+  required = {'response', 'traffic', 'nominal', 'stress', 'independent_response', 'runtime', 'collision'}
   categories = {c.get('category') for c in offline}
   test_ready = bool(offline) and required <= categories and all(c.get('pass') is True for c in offline)
   vehicle = vehicle or {}

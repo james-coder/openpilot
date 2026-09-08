@@ -25,6 +25,8 @@ try {
   await page.goto(`http://127.0.0.1:${server.address().port}/#braking`);
   await page.getByRole('heading', { name: 'What happens before the stop?' }).waitFor();
   await page.getByRole('heading', { name: 'Acceleration and braking', exact: false }).waitFor();
+  await page.getByRole('heading', { name: 'A smoother stop must also finish promptly' }).waitFor();
+  assert.equal(await page.getByRole('columnheader', { name: 'With manual taper' }).count(), 1);
   assert.equal(await page.locator('[aria-label="Recorded stop"] option').count(), 3);
   await page.getByLabel('Inspect braking time').fill('-1');
   await page.getByLabel('Brightness', { exact: true }).fill('1.5');

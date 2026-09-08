@@ -104,5 +104,9 @@ class LongControl:
         self.pid.i = float(np.clip(self.pid.i, -PROFILE.integral_limit, PROFILE.integral_limit))
         output_accel = self.pid.p + self.pid.i + self.pid.f
 
+    if volt_braking and active and not CS.standstill and a_target <= accel_limits[0]:
+      # A positive residual integral must not soften a full-braking request.
+      # Preserve stationary holding and the stock path when the candidate is off.
+      output_accel = accel_limits[0]
     self.last_output_accel = np.clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel

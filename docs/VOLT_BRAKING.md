@@ -90,6 +90,42 @@ to MPC's STOP_DISTANCE. The style report retains speed-binned deceleration and
 review state. Review, more representative support, and validated actuator/gap
 mapping are needed before a personalized runtime profile can be released.
 
+### Finishing pace, not jerk alone
+
+The recorded autonomous low-speed phases (below 2 m/s until the sustained-stop
+threshold) last 2.86, 3.03, and 4.16 seconds. The two manual references last 1.83
+and 1.46 seconds. At 10:27 the car briefly accelerates again near 0.6–0.7 m/s
+after effective braking falls away, then builds friction pressure sharply. The
+manual reference can brake harder earlier while easing into the actual stop.
+Peak deceleration alone does not capture this difference.
+
+Validation now scores finishing duration separately from jerk and speed rebound.
+The exploratory target uses the manual duration range with a 0.35-second tolerance
+and the observed manual jerk ceiling. This is a design objective, not a validated
+comfort threshold or a matched-traffic comparison. Simulator jerk now uses the
+same centered 0.2-second difference and -3 to +0.5-second window as the native
+review; duration excludes any earlier low-speed stretches.
+
+A host-only moving-stop taper is fitted to speed-binned manual acceleration on
+the first route and scored without refitting on the second. The fit excludes
+invalid or unknown control states and the first second after intervention. Its
+unmeasured zero-speed endpoint retains the existing candidate assumption; it
+does not change the runtime profile, planner settings, or personal review labels.
+
+This experiment exposes a remaining problem: replacing only the final taper has
+almost no effect on the low-speed duration. Fixed-target replays still spend
+2.28, 1.75, and 2.66 seconds below 2 m/s, and the baseline candidate takes roughly
+3.7–5.5 seconds in the four nominal stationary-lead scenarios. Lower jerk alone
+previously let those prolonged finishes pass. They now fail the finishing-pace
+comparison. Approach planning must be evaluated together with the actuator fix;
+the taper alone is not a complete personal braking policy. Recorded-target
+replays cannot establish how a different planner would approach the same lead.
+
+A new transition regression also found that a positive residual integral could
+soften a full-braking request in the candidate. While moving and active, the
+candidate now passes a request at the negative command limit through at that
+limit. Disengagement, stationary holding, and the stock controller are unchanged.
+
 ## Reproduce locally
 
 Bulk recordings and reports belong on `/mnt/algo14`, outside Git. Use the repo

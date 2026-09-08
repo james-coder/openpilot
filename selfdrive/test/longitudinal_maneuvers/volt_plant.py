@@ -15,6 +15,7 @@ from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.values import CAR, DBC
 from opendbc.car.gm.volt_longitudinal import VoltFlags
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+from openpilot.selfdrive.controls.lib.volt_stopping import VoltStopping
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
 
 DT = 0.01
@@ -29,9 +30,13 @@ def volt_params(smooth=False):
 
 
 class VoltPlant:
-  def __init__(self, fit, speed=0.0, smooth=False, grade=0.0, regen_factor=1.0, extra_delay=0.0):
+  def __init__(self, fit, speed=0.0, smooth=False, grade=0.0, regen_factor=1.0, extra_delay=0.0, stopping_profile=None):
+    if stopping_profile is not None and not smooth:
+      raise ValueError('A simulated stopping profile requires the candidate controller')
     self.CP = volt_params(smooth)
     self.long = LongControl(self.CP)
+    if stopping_profile is not None:
+      self.long.volt_stopping = VoltStopping(stopping_profile)
     self.controller = CarController(DBC[CAR.CHEVROLET_VOLT], self.CP)
     self.state = car.CarState.new_message(vEgo=speed)
     self.cs = SimpleNamespace(
@@ -96,7 +101,7 @@ class VoltPlant:
     }
 
 
-def replay_targets(event, fit, smooth=False):
+def replay_targets(event, fit, smooth=False, stopping_profile=None):
   rows = event['samples']
   times = np.array([r['t'] for r in rows])
   controls = [r for r in rows if r.get('active') and 'target' in r]
@@ -104,7 +109,7 @@ def replay_targets(event, fit, smooth=False):
     raise ValueError('No valid autonomous planner targets')
   ts = np.array([r['t'] for r in controls])
   targets = np.array([r['target'] for r in controls])
-  plant = VoltPlant(fit, speed=rows[0]['v'], smooth=smooth)
+  plant = VoltPlant(fit, speed=rows[0]['v'], smooth=smooth, stopping_profile=stopping_profile)
   trace = []
   for t in np.arange(times[0], times[-1], DT):
     idx = min(len(controls) - 1, max(0, int(np.searchsorted(ts, t, side='right') - 1)))
@@ -116,9 +121,10 @@ def replay_targets(event, fit, smooth=False):
 
 
 def closed_loop_stop(
-  fit, speed=10.0, distance=45.0, smooth=False, grade=0.0, regen_factor=1.0, extra_delay=0.0, personality=log.LongitudinalPersonality.standard
+  fit, speed=10.0, distance=45.0, smooth=False, grade=0.0, regen_factor=1.0, extra_delay=0.0, personality=log.LongitudinalPersonality.standard,
+  stopping_profile=None,
 ):
-  plant = VoltPlant(fit, speed, smooth, grade, regen_factor, extra_delay)
+  plant = VoltPlant(fit, speed, smooth, grade, regen_factor, extra_delay, stopping_profile)
   planner = LongitudinalPlanner(plant.CP, init_v=speed)
   sm = {name: getattr(messaging.new_message(name), name) for name in ('carState', 'controlsState', 'selfdriveState', 'liveParameters', 'carControl', 'modelV2')}
   sm['selfdriveState'].enabled = True
@@ -155,14 +161,20 @@ def closed_loop_stop(
 def metrics(trace):
   stopped = next((i for i in range(1, len(trace) - 100) if trace[i]['v'] < 0.3 and max(r['v'] for r in trace[i : i + 100]) < 0.5), len(trace) - 1)
   end = trace[stopped]['t']
-  final = [r for r in trace if end - 3 <= r['t'] <= end + 0.3]
-  low = [r for r in trace[: stopped + 1] if r['v'] < 2]
-  a = np.array([r['a'] for r in final])
-  jerk = (a[20:] - a[:-20]) / 0.2
+  low_start = stopped
+  while low_start > 0 and trace[low_start - 1]['v'] < 2 and trace[low_start]['t'] - trace[low_start - 1]['t'] < 0.1:
+    low_start -= 1
+  low = trace[low_start:stopped + 1]
+  # Match the native review: centered 0.2 s difference, -3 to +0.5 s.
+  times = np.array([r['t'] for r in trace])
+  a = np.array([r['a'] for r in trace])
+  jerk = (np.interp(times + 0.1, times, a) - np.interp(times - 0.1, times, a)) / 0.2
+  jerk = jerk[(times >= end - 3) & (times <= end + 0.5)]
   rebound = max((r['v'] - min(p['v'] for p in low[: i + 1]) for i, r in enumerate(low)), default=0.0)
   return {
     'min_accel': min(r['a'] for r in trace),
     'final_jerk_p95': float(np.percentile(abs(jerk), 95)) if len(jerk) else None,
+    'low_speed_seconds': end - low[0]['t'],
     'speed_rebound': rebound,
     'stopped': trace[-1]['v'] < 0.05,
     'minimum_gap': min((r.get('gap', float('inf')) for r in trace), default=None) if 'gap' in trace[0] else None,

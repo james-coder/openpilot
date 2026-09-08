@@ -75,6 +75,31 @@ def test_stopping_exit_and_disengagement_reset():
   assert lc.pid.i == 0
 
 
+def test_offline_taper_is_per_instance_and_retains_urgent_braking():
+  from openpilot.selfdrive.controls.lib.volt_stopping import VoltStopping
+
+  baseline = LongControl(volt_params(True))
+  experiment = LongControl(volt_params(True))
+  experiment.volt_stopping = VoltStopping(replace(PROFILE, stop_decel=(0.18, 0.9, 1.1)))
+  cs = car.CarState.new_message(vEgo=0.5, aEgo=-0.4)
+  for _ in range(100):
+    original = baseline.update(True, cs, -0.1, True, (-4.0, 2.0))
+    changed = experiment.update(True, cs, -0.1, True, (-4.0, 2.0))
+  assert changed < original - 0.3
+  assert baseline.volt_stopping.profile is PROFILE
+  assert experiment.update(True, cs, -4.0, True, (-4.0, 2.0)) == -4
+
+
+@pytest.mark.parametrize('should_stop', [False, True])
+def test_positive_integral_cannot_soften_full_braking_request(should_stop):
+  lc = LongControl(volt_params(True))
+  cs = car.CarState.new_message(vEgo=0.5, aEgo=-0.4)
+  lc.update(True, cs, -0.1, should_stop, (-4.0, 2.0))
+  lc.pid.i = 0.4
+  assert lc.update(True, cs, -4.0, should_stop, (-4.0, 2.0)) == -4
+  assert lc.update(False, cs, -4.0, should_stop, (-4.0, 2.0)) == 0
+
+
 def test_stationary_noise_does_not_ratchet_holding_brake():
   cp = volt_params(True)
   lc = LongControl(cp)

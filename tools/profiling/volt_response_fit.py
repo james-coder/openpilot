@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 
 import numpy as np
+from opendbc.car.gm.volt_longitudinal import PROFILE
 from scipy.optimize import lsq_linear
 from scipy.signal import lfilter
 
@@ -143,18 +144,61 @@ def fit_response(routes):
   }
 
 
+def fit_stopping_curve(examples, samples):
+  """A host-only taper hypothesis; fit one route and score the other unchanged.
+
+  Equal speed bins avoid overweighting time spent creeping. The unsupported
+  standstill endpoint retains the existing candidate value. No runtime profile
+  or review decision is changed by this fit.
+  """
+  routes = sorted({e['route'] for e in examples})
+  if len(routes) < 2:
+    return None
+  train_ids = [e['id'] for e in examples if e['route'] == routes[0]]
+  holdout_ids = [e['id'] for e in examples if e['route'] != routes[0]]
+  train = [r for key in train_ids for r in samples[key] if 0.3 <= r['v'] < 2 and r['a'] < -0.05]
+  knots, decel, support = [0.0], [PROFILE.stop_decel[0]], []
+  for lo, hi in ((0.3, 0.5), (0.5, 0.75), (0.75, 1), (1, 1.5), (1.5, 2)):
+    rows = [r for r in train if lo <= r['v'] < hi]
+    support.append({'speed_bin': [lo, hi], 'samples': len(rows)})
+    if len(rows) >= 10:
+      knots.append(float(np.median([r['v'] for r in rows])))
+      decel.append(float(np.clip(np.median([-r['a'] for r in rows]), decel[-1], 1.2)))
+  if len(knots) < 3:
+    return None
+  holdout = [r for key in holdout_ids for r in samples[key] if knots[1] <= r['v'] <= knots[-1] and r['a'] < -0.05]
+  errors = [-r['a'] - np.interp(r['v'], knots, decel) for r in holdout]
+  return {
+    'stop_speed': knots,
+    'stop_decel': decel,
+    'train_ids': train_ids,
+    'holdout_ids': holdout_ids,
+    'support': support,
+    'holdout_samples': len(errors),
+    'holdout_rmse': float(np.sqrt(np.mean(np.square(errors)))) if errors else None,
+    'validated': False,
+    'runtime_applied': False,
+    'limitations': [
+      'Only the moving-stop taper is fitted; approach planning and terminal gap remain unchanged.',
+      'The zero-speed endpoint is the existing candidate assumption, not a measured manual braking target.',
+      'Two manual finishes in different traffic do not establish a general personal stopping policy.',
+    ],
+  }
+
+
 def fit_style(root):
   index = json.loads((root / 'index.json').read_text())
   decisions = json.loads((root / 'decisions.json').read_text()) if (root / 'decisions.json').exists() else {}
-  examples = []
+  examples, samples = [], {}
   for e in index['events']:
     if not e['recommended_manual'] or decisions.get(e['id']) == 'exclude':
       continue
     event = json.loads((root / 'events' / (e['id'] + '.json')).read_text())
-    rows = [r for r in event['samples'] if -8 <= r['t'] <= 0 and not r.get('active') and r['foot']]
+    rows = [r for r in event['samples'] if -8 <= r['t'] <= 0 and r.get('active') is False and r.get('valid') and r['foot']]
     # Human braking only: exclude the first second after leaving active control.
     last_active = max((r['t'] for r in event['samples'] if r.get('active')), default=-100)
     rows = [r for r in rows if r['t'] > last_active + 1]
+    samples[e['id']] = rows
     bins = []
     for lo, hi in ((0, 0.5), (0.5, 1), (1, 2), (2, 5), (5, 10), (10, 20)):
       values = [-r['a'] for r in rows if lo <= r['v'] < hi and r['a'] < -0.05]
@@ -176,6 +220,7 @@ def fit_style(root):
     'examples': examples,
     'speed_bins': [[0, 0.5], [0.5, 1], [1, 2], [2, 5], [5, 10], [10, 20]],
     'median_settled_radar_gap': float(np.median(gaps)) if gaps else None,
+    'stopping_candidate': fit_stopping_curve(examples, samples),
     'validated': False,
     'runtime_applied': False,
     'reason': (

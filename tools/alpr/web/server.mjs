@@ -1,3 +1,4 @@
+import { installBrakingRoutes } from './braking-server.mjs';
 import express from 'express';
 import { installAssistedRoutes } from './assisted-server.mjs';
 import fs from 'node:fs';
@@ -81,7 +82,22 @@ export function createApp({
   });
   app.use(express.json({ limit: '5mb' }));
   installAssistedRoutes(app, dataDir);
+  installBrakingRoutes(app, dataDir);
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
+  for (const name of ['braking-audit', 'can-coverage'])
+    app.get('/api/' + name, (_req, res) => {
+      const file = path.join(dataDir, name + '.json');
+      if (!fs.existsSync(file)) return res.status(404).json({ error: 'Analysis not prepared yet.' });
+      res.json(read(file));
+    });
+  app.use(
+    '/diagnostics-ui',
+    (req, res, next) => {
+      if (!/^\/can-(list|graph|flat)\.png$/.test(req.path)) return res.sendStatus(404);
+      next();
+    },
+    express.static(path.join(dataDir, 'diagnostics-ui'), { dotfiles: 'deny', index: false }),
+  );
   app.get('/api/study', (_req, res) => res.json(read(path.join(dataDir, 'study-results.json'))));
   app.get('/api/labels', (_req, res) => {
     const data = current();

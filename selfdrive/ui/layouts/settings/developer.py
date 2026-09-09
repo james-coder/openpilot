@@ -2,7 +2,8 @@ from openpilot.common.params import Params
 from openpilot.selfdrive.ui.widgets.ssh_key import ssh_key_item
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets import Widget
-from openpilot.system.ui.widgets.list_view import toggle_item
+from openpilot.system.ui.widgets.list_view import toggle_item, multiple_button_item
+from opendbc.car.gm.volt_longitudinal import supported as volt_supported
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
 from openpilot.system.ui.lib.application import gui_app
@@ -90,6 +91,20 @@ class DeveloperLayout(Widget):
     )
     self._on_enable_ui_debug(self._params.get_bool("ShowDebugInfo"))
 
+    self._volt_mode = multiple_button_item(
+      lambda: tr("Volt Braking"),
+      lambda: tr("Test requires passing offline checks and is for supervised empty-area stops. " +
+                 "Brake and Personal require vehicle validation. Changes apply next drive."),
+      buttons=[lambda: tr("Stock"), lambda: tr("Test"), lambda: tr("Brake"), lambda: tr("Personal")],
+      callback=self._set_volt_mode, selected_index=0, button_width=190,
+    )
+    self._volt_protection = multiple_button_item(
+      lambda: tr("Volt Braking Protection"),
+      lambda: tr("Unavailable until separate calibration and device timing checks pass. Monitor cannot brake. " +
+                 "Test requires controlled-area qualification; Enabled requires physical validation. Changes apply next drive."),
+      buttons=[lambda: tr("Off"), lambda: tr("Monitor"), lambda: tr("Test"), lambda: tr("Enabled")],
+      callback=self._set_volt_protection, selected_index=0, button_width=190,
+    )
     self._scroller = Scroller([
       self._adb_toggle,
       self._ssh_toggle,
@@ -99,10 +114,34 @@ class DeveloperLayout(Widget):
       self._lat_maneuver_toggle,
       self._alpha_long_toggle,
       self._ui_debug_toggle,
+      self._volt_mode,
+      self._volt_protection,
     ], line_separator=True, spacing=0)
 
     # Toggles should be not available to change in onroad state
     ui_state.add_offroad_transition_callback(self._update_toggles)
+
+  def _set_volt_mode(self, index):
+    if not ui_state.is_offroad() or ui_state.CP is None or not volt_supported(ui_state.CP):
+      return
+    bundle = getattr(self, '_volt_bundle', None)
+    if index and (not bundle or not bundle['readiness']['test_ready' if index == 1 else 'road_ready']
+                  or index == 2 and bundle['kind'] != 'brake' or index == 3 and bundle['kind'] != 'personal'):
+      self._update_toggles()
+      return
+    self._params.put("VoltLongitudinalMode", ('stock', 'test', 'smooth', 'personal')[index], block=True)
+
+  def _set_volt_protection(self, index):
+    if not ui_state.is_offroad() or ui_state.CP is None or not volt_supported(ui_state.CP) or not 0 <= index <= 3:
+      return
+    from openpilot.selfdrive.car.volt_protection import read_bundle
+    bundle = read_bundle()
+    stage = ('', 'monitor_ready', 'test_ready', 'road_ready')[index]
+    if index and (not bundle or not bundle['readiness'][stage]):
+      self._update_toggles()
+      return
+    self._params.put('VoltProtectionMode', ('off', 'monitor', 'test', 'enabled')[index], block=True)
+    self._update_toggles()
 
   def _render(self, rect):
     self._scroller.render(rect)
@@ -114,6 +153,23 @@ class DeveloperLayout(Widget):
 
   def _update_toggles(self):
     ui_state.update_params()
+    from openpilot.selfdrive.car.volt_profile import read_bundle
+    self._volt_bundle = read_bundle()
+    self._volt_mode.set_visible(ui_state.CP is not None and volt_supported(ui_state.CP))
+    self._volt_mode.action_item.set_enabled(ui_state.is_offroad())
+    mode = self._params.get("VoltLongitudinalMode", return_default=True)
+    available = self._volt_bundle and self._volt_bundle['readiness']['test_ready' if mode == 'test' else 'road_ready']
+    available = available and (mode in ('stock', 'test') or self._volt_bundle['kind'] == ('brake' if mode == 'smooth' else 'personal'))
+    selected = ('stock', 'test', 'smooth', 'personal').index(mode) if mode in ('stock', 'test', 'smooth', 'personal') and available else 0
+    self._volt_mode.action_item.set_selected_button(selected)
+    from openpilot.selfdrive.car.volt_protection import read_bundle as read_protection
+    protection = read_protection()
+    self._volt_protection.set_visible(ui_state.CP is not None and volt_supported(ui_state.CP))
+    self._volt_protection.action_item.set_enabled(ui_state.is_offroad())
+    requested = self._params.get('VoltProtectionMode', return_default=True)
+    stage = {'monitor': 'monitor_ready', 'test': 'test_ready', 'enabled': 'road_ready'}.get(requested)
+    selected = ('off', 'monitor', 'test', 'enabled').index(requested) if stage and protection and protection['readiness'][stage] else 0
+    self._volt_protection.action_item.set_selected_button(selected)
 
     # Hide non-release toggles on release builds
     # TODO: we can do an onroad cycle, but alpha long toggle requires a deinit function to re-enable radar and not fault

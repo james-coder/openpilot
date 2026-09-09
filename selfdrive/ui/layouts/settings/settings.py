@@ -52,6 +52,7 @@ class SettingsLayout(Widget):
   def __init__(self):
     super().__init__()
     self._current_panel = PanelType.DEVICE
+    self._can_parent = PanelType.DEVICE
 
     # Panel configuration
     wifi_manager = WifiManager()
@@ -67,6 +68,8 @@ class SettingsLayout(Widget):
       PanelType.CAN_DIAGNOSTICS: PanelInfo(tr_noop("CAN Bus"), CanDiagnosticsLayout()),
     }
 
+    self._panels[PanelType.CAN_DIAGNOSTICS].instance.on_back = lambda: self.set_current_panel(self._can_parent)
+
     self._font_medium = gui_app.font(FontWeight.MEDIUM)
     self._close_icon = gui_app.texture("icons/close2.png", CLOSE_ICON_SIZE, CLOSE_ICON_SIZE)
 
@@ -77,6 +80,9 @@ class SettingsLayout(Widget):
     self._close_callback = on_close
 
   def _render(self, rect: rl.Rectangle):
+    if self._current_panel == PanelType.CAN_DIAGNOSTICS:
+      self._panels[self._current_panel].instance.render(rect)
+      return
     # Calculate layout
     sidebar_rect = rl.Rectangle(rect.x, rect.y, SIDEBAR_WIDTH, rect.height)
     panel_rect = rl.Rectangle(rect.x + SIDEBAR_WIDTH, rect.y, rect.width - SIDEBAR_WIDTH, rect.height)
@@ -149,6 +155,8 @@ class SettingsLayout(Widget):
       panel.instance.render(content_rect)
 
   def _handle_mouse_release(self, mouse_pos: MousePos) -> None:
+    if self._current_panel == PanelType.CAN_DIAGNOSTICS:
+      return  # Hidden sidebar hitboxes must not respond beneath the full-screen inspector.
     # Check close button
     if rl.check_collision_point_rec(mouse_pos, self._close_btn_rect):
       if self._close_callback:
@@ -163,6 +171,8 @@ class SettingsLayout(Widget):
 
   def set_current_panel(self, panel_type: PanelType):
     if panel_type != self._current_panel:
+      if panel_type == PanelType.CAN_DIAGNOSTICS:
+        self._can_parent = self._current_panel
       self._panels[self._current_panel].instance.hide_event()
       self._current_panel = panel_type
       self._panels[self._current_panel].instance.show_event()

@@ -62,11 +62,10 @@ class BusStats:
 
 
 @dataclass
-class MessageStats:
-  count: int = 0
-  last_seen: float = 0.
+class MessageStats(BusStats):
   data: bytes = b''
   decoded: bool = False
+  last_decoded: float = 0.
 
 
 @dataclass(frozen=True)
@@ -223,6 +222,7 @@ class CanSnapshot:
     touched: set[tuple[int, int, str | None]] = set()
 
     updated_by_bus: dict[int, set[int]] = {}
+    value_changes, last_values = {}, {}
     for t, frames in batches:
       frames_by_bus: dict[int, list[tuple[int, bytes, int]]] = {}
       for address, dat, src in frames:
@@ -271,11 +271,22 @@ class CanSnapshot:
           continue
         updated = parser.update([(t, bus_frames)])
         updated_by_bus.setdefault(bus, set()).update(updated)
+        for address in updated:
+          for name, values in parser.vl_all[address].items():
+            key = (bus, address, name)
+            row = self.rows.get(key)
+            previous_value = last_values.get(key, row.value if row else None)
+            for value in values:
+              if previous_value is not None and previous_value != value:
+                value_changes[key] = value_changes.get(key, 0)+1
+              previous_value = value
+            last_values[key] = previous_value
 
     for bus, addrs in updated_by_bus.items():
       parser = self.parsers[bus]
       for address in addrs:
         self.messages[(bus, address)].decoded = True
+        self.messages[(bus, address)].last_decoded = now
         raw_key = (bus, address, None)
         if raw_key in self.rows:
           del self.rows[raw_key]
@@ -292,7 +303,7 @@ class CanSnapshot:
           if choice:
             text += ' ('+choice+')'
           previous = self.rows.get(key)
-          changes = previous.changes + (previous.value != value) if previous else 0
+          changes = (previous.changes if previous else 0) + value_changes.get(key, 0)
           self.rows[key] = SignalRow(bus=bus, address=address, signal=name,
                                       text=text, last_updated=now, value=value, message=message, unit=unit, choice=choice, changes=changes)
 
@@ -315,6 +326,8 @@ class GraphBuffer:
   def add(self, t: float, value: float) -> None:
     if not math.isfinite(t) or not math.isfinite(value):
       return
+    if self.samples and t < self.samples[-1][0]:
+      return  # Late data must not draw backwards or invalidate time-cursor lookup.
     self.samples.append((t, value))
     cutoff = t - self.window_s
     while self.samples and self.samples[0][0] < cutoff:

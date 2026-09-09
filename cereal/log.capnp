@@ -62,6 +62,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     radarFault @25;
     radarTempUnavailable @93;
     radarDegraded @100;
+    voltProtectionDegraded @101;
     brakeHold @26;
     parkBrake @27;
     manualRestart @28;
@@ -709,6 +710,10 @@ struct RadarState @0x9a185389d6fdd05f {
     modelProb @13 :Float32;
     radar @14 :Bool;
     radarTrackId @15 :Int32 = -1;
+    visionMatched @16 :Bool;
+    visionProbability @17 :Float32;
+    measured @18 :Bool;
+    observationMonoTime @19 :UInt64;
 
     deprecated :group {
       aLead @5 :Float32;
@@ -812,6 +817,7 @@ struct ControlsState @0x97ff69c53601abf1 {
   curvature @37 :Float32;  # path curvature from vehicle model
   desiredCurvature @61 :Float32;  # lag adjusted curvatures used by lateral controllers
   forceDecel @51 :Bool;
+  longitudinalProtection @67 :Car.CarControl.LongitudinalProtection;
 
   lateralControlState :union {
     pidState @53 :LateralPIDState;

@@ -53,6 +53,11 @@ export function installBrakingRoutes(app, dataDir) {
     if (!fs.existsSync(file)) return res.sendStatus(404);
     res.json(read(file));
   });
+  app.get('/api/braking/protection', (_req, res) => {
+    const file = path.join(root, 'protection-validation.json');
+    if (!fs.existsSync(file)) return res.sendStatus(404);
+    res.json(read(file));
+  });
   app.get('/api/braking/simulation/:id/:mode', (req, res) => {
     const modes = [
       'commands',

@@ -113,6 +113,15 @@ def test_stationary_noise_does_not_ratchet_holding_brake():
   assert gas == -650 and brake >= 133
 
 
+def test_standstill_flag_cannot_weaken_full_braking_while_wheels_move():
+  controller = LongControl(volt_params(True))
+  cs = car.CarState.new_message(vEgo=.05, vEgoRaw=.05, standstill=True)
+  for _ in range(25):
+    controller.update(True, cs, -.2, True, (-4., 2.))
+  assert controller.update(True, cs, -4., True, (-4., 2.)) == -4.
+  assert controller.update(False, cs, -4., True, (-4., 2.)) == 0.
+
+
 def test_carried_positive_integral_cannot_cancel_the_final_taper():
   lc = LongControl(volt_params(True))
   cs = car.CarState.new_message(vEgo=0.2, aEgo=-0.3)

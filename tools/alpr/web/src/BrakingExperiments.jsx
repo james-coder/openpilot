@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import BrakingProtection from './BrakingProtection';
 import BrakingDiagnostics from './BrakingDiagnostics';
 import { Trace } from './BrakingReview';
 
@@ -99,7 +100,7 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
       )}
       {validation.collision_experiments && (
         <details aria-label="Collision protection research" open>
-          <summary>Collision protection: not available in this candidate</summary>
+          <summary>Collision protection: vehicle activation blocked</summary>
           <p>The ASCM is unpowered. The fork’s stock tuning does not restore factory emergency braking.
             A forward-collision warning and a smooth stop do not establish collision protection.</p>
           <p>{validation.collision_experiments.note}</p>
@@ -126,6 +127,7 @@ export default function BrakingExperiments({ validation, event, cursor, jump, re
             {' '}<a href="https://autowarefoundation.github.io/autoware_universe/main/control/autoware_autonomous_emergency_braking/">Autoware AEB</a>.</p>
         </details>
       )}
+      <BrakingProtection />
       {validation.qualification_groups && (
         <div aria-label="Braking qualification by cause">
           <h3>What still needs to pass</h3>

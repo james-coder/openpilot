@@ -409,6 +409,14 @@ class SelfdriveD:
     stock_long_is_braking = self.enabled and not self.CP.openpilotLongitudinalControl and CS.aEgo < -1.25
     model_fcw = self.sm['modelV2'].meta.hardBrakePredicted and not CS.brakePressed and not stock_long_is_braking
     planner_fcw = self.sm['longitudinalPlan'].fcw and self.enabled
+    from openpilot.selfdrive.car.volt_protection import ACTUATE
+    from opendbc.car.gm.volt_longitudinal import supported as volt_supported
+    if (volt_supported(self.CP) and self.CP.flags & ACTUATE and self.sm.valid['controlsState'] and self.sm.alive['controlsState']
+        and 0 <= time.monotonic()-self.sm.logMonoTime['controlsState']/1e9 <= .15):
+      protection = self.sm['controlsState'].longitudinalProtection
+      planner_fcw |= protection.active and str(protection.state) in ('protective', 'emergency')
+      if str(protection.state) == 'degraded':
+        self.events.add(EventName.voltProtectionDegraded)
     if (planner_fcw or model_fcw) and not self.CP.notCar:
       self.events.add(EventName.fcw)
 

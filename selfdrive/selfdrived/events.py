@@ -905,6 +905,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.NO_ENTRY: NoEntryAlert("Radar Error: Restart the Car"),
   },
 
+  EventName.voltProtectionDegraded: {
+    ET.SOFT_DISABLE: soft_disable_alert("Braking Protection Unavailable: Take Control"),
+    ET.NO_ENTRY: NoEntryAlert("Braking Protection Unavailable"),
+  },
+
   EventName.radarTempUnavailable: {
     ET.SOFT_DISABLE: soft_disable_alert("Radar Temporarily Unavailable"),
     ET.NO_ENTRY: NoEntryAlert("Radar Temporarily Unavailable"),

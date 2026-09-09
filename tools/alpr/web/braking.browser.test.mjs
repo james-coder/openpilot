@@ -11,7 +11,7 @@ for (const file of ['labels.template.json', 'study-results.json'])
   fs.copyFileSync(path.join(source, file), path.join(fixture, file));
 const review = path.join(fixture, 'braking', 'review');
 fs.mkdirSync(review, { recursive: true });
-for (const file of ['index.json', 'validation.json', 'function-fit.json'])
+for (const file of ['index.json', 'validation.json', 'function-fit.json', 'protection-validation.json'])
   fs.copyFileSync(path.join(source, 'braking', 'review', file), path.join(review, file));
 for (const dir of ['events', 'media', 'simulation'])
   fs.symlinkSync(path.join(source, 'braking', 'review', dir), path.join(review, dir));
@@ -29,6 +29,15 @@ try {
   await page.getByLabel('Collision protection research').waitFor();
   assert.equal(await page.getByLabel('Collision protection research').locator('tbody tr').count(), 7);
   await page.getByRole('columnheader', { name: 'Minimum gap at limit' }).waitFor();
+  await page.getByRole('heading', { name: 'Protective braking: requested and applied commands' }).waitFor();
+  assert.equal(await page.getByLabel('Synthetic protection scenario').locator('option').count(), 10);
+  await page.getByLabel('Synthetic protection scenario').selectOption('insufficient initial distance');
+  await page.getByRole('heading', { name: 'Protective brake command', exact: false }).waitFor();
+  const protectionStatus = page.locator('[aria-label="Protection command bench"] p').filter({ hasText: 'State at' });
+  const initialProtectionStatus = await protectionStatus.textContent();
+  await page.getByRole('img', { name: 'Protective brake command over time', exact: true }).hover({ position: { x: 300, y: 100 } });
+  assert.notEqual(await protectionStatus.textContent(), initialProtectionStatus);
+  await page.getByLabel('Synthetic protection scenario').selectOption('target loss during intervention');
   await page.getByRole('heading', { name: 'Reconstructed traffic: the planner runs again' }).waitFor();
   assert.equal(await page.getByRole('columnheader', { name: 'Brake candidate' }).count(), 1);
   const brakeOnly = JSON.parse(fs.readFileSync(path.join(review, 'validation.json'))).profile_kind === 'brake';

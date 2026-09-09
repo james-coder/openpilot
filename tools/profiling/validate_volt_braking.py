@@ -13,6 +13,8 @@ from openpilot.selfdrive.test.longitudinal_maneuvers.volt_replay import replay_c
 from openpilot.tools.profiling.volt_braking import atomic_json
 from openpilot.tools.profiling.volt_finish_metrics import physical_finish, holding_metrics
 from openpilot.tools.profiling.volt_collision import experiments as collision_experiments
+from openpilot.tools.profiling.volt_protection_scenarios import run_scenarios as protection_scenarios
+from openpilot.selfdrive.car.volt_protection import read_bundle as read_protection_bundle
 from openpilot.tools.profiling.volt_response_fit import fit_style, load_routes, prepare
 from openpilot.tools.profiling.volt_pressure_model import allocator_profile, evaluate_pressure_response
 from openpilot.selfdrive.car.volt_profile import make_bundle, source_hashes, VEHICLE_CHECKS
@@ -272,12 +274,17 @@ def validate(root, vehicle_evidence=None, kind='brake', baseline=None):
         'Optional example review; final driver comfort is checked during the supervised vehicle tests.', 'manual', 'diagnostic')
 
   collision = collision_experiments()
-  # An offline equation is not a sensor-to-actuator emergency-braking system.
-  # Keep this explicit even if every comfort and synthetic maneuver passes.
-  check('End-to-end collision protection', False,
-        'The ASCM is unpowered. The independent stopping envelope is offline only; target selection, '
-        + 'degraded operation and actuator arbitration are not connected or validated. FCW and soft MPC costs are insufficient.', 'collision')
-  check('Emergency braking authority and response', False,
+  protection = protection_scenarios()
+  atomic_json(root / 'protection-validation.json', {**protection, 'sources': tested_sources})
+  check('Protection controls-to-CAN bench', all(c['pass'] for c in protection['cases']),
+        'Production supervisor, controls arbitration and GM CAN generation under declared synthetic assumptions; '
+        + 'includes two-stage priority, delayed friction, lost targets, cut-in, adjacent objects and driver override. No physical qualification.', 'collision')
+  qualified_protection = read_protection_bundle()
+  protection_ready = bool(qualified_protection and qualified_protection['readiness']['test_ready'])
+  check('End-to-end collision protection', protection_ready,
+        'The ASCM is unpowered. The production protection path is connected and bench-tested; separate '
+        + 'source-bound target/geometry, fault, actuator and whole-device runtime evidence must qualify it before vehicle tests.', 'collision')
+  check('Emergency braking authority and response', protection_ready,
         'CAN brake limit 400 is not proof of full physical braking. Emergency response, achievable deceleration, '
         + 'range geometry and grip/grade/regen bounds require instrumented evidence; the comfort fit cannot supply them.', 'collision')
 
@@ -309,8 +316,10 @@ def validate(root, vehicle_evidence=None, kind='brake', baseline=None):
                    'failed_checks': [c['name'] for c in relevant if not c['pass']]})
   groups.append({'name': 'Device timing and physical tests', 'status': 'passed' if readiness['vehicle_validated'] else 'pending',
                  'failed_checks': []})
-  result = {'version': 8, 'metric_version': 2, 'qualification_groups': groups, 'collision_experiments': collision,
-            'profile_kind': kind, 'summary': 'Corrected causal response, signed motion, and continuous holding checks.',
+  result = {'version': 9, 'metric_version': 2, 'qualification_groups': groups, 'collision_experiments': collision,
+            'protection_readiness': qualified_protection['readiness'] if qualified_protection else
+              {'monitor_ready': False, 'test_ready': False, 'road_ready': False},
+            'profile_kind': kind, 'summary': 'Connected gated protection, causal response, signed motion, and continuous holding checks.',
             'deployment_ready': readiness['road_ready'], 'readiness': readiness, 'profile_id': bundle['id'] if bundle else None,
             'checks': checks, 'recorded_cases': recorded, 'scenarios': scenarios,
             'manual_reference': {'examples': style['examples'], 'stopping_candidate': style['stopping_candidate'],

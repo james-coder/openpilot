@@ -95,6 +95,7 @@ class Track:
       "modelProb": model_prob,
       "radar": True,
       "radarTrackId": self.identifier,
+      "measured": bool(self.measured),
     }
 
   def potential_low_speed_lead(self, v_ego: float):
@@ -167,6 +168,8 @@ def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capn
   lead_dict = {'status': False}
   if track is not None:
     lead_dict = track.get_RadarState(lead_prob)
+    lead_dict['visionMatched'] = True
+    lead_dict['visionProbability'] = float(lead_msg.prob)
   elif (track is None) and ready and (lead_prob > .5):
     lead_dict = get_RadarState_from_vision(lead_msg, v_ego, model_v_ego, lead_prob)
 
@@ -256,6 +259,8 @@ class RadarD:
         # radar_state is fresh each update: absent fields keep their defaults.
         for key, value in values.items():
           setattr(lead, key, value)
+        if lead.radar and lead.measured:
+          lead.observationMonoTime = sm.logMonoTime.get('liveTracks', 0)
 
   def publish(self, pm: messaging.PubMaster):
     assert self.radar_state is not None

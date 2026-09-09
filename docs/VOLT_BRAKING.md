@@ -16,7 +16,8 @@ check results. Previous checkpoint `be7d59f9e381e077` is preserved under
 comparable to the corrected motion metrics. Report check counts include diagnostic
 comparisons and are not a safety score.
 
-Checkpoint `d4b26a2de7fe714d` passes 58/96 report checks with 26 offline failures.
+Checkpoint `472dc36034a18686` passes 59/97 report checks with 26 offline failures.
+The previous `d4b26a2de7fe714d` artifacts are preserved in the review history.
 All three recorded command approaches can now be reproduced without treating
 raw pedal jitter as intervention, but their modeled stop-time errors are
 −1.68, −0.59 and −3.63 seconds. The response model still fails qualification.
@@ -29,7 +30,27 @@ No candidate was installed or selected on the device. The fork's stock tuning
 remains the default selection; **it does not restore an unpowered factory ASCM**.
 Test and Personal remain unavailable. A separate collision-protection category
 now blocks qualification even if all comfort checks pass. See
-[the factory research, offline envelope and required integration](VOLT_COLLISION_PROTECTION.md).
+[the factory research, connected protection and qualification requirements](VOLT_COLLISION_PROTECTION.md).
+
+The independent supervisor now evaluates both radar leads and reaches production
+controls arbitration and GM CAN generation in ten synthetic bench scenarios.
+Protective requests dominate comfort before and after PID/stopping transitions,
+and a separately qualified backend enforces friction floors within the existing
+brake400 limit. Sensor faults, target loss, freshness, driver overrides and
+confirmed holding have explicit behavior and tests. All ten synthetic scenarios
+meet their declared command/behavior checks; that does not qualify the car.
+
+Protection has separate Off/Monitor/Test/Enabled gates. No emergency calibration
+is installed, so every protection readiness level remains false. Comfort-fit
+evidence cannot authorize protection. The device was reachable and offroad during
+the final check, still on `684def7`; no candidate was installed or activated.
+
+Validation: 416 tests and 279 subtests, including GM panda checks; four upstream
+longitudinal tests with 58 maneuver subtests; 11 web tests; production web and
+cereal/params builds; browser review, Ruff and whitespace checks. A separate
+20,000-cycle host run with two distinct leads and GC disabled found zero
+unreachable objects and 0.16 MB RSS growth. Host timing remains separate from
+required whole-device comma 3 measurements.
 
 ## Fitted function
 

@@ -21,9 +21,14 @@ SOURCE_FILES = (
   'tools/profiling/volt_brake_diagnostics.py', 'tools/profiling/volt_function_fit.py', 'tools/profiling/volt_finish_metrics.py',
   'tools/profiling/volt_actuator.py', 'tools/profiling/volt_observations.py',
   'tools/profiling/volt_collision.py', 'opendbc/safety/modes/gm.h',
+  'selfdrive/controls/lib/volt_collision.py', 'selfdrive/controls/lib/volt_protection.py', 'selfdrive/car/volt_protection.py',
+  'opendbc/car/gm/volt_protection.py', 'opendbc/car/car.capnp', 'common/params_keys.h',
   'selfdrive/controls/lib/volt_polynomial.py', 'selfdrive/controls/controlsd.py', 'cereal/log.capnp',
   'common/realtime.py', 'selfdrive/controls/plannerd.py', 'selfdrive/controls/radard.py',
   'selfdrive/selfdrived/selfdrived.py', 'selfdrive/modeld/modeld.py',
+  'selfdrive/selfdrived/events.py', 'selfdrive/ui/layouts/settings/developer.py',
+  'tools/profiling/volt_protection_scenarios.py',
+  'tools/profiling/qualify_volt_protection.py', 'tools/profiling/benchmark_volt_protection.py',
 )
 VEHICLE_CHECKS = ('walking_stop', 'moderate_stop', 'holding', 'pedal_override', 'grade', 'engine_on', 'reduced_regen',
                   'driver_comfort', 'runtime_deadlines', 'emergency_brake_authority', 'collision_target_validation')

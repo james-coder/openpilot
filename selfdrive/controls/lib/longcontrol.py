@@ -1,3 +1,4 @@
+import math
 import numpy as np
 from cereal import car
 from opendbc.car.gm.volt_longitudinal import enabled as volt_enabled, PROFILE, VoltFlags
@@ -110,7 +111,8 @@ class LongControl:
         self.pid.i = float(np.clip(self.pid.i, -profile.integral_limit, positive_limit))
         output_accel = self.pid.p + self.pid.i + self.pid.f
 
-    if volt_braking and active and not CS.standstill and a_target <= accel_limits[0]:
+    stationary_wheels = CS.standstill and math.isfinite(CS.vEgoRaw) and abs(CS.vEgoRaw) < .03
+    if volt_braking and active and not stationary_wheels and a_target <= accel_limits[0]:
       # A positive residual integral must not soften a full-braking request.
       # Preserve stationary holding and the stock path when the candidate is off.
       output_accel = accel_limits[0]

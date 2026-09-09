@@ -157,6 +157,23 @@ class Car:
       self.params.put("VoltLongitudinalProfile", f"{profile.version}:{mode}", block=True)
       cloudlog.info("Volt longitudinal profile", version=profile.version, mode=mode, validated=profile.validated)
 
+      from openpilot.selfdrive.car.volt_protection import BUNDLE_PATH as PROTECTION_PATH, read_bundle as read_protection, configure, ACTUATE
+      from opendbc.car.gm.volt_protection import ProtectionGate
+      try:
+        raw_protection = PROTECTION_PATH.read_text()
+      except OSError:
+        raw_protection = None
+      protection = read_protection(raw=raw_protection) if raw_protection else None
+      protection_mode = configure(self.CP, self.params.get('VoltProtectionMode', return_default=True), protection)
+      if protection_mode != 'unavailable':
+        self.params.put('VoltProtectionActiveBundle', raw_protection, block=True)
+      else:
+        self.params.remove('VoltProtectionActiveBundle')
+      if controller_available:
+        authority = protection['calibration'].authority if self.CP.flags & ACTUATE else None
+        self.CI.CC.protection_gate = ProtectionGate(authority)
+      self.params.put('VoltProtectionStatus', protection_mode, block=True)
+
     # Write previous route's CarParams
     prev_cp = self.params.get("CarParamsPersistent")
     if prev_cp is not None:
@@ -224,6 +241,12 @@ class Car:
     co_send = messaging.new_message('carOutput')
     co_send.valid = self.sm.all_checks(['carControl'])
     co_send.carOutput.actuatorsOutput = self.last_actuators_output
+    gate = getattr(self.CI.CC, 'protection_gate', None) if self.CI.CC else None
+    if gate is not None:
+      co_send.carOutput.protectionAccepted = gate.accepted
+      co_send.carOutput.protectionReason = gate.reason
+      co_send.carOutput.protectionCheckedMonoTime = gate.checked_time
+      co_send.carOutput.protectionCommandMonoTime = gate.command_time
     self.pm.send('carOutput', co_send)
 
     # kick off controlsd step while we actuate the latest carControl packet
@@ -242,6 +265,12 @@ class Car:
 
   def controls_update(self, CS: car.CarState, CC: car.CarControl):
     """control update loop, driven by carControl"""
+
+    from opendbc.car.gm.volt_longitudinal import supported as volt_supported
+    if volt_supported(self.CP):
+      now = self.can_log_mono_time if REPLAY else time.monotonic_ns()
+      if not self.sm.valid['carControl'] or not 0 <= now-self.sm.logMonoTime['carControl'] <= 150_000_000:
+        return  # Never re-stamp or re-transmit stale protection/actuator commands.
 
     if not self.initialized_prev:
       # Initialize CarInterface, once controls are ready

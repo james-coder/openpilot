@@ -1,57 +1,114 @@
 # CAN inspection on comma 3
 
-Open **Settings → CAN Bus**. The inspector is read-only and uses the installed
-car's matching powertrain, radar and chassis DBCs. It does not transmit CAN or
-change driving controls. For the Volt, these contain 113 message definitions and
-651 signal definitions; availability in a DBC does not mean the car sends them.
+Open **Settings → CAN Bus**. This full-screen inspector reads the installed car's
+powertrain, radar and chassis DBCs. It does not transmit CAN, change panda bus
+configuration or affect driving controls. For the Volt, the installed DBCs contain
+113 message definitions and 651 signal definitions. A definition does not mean
+the car actually sends that message.
 
-- **Live** shows received signals with physical units and named states. Values
-  older than one second are marked stale. Tap the name for the full message,
-  signal, DBC, bit position, signedness, byte order, scaling and named states.
-- **Changed** keeps signals that changed at least once during this UI session.
-- **Raw** shows observed messages that could not be decoded. Messages with an
-  unexpected payload length remain raw instead of displaying plausible values.
-- **DBC** browses definitions even without traffic. Tap **View** for every signal
-  in that message; unsampled signals say **Not seen** and cannot be graphed.
-  Tap **DBC** again to return to messages.
-- **Coverage** shows each bus's activity, approximate frame rate, observed IDs,
-  matching definitions, messages decoded at least once, unknown IDs and available
-  definitions. Counts accumulate during the current UI process's inspection
-  session; a decoded count is not proof that every later frame passes validation.
-- **Search** accepts message or signal names, units, bus names and hexadecimal or
-  decimal CAN IDs (for example `0x135`, `0135` or `309`). Space-separated terms
-  must all match. Submit an empty search to clear it. Selecting a DBC message
-  clears search so all its signals appear. Search entry is available when parked.
+## Finding signals
 
-Graphs use a thick cyan line, bright axes, a current-value readout and explicit
-**Freeze/Resume** and **Close** buttons. Plot taps do not close the graph. The
-window is 30 seconds and history is retained during CAN interruptions. Graphs
-keep at most 6,000 finite samples. Unknown messages are capped at 256 IDs per bus;
-coverage reports omitted frames. Each UI update reads at most 32 CAN batches,
-checking an 8 ms work budget between batches, and drops batches older than one
-second. Live value measurements bypass the shared permanent text cache.
+**Browse** shows received signals with units and named states. **Find** accepts
+message/signal names, units, bus names and hexadecimal or decimal CAN IDs
+(`0x135`, `0135`, `309`). Space-separated terms must all match. Submit an empty
+search to clear it. The keyboard is available when parked.
+
+Use **Bus** to narrow the list and **Filter** to choose:
+
+- **Live:** received signals and raw messages. Data older than one second is
+  explicitly marked stale.
+- **Changed since reset:** signals that changed at least once after resetting
+  the baseline, including changes that returned to the original value. Signals
+  first received after reset are marked **New**.
+- **Raw:** messages without a matching definition or valid payload length.
+
+Tap **Save** beside a signal to add it to **Favorites**. Up to 24 signals persist
+in selection order across inspector exits and reboots, validated against the
+current car and DBC. Saving another car's favorites replaces the previous car's
+list. Favorites are independent of Browse's search and filters.
+
+Tap a row for signal details, **Graph**, **Message**, or **Decoding details**.
+Back restores the previous Browse list and scroll position. **More → DBC
+definitions** includes unsampled messages; **Signals** lists every definition
+in a message, with **Not seen** until received. Decoding details show byte order,
+start bit, width, signedness, scaling and named states.
+
+## Freeze and compare
+
+**Freeze** holds one timestamped snapshot across values, message counts, raw
+bytes, bit activity, coverage and graphs. The receiver continues collecting
+bounded live data. **Resume** returns to current values. Baseline/activity resets
+and graph selection are disabled while frozen.
+
+**Compare** displays up to two vertically stacked graphs with independent units
+and scales, a shared cursor and a 10- or 30-second window. Choose Signal 1/2;
+favorites appear first, followed by the remaining DBC signals. Unsampled choices
+wait for incoming data. Enum signals use step plots. Gaps longer than one second
+are not connected. Tap a plot to inspect real samples and their ages; while
+frozen, **Previous sample / Next sample** moves the shared cursor precisely.
+
+## Messages and bits
+
+Message details include received count, approximate frame rate, sample age,
+received/expected payload length, last successful decode and raw bytes.
+
+**Bits** shows four bytes per page, each with eight large touch cells. Previous /
+Next supports payloads through 64 bytes. Cyan outlines identify DBC-defined bits,
+including signals crossing bytes and Motorola byte order. The selected signal's
+bits are highlighted. Amber underlines mark recent changes. **Dim defined**
+helps locate unexplained activity. Tap a bit for its signal association and
+change count; undefined bits explicitly say they are undefined in the installed
+DBC. **View signal** opens the associated definition. Activity tracking starts
+when the live Bits view opens; it cannot recover earlier changes from a frozen
+snapshot. Reset activity starts a new baseline for the selected message.
+
+**More → Bus coverage** separates observed IDs, matching definitions, successful
+decodes and unknown traffic. Counts cover this inspection session. A successful
+decode count does not mean every later frame passes validation.
+
+## Resource limits and lifecycle
+
+The inspector reads at most 32 CAN batches per UI update, checking an 8 ms budget
+between batches, and rejects invalid batches or timestamps outside the previous
+second. Unknown IDs are capped at 256 per bus; coverage reports omitted frames.
+Only two selected graph histories are retained (6,000 samples each), along with
+one frozen snapshot. Bit activity is tracked only for the selected message.
+Dynamic text measurements bypass the shared permanent text cache.
 
 Parked inspection gets a five-minute inactivity timeout: offroad, or with fresh
 valid car state below 0.1 m/s and disengaged. Movement, engagement, unavailable
-onroad vehicle state, panel exit or a panel fault restore the normal timeout.
-The existing onroad-transition navigation is preserved.
+onroad vehicle state, exit or a fault restore the normal timeout. Normal onroad
+navigation is preserved, including exiting the embedded search keyboard. Leaving
+the inspector releases its CAN subscription, session and histories. The hidden
+Settings sidebar does not receive touches behind the full-screen inspector.
 
-Run data and usability tests from a configured checkout:
+There is no on-device webserver or QR handoff. Desktop previews below are
+illustrative renders of native widgets with synthetic data, not vehicle footage.
+
+## Validation and previews
+
+Run data and native touch checks from a configured checkout with a desktop display:
 
 ```sh
-.venv/bin/pytest -q selfdrive/ui/tests/test_can_diagnostics_data.py \
-  selfdrive/ui/tests/test_can_diagnostics_usability.py
+DISPLAY=:0 BIG=1 SCALE=1 OFFSCREEN=1 PYTHONPATH="$PWD" .venv/bin/pytest -n0 -q \
+  selfdrive/ui/tests/test_can_diagnostics_data.py \
+  selfdrive/ui/tests/test_can_diagnostics_usability.py \
+  selfdrive/ui/tests/test_can_inspection.py selfdrive/ui/tests/test_can_touch.py
 ```
 
-Generate illustrative previews with the real widgets and an existing desktop
-display, without a CAN subscription:
+Generate previews and run layout, control and text-cache checks:
 
 ```sh
 DISPLAY=:0 BIG=1 SCALE=1 OFFSCREEN=1 PYTHONPATH="$PWD" \
   .venv/bin/python -m tools.profiling.render_can_diagnostics \
-  --output /mnt/algo14/comma3-alpr/can-coverage-preview
+  --output /tmp/can-touch-preview
 ```
 
-The renderer exercises filters, message browsing, expanded decoding details,
-graph controls and text-cache stability. Its frames contain synthetic data;
-these images do not establish live traffic coverage on the vehicle.
+Run the synthetic decode/memory profile (opens no CAN socket):
+
+```sh
+PYTHONPATH="$PWD" .venv/bin/python -m tools.profiling.profile_can_inspection --iterations 24000
+```
+
+The synthetic checks establish bounds and interaction behavior, not coverage of
+all live vehicle traffic or human evaluation of the physical touchscreen.

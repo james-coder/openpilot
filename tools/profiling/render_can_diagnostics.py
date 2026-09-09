@@ -35,6 +35,7 @@ def render_previews(output: Path):
     snap.ingest([(time.monotonic_ns(), frames)])
     snap.rows = {k: r for k, r in snap.rows.items() if k[2] in ('PRNDL', 'EngineRPM', 'EngineTPS', 'SteeringWheelAngle', None)}
     layout._snapshot = snap
+    layout._build_catalog()
     layout._dirty = set(snap.rows)
     layout._refresh_display(time.monotonic())
     rect = rl.Rectangle(550, 25, 1560, 1030)
@@ -53,6 +54,38 @@ def render_previews(output: Path):
       rl.unload_image(capture)
 
     draw('can-list.png')
+    layout._set_view('coverage')
+    draw('can-coverage.png')
+    layout._set_view('dbc')
+    layout._query = 'PRNDL'
+    layout._apply_filters()
+    draw('can-dbc.png')
+    layout._inspect_message((0, 309))
+    draw('can-message.png')
+    layout._items[(0, 309, 'PRNDL')]._set_description_visible(True)
+    draw('can-details.png')
+    layout._items[(0, 309, 'PRNDL')]._set_description_visible(False)
+    assert any(item.is_visible for item in layout._items.values())
+    layout._query = 'this does not exist'
+    layout._apply_filters()
+    assert not any(item.is_visible for item in layout._items.values())
+    draw('can-empty.png')
+    layout._query = ''
+    layout._set_view('live')
+    layout._on_bus_filter_changed(1)
+    assert all(not item.is_visible or key[0] == 0 for key, item in layout._items.items())
+    layout._on_bus_filter_changed(0)
+    layout._set_view('raw')
+    assert all(not item.is_visible or key[2] is None for key, item in layout._items.items())
+    draw('can-raw.png')
+    layout._set_view('changed')
+    assert not any(item.is_visible for item in layout._items.values())
+    snap.ingest([(time.monotonic_ns(), [packer.make_can_msg('ECMEngineStatus', 0, {'EngineRPM': 1400, 'EngineTPS': 18})])])
+    layout._dirty = set(snap.rows)
+    layout._refresh_display(time.monotonic())
+    assert layout._items[(0, 201, 'EngineRPM')].is_visible
+    draw('can-changed.png')
+    layout._set_view('live')
     layout._open_graph((0, 201, 'EngineRPM'))
     graph = layout._graph
     graph.reset('00C9 EngineRPM [RPM]')
@@ -80,8 +113,18 @@ def render_previews(output: Path):
     for i in range(301):
       graph.add_sample(now-30+i*.1, 2)
     draw('can-flat.png')
+    # Changing numeric values must not grow the shared text cache indefinitely.
+    from openpilot.system.ui.lib.text_measure import _cache
+    from openpilot.selfdrive.ui.layouts.settings.can_diagnostics import draw_live_value
+    font = gui_app.font(FontWeight.NORMAL)
+    before = len(_cache)
+    rl.begin_drawing()
+    for i in range(2000):
+      draw_live_value(font, f'{i*1.23456789:.8f}', rl.Rectangle(600, 200, 500, 100))
+    rl.end_drawing()
+    assert len(_cache) == before
     rl.close_window()
-  print('Rendered list, graph and flatline; graph Close/Freeze/plot-tap checks passed.')
+  print('Rendered live, coverage, DBC, message, raw, changed, empty, graph and flatline views; filter and graph interaction checks passed.')
 
 
 if __name__ == '__main__':

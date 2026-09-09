@@ -28,6 +28,7 @@ BUS_LABELS: dict[int, str] = {
 }
 
 BUS_ALIVE_TIMEOUT = 1.0  # seconds since last frame before a bus is considered dead
+MAX_RAW_MESSAGES_PER_BUS = 256
 
 
 def diagnostics_timeout(started: bool, enabled: bool, speed: float, car_state_valid: bool) -> int | None:
@@ -43,12 +44,54 @@ def graph_display_bounds(lo: float, hi: float) -> tuple[float, float]:
 class BusStats:
   count: int = 0
   last_seen: float = 0.0
+  rate_samples: deque = field(default_factory=lambda: deque(maxlen=32))
 
   def alive(self, now: float | None = None) -> bool:
     if self.last_seen == 0.0:
       return False
     now = time.monotonic() if now is None else now
     return (now - self.last_seen) < BUS_ALIVE_TIMEOUT
+
+  def rate(self, now: float) -> float:
+    if not self.rate_samples or now-self.rate_samples[-1][0] >= .2:
+      self.rate_samples.append((now, self.count))
+    while len(self.rate_samples) > 2 and now-self.rate_samples[1][0] > 2.:
+      self.rate_samples.popleft()
+    first_time, first_count = self.rate_samples[0]
+    return (self.count-first_count)/(now-first_time) if self.alive(now) and now-first_time > .1 else 0.
+
+
+@dataclass
+class MessageStats:
+  count: int = 0
+  last_seen: float = 0.
+  data: bytes = b''
+  decoded: bool = False
+
+
+@dataclass(frozen=True)
+class MessageDefinition:
+  bus: int
+  address: int
+  name: str
+  size: int
+  signals: tuple[str, ...]
+
+
+def matches_query(query: str, bus: int, address: int, *names: str) -> bool:
+  # Hex IDs match exactly, including digits-only hexadecimal such as 0135.
+  # Bare decimal and hexadecimal IDs are both accepted for convenience.
+  words = query.lower().split()
+  identifiers = {f'{address:x}', f'{address:04x}', f'0x{address:x}', str(address)}
+  haystack = ' '.join((BUS_LABELS[bus], *names)).lower()
+  def matches(word):
+    if word.startswith('0x'):
+      try:
+        return int(word, 16) == address
+      except ValueError:
+        return False
+    return word in identifiers or word in haystack
+  return all(matches(word) for word in words)
 
 
 @dataclass
@@ -62,6 +105,7 @@ class SignalRow:
   message: str = ''
   unit: str = ''
   choice: str = ''
+  changes: int = 0
 
   @property
   def key(self) -> tuple[int, int, str | None]:
@@ -113,6 +157,8 @@ def build_parsers(car_fingerprint: str) -> tuple[dict[int, CANParser], dict[int,
 
 
 def format_value(value: float) -> str:
+  if not math.isfinite(value):
+    return 'invalid'
   if value == int(value):
     return str(int(value))
   return f"{value:.4g}"
@@ -126,6 +172,50 @@ class CanSnapshot:
     self.metadata = signal_metadata(car_fingerprint)
     self.tally: dict[int, BusStats] = {bus: BusStats() for bus in self.parsers}
     self.rows: dict[tuple[int, int, str | None], SignalRow] = {}
+    self.dbc_names = {bus: GM_DBC_MAP[car_fingerprint][key] for bus, key in BUS_DBC_KEYS.items()}
+    self.definitions = {(bus, address): MessageDefinition(bus, address, msg.name, msg.size, tuple(msg.sigs))
+                        for bus, name in self.dbc_names.items() for address, msg in DbcFile(name).msgs.items()}
+    self.messages: dict[tuple[int, int], MessageStats] = {}
+    self.raw_counts = dict.fromkeys(self.parsers, 0)
+    self.omitted_raw_frames = dict.fromkeys(self.parsers, 0)
+
+  def catalog(self, bus_filter=None, query='') -> list[MessageDefinition]:
+    return sorted((d for d in self.definitions.values() if (bus_filter is None or d.bus == bus_filter)
+                   and matches_query(query, d.bus, d.address, d.name, *d.signals,
+                                     *(self.metadata[(d.bus, d.address, name)][1] for name in d.signals))), key=lambda d: (d.bus, d.address))
+
+  def coverage(self, now=None) -> list[dict]:
+    now = time.monotonic() if now is None else now
+    result = []
+    for bus, dbc in self.dbc_names.items():
+      observed = {address: stats for (src, address), stats in self.messages.items() if src == bus}
+      known = set(observed) & self._known_addrs[bus]
+      result.append({'bus': bus, 'name': BUS_LABELS[bus], 'dbc': dbc, 'alive': self.tally[bus].alive(now),
+                     'frames': self.tally[bus].count, 'rate': self.tally[bus].rate(now),
+                     'observed': len(observed), 'matched': len(known), 'decoded': sum(observed[a].decoded for a in known),
+                     'unknown': len(observed)-len(known), 'defined_messages': len(self._known_addrs[bus]),
+                     'defined_signals': sum(len(d.signals) for d in self.definitions.values() if d.bus == bus),
+                     'omitted_raw_frames': self.omitted_raw_frames[bus]})
+    return result
+
+  def definition_row(self, key) -> SignalRow:
+    message, unit, _ = self.metadata[key]
+    return SignalRow(bus=key[0], address=key[1], signal=key[2], message=message, unit=unit, text='Not seen')
+
+  def signal_details(self, key) -> str:
+    row = self.rows.get(key)
+    if key[2] is None:
+      return row.details() if row else ''
+    row = row or self.definition_row(key)
+    dbc = self.dbc_names[key[0]]
+    signal = DbcFile(dbc).msgs[key[1]].sigs[key[2]]
+    choices = self.metadata[key][2]
+    states = ', '.join(f'{v}={label}' for v, label in choices.items())
+    return (f'{row.details()}<br>DBC: {dbc}<br>'
+            + f'{signal.size} bits at bit {signal.start_bit}; {"signed" if signal.is_signed else "unsigned"}; '
+            + f'{"little" if signal.is_little_endian else "big"} endian; '
+            + f'value = raw * {signal.factor:g} + {signal.offset:g}'
+            + (f' {row.unit}' if row.unit else '') + (f'<br>States: {states}' if states else ''))
 
   def ingest(self, batches: list[tuple[int, list[tuple[int, bytes, int]]]]) -> set[tuple[int, int, str | None]]:
     """Feed drained (timestamp_ns, [(address, dat, src), ...]) batches. Returns the set of row keys touched."""
@@ -136,18 +226,34 @@ class CanSnapshot:
     for t, frames in batches:
       frames_by_bus: dict[int, list[tuple[int, bytes, int]]] = {}
       for address, dat, src in frames:
-        frames_by_bus.setdefault(src, []).append((address, dat, src))
-
         stats = self.tally.get(src)
-        if stats is None:
+        if stats is None or len(dat) > 64:
           continue
         stats.count += 1
         stats.last_seen = now
-        if address not in self._known_addrs.get(src, ()):
+        msg_key = (src, address)
+        if msg_key not in self.messages:
+          if address not in self._known_addrs[src]:
+            if self.raw_counts[src] >= MAX_RAW_MESSAGES_PER_BUS:
+              self.omitted_raw_frames[src] += 1
+              continue
+            self.raw_counts[src] += 1
+          self.messages[msg_key] = MessageStats()
+        msg = self.messages[msg_key]
+        msg.count += 1
+        msg.last_seen, msg.data = now, dat
+        definition = self.definitions.get(msg_key)
+        wrong_size = definition is not None and len(dat) != definition.size
+        if definition is None or wrong_size:
           key = (src, address, None)
           touched.add(key)
-          self.rows[key] = SignalRow(bus=src, address=address, signal=None,
-                                      text=dat.hex(' ').upper(), last_updated=now)
+          text = dat.hex(' ').upper()
+          previous = self.rows.get(key)
+          changes = previous.changes + (previous.text != text) if previous else 0
+          reason = f'{definition.name}: {len(dat)} bytes received; expected {definition.size}' if wrong_size else ''
+          self.rows[key] = SignalRow(bus=src, address=address, signal=None, text=text, last_updated=now, changes=changes, message=reason)
+        if not wrong_size:
+          frames_by_bus.setdefault(src, []).append((address, dat, src))
 
       # Only feed each parser the frames for its own bus (and only bother calling a
       # parser at all when this batch actually touched its bus) instead of handing every
@@ -169,6 +275,11 @@ class CanSnapshot:
     for bus, addrs in updated_by_bus.items():
       parser = self.parsers[bus]
       for address in addrs:
+        self.messages[(bus, address)].decoded = True
+        raw_key = (bus, address, None)
+        if raw_key in self.rows:
+          del self.rows[raw_key]
+          touched.add(raw_key)
         signals = parser.vl.get(address, {})
         for name, value in signals.items():
           key = (bus, address, name)
@@ -180,8 +291,10 @@ class CanSnapshot:
             text += ' '+unit
           if choice:
             text += ' ('+choice+')'
+          previous = self.rows.get(key)
+          changes = previous.changes + (previous.value != value) if previous else 0
           self.rows[key] = SignalRow(bus=bus, address=address, signal=name,
-                                      text=text, last_updated=now, value=value, message=message, unit=unit, choice=choice)
+                                      text=text, last_updated=now, value=value, message=message, unit=unit, choice=choice, changes=changes)
 
     return touched
 

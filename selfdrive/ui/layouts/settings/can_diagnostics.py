@@ -7,7 +7,9 @@ import pyray as rl
 import cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
-from openpilot.selfdrive.ui.layouts.settings.can_diagnostics_data import BUS_LABELS, diagnostics_timeout, graph_display_bounds, matches_query
+from openpilot.selfdrive.ui.layouts.settings.can_diagnostics_data import (
+  BUS_LABELS, ODOMETER_KEY, ODOMETER_KM_KEY, diagnostics_timeout, graph_display_bounds, matches_query, signal_timeout,
+)
 from openpilot.selfdrive.ui.layouts.settings.can_inspection import InspectionSession, bit_definitions, preference_document, sample_at
 from openpilot.selfdrive.ui.ui_state import ui_state, device
 from openpilot.system.ui.lib.application import gui_app, FontWeight, FONT_SCALE, font_fallback
@@ -84,7 +86,8 @@ class InspectorRow(Widget):
       seen = owner.display.messages.get(key)
       title = definition.name
       subtitle = f'Bus {key[0]} | 0x{key[1]:X} | {len(definition.signals)} signals'
-      value = 'Not seen' if not seen else 'Stale' if owner.display.now-seen.last_seen > 1 else 'Live'
+      timeout = max((signal_timeout((*key, name)) for name in definition.signals), default=1.)
+      value = 'Not seen' if not seen else 'Stale' if owner.display.now-seen.last_seen > timeout else 'Live'
       label(title, rect.x+20, rect.y+16, rect.width-390)
       label(subtitle, rect.x+20, rect.y+78, rect.width-390, 34, MUTED)
       label(value+'  >', rect.x+rect.width-350, rect.y+40, 330)
@@ -96,7 +99,7 @@ class InspectorRow(Widget):
     if key in owner.display.new and owner.filter == 'changed':
       subtitle = 'NEW | '+subtitle
     text = row.text if row else 'Not seen'
-    if row and owner.display.now-row.last_updated > 1:
+    if row and owner.display.now-row.last_updated > signal_timeout(key):
       subtitle = 'STALE | '+subtitle
     star_width = 176 if key[2] else 0
     value_width = min(620, rect.width*.36)
@@ -410,9 +413,10 @@ class CanDiagnosticsLayout(Widget):
         rows.append(('Named states', ', '.join(f'{v}={text}' for v, text in choices.items())))
     elif self.screen == 'decoding':
       from opendbc.can.dbc import DBC
-      signal = DBC(self.snapshot.dbc_names[self.key[0]]).msgs[self.key[1]].sigs[self.key[2]]
+      dbc = DBC(self.snapshot.message_dbcs[self.key[:2]])
+      signal = dbc.msgs[self.key[1]].sigs[self.key[2]]
       _, unit, choices = self.snapshot.metadata[self.key]
-      rows = [('Signal', self.key[2]), ('DBC', self.snapshot.dbc_names[self.key[0]]),
+      rows = [('Signal', self.key[2]), ('DBC', dbc.name),
               ('Bit layout', f'{signal.size} bits, start {signal.start_bit}; {"little" if signal.is_little_endian else "big"} endian'),
               ('Type', 'Signed' if signal.is_signed else 'Unsigned'),
               ('Physical value', f'raw * {signal.factor:g} + {signal.offset:g} {unit}')]
@@ -454,7 +458,7 @@ class CanDiagnosticsLayout(Widget):
 
   def _value(self, key):
     row = self.display.rows.get(key)
-    return (row.text + (' [stale]' if self.display.now-row.last_updated > 1 else '')) if row else 'Not seen'
+    return (row.text + (' [stale]' if self.display.now-row.last_updated > signal_timeout(key) else '')) if row else 'Not seen'
 
   def _bit_activity(self):
     bits = self.display.bits
@@ -553,13 +557,24 @@ class CanDiagnosticsLayout(Widget):
       return
     x, y, w = rect.x+24, rect.y+24, rect.width-48
     self._button('back', 'Back', rl.Rectangle(x, y, 240, 120), self.back)
-    label('CAN inspection', x+272, y+34, w-780, 52)
+    label('CAN inspection', x+272, y+34, 500, 52)
     if self._faulted:
       label('CAN inspection unavailable. Back returns to Settings.', x, y+180, w, 44)
       return
     if self.session is None:
       label('Waiting for car identification...', x, y+180, w)
       return
+    if ODOMETER_KEY in self.snapshot.metadata:
+      row = self.display.rows.get(ODOMETER_KEY)
+      age = max(0., self.display.now-row.last_updated) if row else None
+      reading = f'{math.floor(row.value):,} mi' if row else 'Not seen'
+      status = f'{age:.0f}s ago' if age is not None else 'waiting for car'
+      if row is None and ODOMETER_KEY[:2] in self.display.messages:
+        reading, status = 'Unavailable', 'no valid reading'
+      if age is not None and age > signal_timeout(ODOMETER_KEY):
+        status = 'STALE | '+status
+      label('Odometer | '+status, x+800, y+4, w-1340, 30, MUTED)
+      label(reading, x+800, y+52, w-1340, 46, AMBER if age is None or age > 15 else TEXT_COLOR)
     self._button('freeze', 'Resume' if self.session.frozen else 'Freeze', rl.Rectangle(x+w-504, y, 240, 120), self._freeze,
                  selected=self.session.frozen is not None)
     self._button('more', 'More', rl.Rectangle(x+w-240, y, 240, 120), lambda: self._go('more'))
@@ -759,7 +774,8 @@ class CanDiagnosticsLayout(Widget):
       text = 'No sample at cursor'
       if sample is not None:
         state = f' ({choices[sample[1]]})' if sample[1] in choices else ''
-        text = f'{sample[1]:.5g} {unit}{state} | t {cursor-end:.3f} s | age {max(0, cursor-sample[0]):.3f} s'
+        number = f'{sample[1]:,.1f}' if key in (ODOMETER_KEY, ODOMETER_KM_KEY) else f'{sample[1]:.5g}'
+        text = f'{number} {unit}{state} | t {cursor-end:.3f} s | age {max(0, cursor-sample[0]):.3f} s'
       label(text, box.x+20, box.y+58, box.width-40, 34)
       plot = rl.Rectangle(box.x+130, box.y+112, box.width-170, max(40, box.height-145))
       self._graph_rects.append((plot, start, end))
@@ -773,7 +789,7 @@ class CanDiagnosticsLayout(Widget):
       stride = max(1, len(points)//max(1, int(plot.width)))
       previous = None
       for n, (t, v) in enumerate(points):
-        if previous and t-previous[0] > 1.:
+        if previous and t-previous[0] > signal_timeout(key):
           previous = None
         if n % stride and n != len(points)-1:
           continue

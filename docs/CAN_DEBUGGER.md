@@ -4,7 +4,35 @@ Open **Settings → CAN Bus**. This full-screen inspector reads the installed ca
 powertrain, radar and chassis DBCs. It does not transmit CAN, change panda bus
 configuration or affect driving controls. For the Volt, the installed DBCs contain
 113 message definitions and 651 signal definitions. A definition does not mean
-the car actually sends that message.
+the car actually sends that message. The inspector also loads a Volt-only
+odometer extension, bringing its catalog to 114 messages and 653 signals.
+
+## Odometer
+
+The header shows whole miles and the age of the latest reading. Search
+**odometer** in Browse or the DBC catalog to see **OdometerMiles** and
+**OdometerKm**, save either to Favorites, graph it, or inspect its raw bytes and
+bit definition. Fractional signal values retain one decimal place; the header
+truncates to completed miles. Freeze holds the reading and age along with the
+rest of the screen.
+
+On this Volt, bus 0 broadcasts CAN ID **0x120** every approximately five seconds.
+The first four bytes form an unsigned big-endian counter in **1/64 km** units;
+miles use the exact conversion of 1.609344 km per mile. This matches the passive
+decoder in [OVMS's Volt implementation](https://github.com/openvehicles/Open-Vehicle-Monitoring-System-3/blob/master/vehicle/OVMS.V3/components/vehicle_voltampera/src/vehicle_voltampera.cpp).
+The local check covered 652 frames in 55 recorded segments: no decreasing
+readings, and distance increments agreed with integrated vehicle speed to about
+1%. A current dashboard comparison remains the check on the absolute reading.
+The historical mileage supplied by the owner is not used as an offset or to
+generate an estimate.
+
+The inspector-only `volt_odometer.dbc` supplies the definition; driving DBCs and
+parsers are unchanged. No diagnostic request or GMLAN switching is needed.
+The five-byte message's last byte remains undefined because its meaning has not
+been verified. Unexpected lengths and an all-one counter show raw/unavailable
+data. Odometer readings become stale after 15 seconds, allowing for their slower
+broadcast; stale readings remain visible with their age. No previous-session
+reading is substituted when the inspector opens without traffic.
 
 ## Finding signals
 
@@ -44,8 +72,8 @@ and graph selection are disabled while frozen.
 and scales, a shared cursor and a 10- or 30-second window. Choose Signal 1/2;
 favorites appear first, followed by the remaining DBC signals. Unsampled choices
 wait for incoming data. Enum signals use step plots. Gaps longer than one second
-are not connected. Tap a plot to inspect real samples and their ages; while
-frozen, **Previous sample / Next sample** moves the shared cursor precisely.
+are not connected (15 seconds for the slowly broadcast odometer). Tap a plot
+to inspect real samples and their ages; while frozen, **Previous sample / Next sample** moves the shared cursor precisely.
 
 ## Messages and bits
 
@@ -93,7 +121,8 @@ Run data and native touch checks from a configured checkout with a desktop displ
 DISPLAY=:0 BIG=1 SCALE=1 OFFSCREEN=1 PYTHONPATH="$PWD" .venv/bin/pytest -n0 -q \
   selfdrive/ui/tests/test_can_diagnostics_data.py \
   selfdrive/ui/tests/test_can_diagnostics_usability.py \
-  selfdrive/ui/tests/test_can_inspection.py selfdrive/ui/tests/test_can_touch.py
+  selfdrive/ui/tests/test_can_inspection.py selfdrive/ui/tests/test_can_touch.py \
+  selfdrive/ui/tests/test_can_odometer.py
 ```
 
 Generate previews and run layout, control and text-cache checks:

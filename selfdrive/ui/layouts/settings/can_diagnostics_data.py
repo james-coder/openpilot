@@ -10,7 +10,7 @@ from opendbc.can import CANParser
 from opendbc.can.parser import CANDefine
 from opendbc.can.dbc import DBC as DbcFile
 from opendbc.car import Bus
-from opendbc.car.gm.values import CanBus, DBC as GM_DBC_MAP
+from opendbc.car.gm.values import CAR, CanBus, DBC as GM_DBC_MAP
 
 # Which opendbc.car.Bus DBC-map key backs each of this car's physical CAN buses.
 # GM-specific and hardcoded deliberately - this is a personal single-car diagnostics
@@ -29,6 +29,21 @@ BUS_LABELS: dict[int, str] = {
 
 BUS_ALIVE_TIMEOUT = 1.0  # seconds since last frame before a bus is considered dead
 MAX_RAW_MESSAGES_PER_BUS = 256
+ODOMETER_KEY = (CanBus.POWERTRAIN, 0x120, 'OdometerMiles')
+ODOMETER_KM_KEY = (CanBus.POWERTRAIN, 0x120, 'OdometerKm')
+ODOMETER_DBC = str(Path(__file__).with_name('volt_odometer.dbc'))
+
+
+def inspection_sources(car_fingerprint):
+  sources = [(bus, GM_DBC_MAP[car_fingerprint][key]) for bus, key in BUS_DBC_KEYS.items()]
+  if car_fingerprint == CAR.CHEVROLET_VOLT:
+    sources.append((CanBus.POWERTRAIN, ODOMETER_DBC))
+  return sources
+
+
+def signal_timeout(key):
+  # The Volt broadcasts its odometer at about 0.2 Hz, unlike most live signals.
+  return 15. if key in (ODOMETER_KEY, ODOMETER_KM_KEY) else 1.
 
 
 def diagnostics_timeout(started: bool, enabled: bool, speed: float, car_state_valid: bool) -> int | None:
@@ -123,13 +138,12 @@ class SignalRow:
 def signal_metadata(car_fingerprint):
   """Expose names, physical units and value tables already present in the matching DBC."""
   metadata = {}
-  for bus, key in BUS_DBC_KEYS.items():
-    name = GM_DBC_MAP[car_fingerprint][key]
+  for bus, name in inspection_sources(car_fingerprint):
     dbc = DbcFile(name)
     choices = CANDefine(name).dv
     content = get_generated_dbcs().get(name)
     if content is None:
-      content = (Path(DBC_PATH)/(name+'.dbc')).read_text()
+      content = (Path(name) if Path(name).is_file() else Path(DBC_PATH)/(name+'.dbc')).read_text()
     units, address = {}, None
     for line in content.splitlines():
       if match := re.match(r'^BO_ (\d+) ', line):
@@ -169,11 +183,19 @@ class CanSnapshot:
   def __init__(self, car_fingerprint: str):
     self.parsers, self._known_addrs = build_parsers(car_fingerprint)
     self.metadata = signal_metadata(car_fingerprint)
+    self._invalid_odometer = False
     self.tally: dict[int, BusStats] = {bus: BusStats() for bus in self.parsers}
     self.rows: dict[tuple[int, int, str | None], SignalRow] = {}
     self.dbc_names = {bus: GM_DBC_MAP[car_fingerprint][key] for bus, key in BUS_DBC_KEYS.items()}
+    self.message_dbcs = {(bus, address): name for bus, name in inspection_sources(car_fingerprint) for address in DbcFile(name).msgs}
     self.definitions = {(bus, address): MessageDefinition(bus, address, msg.name, msg.size, tuple(msg.sigs))
-                        for bus, name in self.dbc_names.items() for address, msg in DbcFile(name).msgs.items()}
+                        for (bus, address), name in self.message_dbcs.items() for msg in [DbcFile(name).msgs[address]]}
+    self._message_parsers = {(bus, address): parser for bus, parser in self.parsers.items() for address in parser.addresses}
+    if car_fingerprint == CAR.CHEVROLET_VOLT:
+      extra = CANParser(ODOMETER_DBC, [(0x120, 0)], CanBus.POWERTRAIN)
+      assert ODOMETER_KEY[:2] not in self._message_parsers, 'Odometer already defined in the driving DBC'
+      self._message_parsers[ODOMETER_KEY[:2]] = extra
+      self._known_addrs[CanBus.POWERTRAIN].add(0x120)
     self.messages: dict[tuple[int, int], MessageStats] = {}
     self.raw_counts = dict.fromkeys(self.parsers, 0)
     self.omitted_raw_frames = dict.fromkeys(self.parsers, 0)
@@ -206,11 +228,11 @@ class CanSnapshot:
     if key[2] is None:
       return row.details() if row else ''
     row = row or self.definition_row(key)
-    dbc = self.dbc_names[key[0]]
+    dbc = self.message_dbcs[key[:2]]
     signal = DbcFile(dbc).msgs[key[1]].sigs[key[2]]
     choices = self.metadata[key][2]
     states = ', '.join(f'{v}={label}' for v, label in choices.items())
-    return (f'{row.details()}<br>DBC: {dbc}<br>'
+    return (f'{row.details()}<br>DBC: {DbcFile(dbc).name}<br>'
             + f'{signal.size} bits at bit {signal.start_bit}; {"signed" if signal.is_signed else "unsigned"}; '
             + f'{"little" if signal.is_little_endian else "big"} endian; '
             + f'value = raw * {signal.factor:g} + {signal.offset:g}'
@@ -224,7 +246,7 @@ class CanSnapshot:
     updated_by_bus: dict[int, set[int]] = {}
     value_changes, last_values = {}, {}
     for t, frames in batches:
-      frames_by_bus: dict[int, list[tuple[int, bytes, int]]] = {}
+      frames_by_parser: dict[CANParser, list[tuple[int, bytes, int]]] = {}
       for address, dat, src in frames:
         stats = self.tally.get(src)
         if stats is None or len(dat) > 64:
@@ -244,16 +266,27 @@ class CanSnapshot:
         msg.last_seen, msg.data = now, dat
         definition = self.definitions.get(msg_key)
         wrong_size = definition is not None and len(dat) != definition.size
-        if definition is None or wrong_size:
+        is_odometer = msg_key == ODOMETER_KEY[:2] and ODOMETER_KEY in self.metadata
+        invalid_odometer = (is_odometer
+                            and len(dat) == 5 and dat[:4] == b'\xff'*4)
+        if is_odometer:
+          self._invalid_odometer = wrong_size or invalid_odometer
+        if definition is None or wrong_size or invalid_odometer:
           key = (src, address, None)
           touched.add(key)
           text = dat.hex(' ').upper()
           previous = self.rows.get(key)
           changes = previous.changes + (previous.text != text) if previous else 0
           reason = f'{definition.name}: {len(dat)} bytes received; expected {definition.size}' if wrong_size else ''
+          if invalid_odometer:
+            reason = 'Odometer unavailable (all-one counter)'
+          if (wrong_size or invalid_odometer) and is_odometer:
+            for odometer_key in (ODOMETER_KEY, ODOMETER_KM_KEY):
+              if self.rows.pop(odometer_key, None) is not None:
+                touched.add(odometer_key)
           self.rows[key] = SignalRow(bus=src, address=address, signal=None, text=text, last_updated=now, changes=changes, message=reason)
-        if not wrong_size:
-          frames_by_bus.setdefault(src, []).append((address, dat, src))
+        if not wrong_size and not invalid_odometer and (parser := self._message_parsers.get(msg_key)) is not None:
+          frames_by_parser.setdefault(parser, []).append((address, dat, src))
 
       # Only feed each parser the frames for its own bus (and only bother calling a
       # parser at all when this batch actually touched its bus) instead of handing every
@@ -265,10 +298,8 @@ class CanSnapshot:
       # once its bus goes silent, rather than correctly timing out - harmless today since
       # this module never reads those properties (bus liveness is tracked separately via
       # self.tally), but worth knowing before ever relying on a parser's own validity here.
-      for bus, bus_frames in frames_by_bus.items():
-        parser = self.parsers.get(bus)
-        if parser is None:
-          continue
+      for parser, bus_frames in frames_by_parser.items():
+        bus = parser.bus
         updated = parser.update([(t, bus_frames)])
         updated_by_bus.setdefault(bus, set()).update(updated)
         for address in updated:
@@ -283,8 +314,10 @@ class CanSnapshot:
             last_values[key] = previous_value
 
     for bus, addrs in updated_by_bus.items():
-      parser = self.parsers[bus]
       for address in addrs:
+        if (bus, address) == ODOMETER_KEY[:2] and self._invalid_odometer:
+          continue
+        parser = self._message_parsers[(bus, address)]
         self.messages[(bus, address)].decoded = True
         self.messages[(bus, address)].last_decoded = now
         raw_key = (bus, address, None)
@@ -297,7 +330,7 @@ class CanSnapshot:
           touched.add(key)
           message, unit, choices = self.metadata.get(key, ('', '', {}))
           choice = choices.get(value, '')
-          text = format_value(value)
+          text = f'{value:,.1f}' if key in (ODOMETER_KEY, ODOMETER_KM_KEY) else format_value(value)
           if unit:
             text += ' '+unit
           if choice:

@@ -44,7 +44,7 @@ def bit_definitions(snapshot, message):
   definition = snapshot.definitions.get(message)
   if definition is None:
     return {}
-  msg = DBC(snapshot.dbc_names[message[0]]).msgs[message[1]]
+  msg = DBC(snapshot.message_dbcs[message]).msgs[message[1]]
   result = {}
   for name, signal in msg.sigs.items():
     for bit in signal_bits(signal):

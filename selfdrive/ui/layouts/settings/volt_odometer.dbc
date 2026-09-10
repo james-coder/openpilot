@@ -1,0 +1,11 @@
+VERSION "Volt CAN inspector extension; not used by driving parsers"
+
+NS_ :
+BS_:
+BU_: XXX
+
+BO_ 288 VehicleOdometer: 5 XXX
+ SG_ OdometerKm : 7|32@0+ (0.015625,0) [0|67108863.96875] "km" XXX
+ SG_ OdometerMiles : 7|32@0+ (0.009708924878708343,0) [0|41713614] "mi" XXX
+
+CM_ BO_ 288 "Passive powertrain broadcast, about every 5 seconds. First four bytes unsigned big endian, 1/64 km per count. Fifth byte semantics not verified. Source: OVMS vehicle_voltampera.cpp, IncomingFrameCan1, case 0x120. Confirmed against recorded Volt driving-distance increments. Display only.";

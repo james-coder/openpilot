@@ -9,6 +9,7 @@ from opendbc.can.packer import CANPacker
 from opendbc.car.gm.values import CAR
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.ui.layouts.settings.can_diagnostics import CanDiagnosticsLayout, draw_live_value
+from openpilot.selfdrive.ui.layouts.settings.can_diagnostics_data import ODOMETER_KEY
 from openpilot.selfdrive.ui.layouts.settings.can_inspection import InspectionSession
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 
@@ -25,7 +26,8 @@ def render_previews(output):
     packer = CANPacker('gm_global_a_powertrain_generated')
     frames = [packer.make_can_msg('ECMPRDNL', 0, {'PRNDL': 2}),
               packer.make_can_msg('ECMEngineStatus', 0, {'EngineRPM': 1260, 'EngineTPS': 18}),
-              packer.make_can_msg('PSCMSteeringAngle', 0, {'SteeringWheelAngle': -3.5}), (0x7ff, b'\x01\x02\x03\x04', 0)]
+              packer.make_can_msg('PSCMSteeringAngle', 0, {'SteeringWheelAngle': -3.5}), (0x7ff, b'\x01\x02\x03\x04', 0),
+              (0x120, bytes.fromhex('00b0d4db00'), 0)]
     layout.session.ingest([(time.monotonic_ns(), frames)])
     layout._refresh()
     rect = rl.Rectangle(0, 0, 2160, 1080)
@@ -139,6 +141,16 @@ def render_previews(output):
       draw_live_value(gui_app.font(FontWeight.NORMAL), f'{i*1.234567:.8f}', rl.Rectangle(600, 200, 500, 100))
     rl.end_drawing()
     assert len(_cache) == count
+    layout._set_tab('browse')
+    layout.filter = 'live'
+    layout.query = 'odometer'
+    layout._refresh()
+    draw('can-odometer.png')
+    layout.open_row(ODOMETER_KEY, 'signal')
+    layout._decoding()
+    draw('can-odometer-definition.png')
+    layout._open_bits()
+    draw('can-odometer-bits.png')
     layout.hide_event()
     assert layout.session is None and layout._sock is None
     rl.close_window()

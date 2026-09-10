@@ -119,6 +119,35 @@ def test_fault_still_allows_exit(layout):
   assert not layout._active and layout.session is None and layout._sock is None
 
 
+def test_odometer_header_precision_age_and_freeze(layout, monkeypatch):
+  import openpilot.selfdrive.ui.layouts.settings.can_diagnostics as module
+  from openpilot.selfdrive.ui.layouts.settings.can_diagnostics_data import ODOMETER_KEY
+  layout.session.ingest([(10, [(0x120, bytes.fromhex('00b0d4db00'), 0)])])
+  layout._refresh()
+  updated = layout.display.rows[ODOMETER_KEY].last_updated
+  texts = []
+  original = module.label
+  def capture(text, *args, **kwargs):
+    texts.append(text)
+    original(text, *args, **kwargs)
+  monkeypatch.setattr(module, 'label', capture)
+  monkeypatch.setattr(layout, '_update_state', lambda: None)
+  layout.display = layout.session.capture(now=updated+6)
+  layout.test_render()
+  assert '112,515 mi' in texts and 'Odometer | 6s ago' in texts
+  assert not any('STALE' in t for t in texts if t.startswith('Odometer'))
+  texts.clear()
+  layout.display = layout.session.capture(now=updated+16)
+  layout.test_render()
+  assert 'Odometer | STALE | 16s ago' in texts
+  layout._freeze()
+  layout.session.ingest([(20, [(0x120, bytes.fromhex('00b0dfff00'), 0)])])
+  layout._refresh()
+  texts.clear()
+  layout.test_render()
+  assert '112,515 mi' in texts
+
+
 def test_back_preserves_browse_scroller_and_filter(layout):
   original = layout._scroller
   layout.open_row((0, 201, 'EngineRPM'), 'signal')

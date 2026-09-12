@@ -68,7 +68,7 @@ uv run --no-sync python -m unittest discover -s opendbc_repo/opendbc/safety/test
 DISPLAY=:0 BIG=1 SCALE=1 OFFSCREEN=1 uv run --no-sync python -m tools.profiling.render_obd_diagnostics --output /tmp/gm-diagnostics-preview
 ```
 
-Still required before claiming vehicle support: scanner-only deployment with rollback, verification of firmware signature and live parked gates, captured request/reply comparison against these formats, identification of actual responders, comparison with a GM-capable service tool, and physical UI/restart/persistence checks. No expanded live scan has been performed.
+Still required before claiming expanded vehicle support: captured request/reply comparison against these formats, identification of actual responders, comparison with a GM-capable service tool, and physical UI/full-reboot/persistence checks for GM reports. Scanner-only deployment, firmware-signature verification, and live parked readiness checks are complete. No expanded live scan has been performed.
 
 ## Requested EGR active test: evidence still required
 

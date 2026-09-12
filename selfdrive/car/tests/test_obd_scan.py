@@ -171,8 +171,7 @@ class TestObdController:
     self.params.put.assert_not_called()
     self.params.get.return_value = None
     self.controller.poll_params()
-    self.params.put.assert_called_once()
-    assert self.params.put.call_args.args[0] == 'ObdScanStatus'
+    assert [call.args[0] for call in self.params.put.call_args_list] == ['ObdScanStatus', 'GmScanStatus']
     self.params.put.reset_mock()
     self.controller.poll_params()
     self.params.put.assert_not_called()

@@ -28,6 +28,16 @@ class ObdResultItem(ListItem):
 
 
 class ObdDiagnosticsLayout(Widget):
+  STATUS_KEY = 'ObdScanStatus'
+  REPORT_KEY = 'ObdLastScan'
+  COMMAND = 'scan'
+  SAFETY_FLAGS = OBD_SAFETY_FLAG
+  VALIDATE = staticmethod(valid_report)
+  ROWS = staticmethod(result_rows)
+
+  def _title(self):
+    return f'Check engine: {lamp_status(self._report)}'
+
   def __init__(self):
     super().__init__()
     self._params = Params()
@@ -43,7 +53,7 @@ class ObdDiagnosticsLayout(Widget):
     self._awaiting = False
     self._rows = []
     self._scroller = Scroller([], line_separator=True, spacing=0)
-    self._action = button_item(lambda: f"Check engine: {lamp_status(self._report)}", lambda: "Cancel" if self._active else "Scan", callback=self._request,
+    self._action = button_item(self._title, lambda: "Cancel" if self._active else "Scan", callback=self._request,
                                enabled=lambda: self._active or not self._reason)
 
   def show_event(self):
@@ -72,7 +82,7 @@ class ObdDiagnosticsLayout(Widget):
         self._requested_at = now
         self._active = True
       self._params.put("ObdScanRequest", {"version": 1, "request_id": request_id,
-                       "command": "cancel" if cancel else "scan", "issued_mono": now})
+                       "command": "cancel" if cancel else self.COMMAND, "issued_mono": now})
       self._local_error = ""
     except Exception:
       self._fault()
@@ -97,7 +107,7 @@ class ObdDiagnosticsLayout(Widget):
         started=ui_state.started, initialized=sm.seen['carState'],
         fresh=sm.all_checks(['carState', 'pandaStates']) and 0 <= now-sm.logMonoTime['carState']/1e9 < .5,
         park=CS.gearShifter == "park", speed=CS.vEgo, enabled=ui_state.engaged or any(p.controlsAllowed for p in pandas),
-        firmware_ready=bool(pandas) and all(p.safetyModel == "gm" and p.safetyParam & OBD_SAFETY_FLAG for p in pandas))
+        firmware_ready=bool(pandas) and all(p.safetyModel == "gm" and p.safetyParam & self.SAFETY_FLAGS == self.SAFETY_FLAGS for p in pandas))
       device.set_override_interactive_timeout(300 if not ui_state.started or not self._reason else None)
       if now - self._last_poll < .2:
         return
@@ -109,8 +119,8 @@ class ObdDiagnosticsLayout(Widget):
           vehicle = {"fingerprint": previous.carFingerprint, "vin": previous.carVin}
       else:
         vehicle = {"fingerprint": CP.carFingerprint, "vin": CP.carVin} if CP is not None else None
-      status = valid_report(self._params.get("ObdScanStatus"), vehicle) or {}
-      previous = valid_report(self._params.get("ObdLastScan"), vehicle) or {}
+      status = self.VALIDATE(self._params.get(self.STATUS_KEY), vehicle) or {}
+      previous = self.VALIDATE(self._params.get(self.REPORT_KEY), vehicle) or {}
       self._status = status
       status_active = (status.get("state") == "scanning" and isinstance(status.get("updated_mono"), (float, int)) and
                        0 <= now - status["updated_mono"] < 2 and ui_state.started)
@@ -124,13 +134,13 @@ class ObdDiagnosticsLayout(Widget):
           self._local_error = "Scan stopped or did not start. Try again with the car on and in Park."
         self._request_id = None
       current = status.get("state") in ("complete", "partial") or status_active
-      self._report = status if status.get("ecus") and current else previous
+      self._report = status if (status.get('ecus') or status.get('modules') or status.get('context')) and current else previous
       self._refresh_results()
     except Exception:
       self._fault()
 
   def _refresh_results(self):
-    rows = result_rows(self._report)
+    rows = self.ROWS(self._report)
     if rows != self._rows:
       self._rows = rows
       items = [ObdResultItem(title=title, action_item=TextAction(value), description=escape(detail), description_visible=True)

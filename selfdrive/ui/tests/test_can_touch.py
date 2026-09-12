@@ -35,7 +35,7 @@ def layout(window, monkeypatch):
   monkeypatch.setattr(module.device, 'set_override_interactive_timeout', lambda _: None)
   monkeypatch.setattr(module.messaging, 'recv_one_or_none', lambda _: None)
   monkeypatch.setattr(module.messaging, 'sub_sock', lambda *a, **kw: object())
-  widget = module.CanDiagnosticsLayout()
+  widget = module.CanSignalsLayout()
   widget.session = InspectionSession(CAR.CHEVROLET_VOLT)
   widget._sock = object()
   widget._active = True

@@ -6,6 +6,7 @@ from opendbc.car.can_definitions import CanData
 from opendbc.car.gm.values import CAR
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.car.obd_scan import MAX_FRAMES_PER_TICK, OBD_SAFETY_FLAG, ObdScanner, scan_block_reason
+from openpilot.selfdrive.car.gm_diagnostics import GM_DIAGNOSTIC_FLAG, GM_RESPONSES, GM_NEGATIVES, GmDiagnosticScanner
 
 
 class ObdScanController:
@@ -14,6 +15,9 @@ class ObdScanController:
     self.supported = CP.carFingerprint == CAR.CHEVROLET_VOLT and not CP.passive and not replay
     self.vehicle = {"fingerprint": CP.carFingerprint, "vin": CP.carVin}
     self.scanner = ObdScanner()
+    self.gm_scanner = GmDiagnosticScanner()
+    self._gm_snapshot = self._gm_written = self._gm_signature = None
+    self._gm_last_publish = 0.
     self._requests = queue.SimpleQueue()
     self._snapshot = None
     self._written = None
@@ -38,6 +42,13 @@ class ObdScanController:
       if report is not None and (self._written is None or report != self._written[1]):
         self.params.put("ObdLastScan", report, block=True)
       self._written = snapshot
+    snapshot = self._gm_snapshot
+    if snapshot is not None and snapshot is not self._gm_written:
+      status, report = snapshot
+      self.params.put('GmScanStatus', status, block=True)
+      if report is not None and (self._gm_written is None or report != self._gm_written[1]):
+        self.params.put('GmLastScan', report, block=True)
+      self._gm_written = snapshot
 
   def step(self, now, batches, CS, sm, initialized):
     if not self.supported or self._faulted:
@@ -48,9 +59,13 @@ class ObdScanController:
       cloudlog.exception("Disabling check-engine scanner after unexpected error")
       self._faulted = True
       self.scanner.cancel("Scanner unavailable; restart openpilot to retry.")
+      self.gm_scanner.cancel('Scanner unavailable; restart openpilot to retry.')
       status = copy.deepcopy(self.scanner.status)
       status.update(state="error", message="Scanner unavailable; restart openpilot to retry.", available=False)
       self._snapshot = (status, None)
+      gm_status = copy.deepcopy(self.gm_scanner.status)
+      gm_status.update(state='error', message=status['message'], available=False, vehicle=self.vehicle)
+      self._gm_snapshot = (gm_status, None)
       return []
 
   def _step(self, now, batches, CS, sm, initialized):
@@ -64,7 +79,7 @@ class ObdScanController:
             self._last_gear = timestamp / 1e9
           elif addr == 0x34A and len(data) == 5:
             self._last_speed = timestamp / 1e9
-          if 0x7E8 <= addr <= 0x7EF and len(frames) <= MAX_FRAMES_PER_TICK:
+          if (0x7E8 <= addr <= 0x7EF or addr in GM_RESPONSES or addr in GM_NEGATIVES) and len(frames) <= MAX_FRAMES_PER_TICK:
             frames.append(CanData(addr, data, bus))
     pandas = sm["pandaStates"]
     fresh = (CS.canValid and sm.all_checks(["carControl", "pandaStates", "onroadEvents"]) and
@@ -76,6 +91,7 @@ class ObdScanController:
     enabled = sm["carControl"].enabled or any(p.controlsAllowed for p in pandas)
     reason = scan_block_reason(supported=True, started=started, initialized=initialized, fresh=fresh,
                                park=CS.gearShifter == "park", speed=CS.vEgo, enabled=enabled, firmware_ready=firmware_ready)
+    gm_reason = reason or ('' if all(p.safetyParam & GM_DIAGNOSTIC_FLAG for p in pandas) else 'Matching GM diagnostic firmware required.')
     try:
       request = self._requests.get_nowait()
     except queue.Empty:
@@ -84,17 +100,23 @@ class ObdScanController:
       valid = (request.get("version") == 1 and isinstance(request.get("request_id"), str) and
                0 < len(request["request_id"]) <= 64 and isinstance(request.get("issued_mono"), (int, float)) and
                0 <= now - request["issued_mono"] < 2.)
-      if valid and request.get("command") == "cancel" and request["request_id"] == self.scanner.status.get("request_id"):
-        self.scanner.cancel()
-      elif valid and request.get("command") == "scan" and not self.scanner.active:
-        if reason:
-          self.scanner.status = {"version": 1, "request_id": request["request_id"], "vehicle": self.vehicle,
-                                 "state": "error", "message": reason}
-          self.scanner.revision += 1
-        else:
-          self.scanner.start(request["request_id"], self.vehicle, now)
-          frames = []
+      if valid and request.get('command') == 'cancel':
+        for scanner in (self.scanner, self.gm_scanner):
+          if request['request_id'] == scanner.status.get('request_id'):
+            scanner.cancel()
+      elif valid and request.get('command') in ('scan', 'scan_gm'):
+        scanner = self.gm_scanner if request['command'] == 'scan_gm' else self.scanner
+        other = self.scanner if scanner is self.gm_scanner else self.gm_scanner
+        blocked = (gm_reason if scanner is self.gm_scanner else reason) or ('Another diagnostic scan is running.' if other.active else '')
+        if not scanner.active:
+          if blocked:
+            scanner.status = {'version': 1, 'request_id': request['request_id'], 'vehicle': self.vehicle, 'state': 'error', 'message': blocked}
+            scanner.revision += 1
+          else:
+            scanner.start(request['request_id'], self.vehicle, now)
+            frames = []
     sends = self.scanner.tick(now, frames, reason)
+    sends += self.gm_scanner.tick(now, frames, gm_reason)
     signature = (self.scanner.revision, reason)
     if signature != self._signature or (self.scanner.active and now - self._last_publish >= .5):
       status = copy.deepcopy(self.scanner.status)
@@ -102,4 +124,11 @@ class ObdScanController:
       self._snapshot = (status, copy.deepcopy(self.scanner.report))
       self._signature = signature
       self._last_publish = now
+    gm_signature = (self.gm_scanner.revision, gm_reason)
+    if gm_signature != self._gm_signature or (self.gm_scanner.active and now - self._gm_last_publish >= .5):
+      status = copy.deepcopy(self.gm_scanner.status)
+      status.update(profile='gm', vehicle=self.vehicle, available=not gm_reason, block_reason=gm_reason, updated_mono=now)
+      self._gm_snapshot = (status, copy.deepcopy(self.gm_scanner.report))
+      self._gm_signature = gm_signature
+      self._gm_last_publish = now
     return sends

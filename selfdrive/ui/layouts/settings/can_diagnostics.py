@@ -836,9 +836,10 @@ class CanDiagnosticsLayout(Widget):
   def __init__(self):
     super().__init__()
     from openpilot.selfdrive.ui.layouts.settings.obd_diagnostics import ObdDiagnosticsLayout
-    self._views = [CanSignalsLayout(), ObdDiagnosticsLayout()]
+    from openpilot.selfdrive.ui.layouts.settings.gm_diagnostics import GmDiagnosticsLayout
+    self._views = [CanSignalsLayout(), ObdDiagnosticsLayout(), GmDiagnosticsLayout()]
     self._selected = 0
-    self._tabs = multiple_button_item("", "", ["Signals", "Check engine"], 0, button_width=350, callback=self._select)
+    self._tabs = multiple_button_item("", "", ["Signals", "Check engine", "GM details"], 0, button_width=300, callback=self._select)
 
   def _select(self, index):
     if index != self._selected:

@@ -92,6 +92,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ObdScanRequest", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION, JSON}},
     {"ObdScanStatus", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION, JSON}},
     {"ObdLastScan", {PERSISTENT | DONT_LOG, JSON}},
+    {"GmScanStatus", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION | CLEAR_ON_OFFROAD_TRANSITION, JSON}},
+    {"GmLastScan", {PERSISTENT | DONT_LOG, JSON}},
     {"Offroad_CarUnrecognized", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, JSON}},
     {"Offroad_ConnectivityNeeded", {CLEAR_ON_MANAGER_START, JSON}},
     {"Offroad_ConnectivityNeededPrompt", {CLEAR_ON_MANAGER_START, JSON}},

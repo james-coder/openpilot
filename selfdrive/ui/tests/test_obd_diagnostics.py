@@ -78,3 +78,21 @@ def test_unacknowledged_request_expires(layout, mocker):
   assert not layout._active
   assert layout._request_id is None
   assert 'did not start' in layout._local_error
+
+
+def test_gm_panel_uses_separate_saved_report_and_firmware_gate(layout):
+  from openpilot.selfdrive.ui.layouts.settings.gm_diagnostics import GmDiagnosticsLayout
+  layout.__class__ = GmDiagnosticsLayout
+  layout._update_state()
+  assert layout._reason  # Old flag 12 must not enable GM queries.
+  panel.ui_state.sm['pandaStates'][0].safetyParam = 28
+  layout._last_poll = 0.
+  saved = {'version': 1, 'profile': 'gm', 'vehicle': {'fingerprint': CAR.CHEVROLET_VOLT, 'vin': 'test'},
+           'state': 'partial', 'modules': {'5E8': {'state': 'ok', 'status_mask': 255, 'codes': []}}}
+  layout._params.get.side_effect = lambda key: saved if key == 'GmLastScan' else None
+  layout._update_state()
+  assert not layout._reason
+  assert layout._report == saved
+  assert not layout._faulted
+  layout._request()
+  assert layout._params.put.call_args.args[1]['command'] == 'scan_gm'

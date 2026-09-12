@@ -3,12 +3,15 @@ import re
 
 from openpilot.selfdrive.car.gm_diagnostics import CONTEXT_QUERIES, GM_RESPONSES, MAX_CODES, PIDS
 from openpilot.selfdrive.ui.layouts.settings.obd_diagnostics_data import descriptions
+from openpilot.selfdrive.ui.layouts.settings.gm_egr_data import valid_egr, egr_rows
 
 
 def valid_gm_report(report, vehicle):
-  if not isinstance(report, dict) or report.get('version') != 1 or not isinstance(vehicle, dict) or report.get('vehicle') != vehicle:
+  if not isinstance(report, dict) or report.get('version') not in (1, 2) or not isinstance(vehicle, dict) or report.get('vehicle') != vehicle:
     return None
   if report.get('profile') != 'gm':
+    return None
+  if report['version'] == 2 and not valid_egr(report, vehicle):
     return None
   modules, context = report.get('modules', {}), report.get('context', {})
   if not isinstance(modules, dict) or len(modules) > len(GM_RESPONSES) or not isinstance(context, dict) or len(context) > len(CONTEXT_QUERIES):
@@ -49,7 +52,8 @@ def valid_gm_report(report, vehicle):
 def gm_rows(report):
   modules = report.get('modules', {})
   finished = sum(m['state'] == 'ok' for m in modules.values())
-  rows = [('Coverage: bus 0 only', f'{finished}/{len(modules)} finished',
+  rows = egr_rows(report) if report.get('version') == 2 else []
+  rows += [('Coverage: bus 0 only', f'{finished}/{len(modules)} finished',
            'Other networks and silent modules are unverified. Lists require an end marker; silence does not mean no faults.')]
   for addr, module in sorted(modules.items(), key=lambda item: (not bool(item[1]['codes']), item[0])):
     # CAN response address is identity here. It is not a verified module name.
@@ -58,6 +62,8 @@ def gm_rows(report):
       title = f"{code['code']}-{code['failure_type']:02X}"
       detail = f"Module 0x{addr}; GM status 0x{code['status']:02X}. " + descriptions().get(code['code'], 'Description unavailable.')
       detail += f" {', '.join(flags)}. Suffix: reported failure-type byte, not a confirmed failed part."
+      if code['code'] == 'U0104':
+        detail += ' Consistent with the intentionally disconnected ASCM in this setup; retained separately from EGR findings.'
       rows.append((title, ', '.join(flags), detail))
     if not module['codes'] or module['state'] != 'ok':
       rows.append((f'GM module 0x{addr}', module['state'].title(), 'Bus 0, GM UUDT response address. ' + module.get('error', 'End-of-report received.')))
@@ -71,6 +77,8 @@ def gm_rows(report):
   rows.append(('Engine freeze frame', str(association or 'No trigger code'),
                'ECU 0x7E8, frame 0. Historical data; only the trigger code identifies the associated fault.'))
   for service, pid in CONTEXT_QUERIES:
+    if report.get('version') == 2 and service == 1:
+      continue
     result = context.get(f'{service:02X}:{pid:02X}', {})
     label, _, unit = PIDS[pid]
     if service == 1 and pid == 5:
@@ -80,8 +88,14 @@ def gm_rows(report):
       value = result['value']
       text = f'{value:.2f} {unit}'.strip() if type(value) in (int, float) else str(value or 'None')
       detail = f"ECU 0x7E8, service {service:02X}, PID {pid:02X}, raw {result['raw']}."
+      if pid == 0x2D and context.get(f'{service:02X}:2C', {}).get('value') == 0:
+        text = 'Not applicable at zero command'
+        detail += ' Relative error is not a blockage percentage or an independent actual-position reading.'
     else:
       text = 'Not read'
       detail = result.get('error', 'Not collected.')
     rows.append((label, text, detail))
+  if report.get('version') != 2:
+    rows.append(('Extended EGR evidence', 'Not collected',
+                 'This legacy report has no Mode 06, extended EGR PIDs, or calibration discovery. Matching EGR firmware is required.'))
   return rows

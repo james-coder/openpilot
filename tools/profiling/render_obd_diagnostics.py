@@ -72,6 +72,13 @@ def render_previews(output: Path):
     }, 'context': {'02:02': {'state': 'ok', 'value': 'P0401', 'raw': '4202000401'}}}
     panel._status = {'message': 'GM scan finished; see coverage and unread items below.'}
     draw('gm-details.png')
+    from openpilot.selfdrive.car.tests.test_gm_egr import simulate
+    panel._report = simulate()[0].report
+    panel._status = {'message': 'Simulated EGR evidence; no vehicle requests.'}
+    draw('gm-egr-evidence.png')
+    from openpilot.selfdrive.ui.layouts.settings.gm_egr_data import egr_rows
+    panel.ROWS = lambda report: egr_rows(report)[3:]
+    draw('gm-egr-results.png')
     panel.hide_event()
     rl.unload_render_texture(target)
     gui_app.close()

@@ -1,5 +1,12 @@
 # GM read-only diagnostics extension
 
+For the current Mode 06/PID 69/6B/readiness implementation and its pending vehicle
+validation, see [GM EGR evidence](gm-egr-evidence.md). The notes below are the
+historical initial deployment record; their "not yet performed" statements refer
+to that initial rollout, not the later September 12 GM scan.
+
+## Historical initial deployment record
+
 This extends the emissions scanner with a **GM details** tab, a one-shot GM current/history fault survey, engine freeze-frame context, a parked engine snapshot, and a text/JSON report exporter. The scanner-only port was deployed September 12, 2026, with matching firmware flashed and verified. Both scanners report ready. **An expanded live GM scan has not yet been performed**; actuator control is not implemented. The previous saved P0401 result remains intact.
 
 ## What it reads

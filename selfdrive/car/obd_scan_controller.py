@@ -7,6 +7,9 @@ from opendbc.car.gm.values import CAR
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.car.obd_scan import MAX_FRAMES_PER_TICK, OBD_SAFETY_FLAG, ObdScanner, scan_block_reason
 from openpilot.selfdrive.car.gm_diagnostics import GM_DIAGNOSTIC_FLAG, GM_RESPONSES, GM_NEGATIVES, GmDiagnosticScanner
+from openpilot.selfdrive.car.gm_egr import GmEgrScanner
+from openpilot.selfdrive.car.gm_egr_data import EGR_SAFETY_FLAG
+from openpilot.selfdrive.car.gm_egr_archive import archive_report
 
 
 class ObdScanController:
@@ -25,6 +28,7 @@ class ObdScanController:
     self._last_publish = 0.
     self._last_gear = self._last_speed = -100.
     self._faulted = False
+    self._archive_ready = False
 
   def poll_params(self):
     """Called by the background parameter thread; all disk I/O stays here."""
@@ -45,6 +49,21 @@ class ObdScanController:
     snapshot = self._gm_snapshot
     if snapshot is not None and snapshot is not self._gm_written:
       status, report = snapshot
+      if status.get('version') == 2:
+        try:
+          if not self._archive_ready:
+            for key in ('GmLastScan', 'ObdLastScan'):
+              old = self.params.get(key)
+              if isinstance(old, dict):
+                archive_report(old)
+            self._archive_ready = True
+          if status.get('state') in ('partial', 'complete', 'cancelled', 'error'):
+            archive_report(report or status)
+        except (OSError, ValueError) as error:
+          status = copy.deepcopy(status)
+          status['archive_error'] = str(error)
+          status['message'] = 'Evidence archive failed; previous saved report retained.'
+          report = None
       self.params.put('GmScanStatus', status, block=True)
       if report is not None and (self._gm_written is None or report != self._gm_written[1]):
         self.params.put('GmLastScan', report, block=True)
@@ -105,6 +124,10 @@ class ObdScanController:
           if request['request_id'] == scanner.status.get('request_id'):
             scanner.cancel()
       elif valid and request.get('command') in ('scan', 'scan_gm'):
+        if request['command'] == 'scan_gm' and not self.gm_scanner.active:
+          enhanced = bool(pandas) and all(p.safetyParam & EGR_SAFETY_FLAG for p in pandas)
+          if enhanced != isinstance(self.gm_scanner, GmEgrScanner):
+            self.gm_scanner = GmEgrScanner() if enhanced else GmDiagnosticScanner()
         scanner = self.gm_scanner if request['command'] == 'scan_gm' else self.scanner
         other = self.scanner if scanner is self.gm_scanner else self.gm_scanner
         blocked = (gm_reason if scanner is self.gm_scanner else reason) or ('Another diagnostic scan is running.' if other.active else '')
@@ -116,7 +139,10 @@ class ObdScanController:
             scanner.start(request['request_id'], self.vehicle, now)
             frames = []
     sends = self.scanner.tick(now, frames, reason)
-    sends += self.gm_scanner.tick(now, frames, gm_reason)
+    egr_reason = gm_reason
+    if isinstance(self.gm_scanner, GmEgrScanner) and not all(p.safetyParam & EGR_SAFETY_FLAG for p in pandas):
+      egr_reason = egr_reason or 'Matching EGR diagnostic firmware required.'
+    sends += self.gm_scanner.tick(now, frames, egr_reason)
     signature = (self.scanner.revision, reason)
     if signature != self._signature or (self.scanner.active and now - self._last_publish >= .5):
       status = copy.deepcopy(self.scanner.status)

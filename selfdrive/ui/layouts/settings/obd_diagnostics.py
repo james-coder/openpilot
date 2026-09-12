@@ -134,7 +134,8 @@ class ObdDiagnosticsLayout(Widget):
           self._local_error = "Scan stopped or did not start. Try again with the car on and in Park."
         self._request_id = None
       current = status.get("state") in ("complete", "partial") or status_active
-      self._report = status if (status.get('ecus') or status.get('modules') or status.get('context')) and current else previous
+      has_results = any(status.get(key) for key in ('ecus', 'modules', 'context', 'emissions', 'readings'))
+      self._report = status if has_results and current else previous
       self._refresh_results()
     except Exception:
       self._fault()

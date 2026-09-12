@@ -36,7 +36,7 @@ def decode_reply(name: str, data: bytes) -> dict:
   if name == "lamp":
     if len(data) != 6 or data[:2] != b"\x41\x01":
       raise ValueError("Malformed lamp response")
-    return {"state": "ok", "mil": bool(data[2] & 0x80), "count": data[2] & 0x7F}
+    return {"state": "ok", "mil": bool(data[2] & 0x80), "count": data[2] & 0x7F, "raw": data.hex()}
   expected = {"stored": 0x43, "pending": 0x47, "permanent": 0x4A}[name]
   if len(data) < 2 or data[0] != expected:
     raise ValueError("Unexpected service response")
@@ -47,7 +47,7 @@ def decode_reply(name: str, data: bytes) -> dict:
   for hi, lo in zip(data[2:end:2], data[3:end:2], strict=True):
     if hi or lo:
       codes.add(f'{"PCBU"[hi >> 6]}{(hi >> 4) & 3}{hi & 15:X}{lo:02X}')
-  return {"state": "ok", "codes": sorted(codes)}
+  return {"state": "ok", "codes": sorted(codes), "raw": data.hex()}
 
 
 class ObdScanner:

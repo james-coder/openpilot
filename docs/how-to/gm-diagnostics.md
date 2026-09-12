@@ -1,6 +1,6 @@
 # GM read-only diagnostics extension
 
-This extends the emissions scanner with a **GM details** tab, a one-shot GM current/history fault survey, engine freeze-frame context, a parked engine snapshot, and a text/JSON report exporter. It is implemented and tested locally, **not deployed or validated against the car yet**. The previously deployed emissions scanner and saved P0401 result remain unchanged on the device.
+This extends the emissions scanner with a **GM details** tab, a one-shot GM current/history fault survey, engine freeze-frame context, a parked engine snapshot, and a text/JSON report exporter. The scanner-only port was deployed September 12, 2026, with matching firmware flashed and verified. Both scanners report ready. **An expanded live GM scan has not yet been performed**; actuator control is not implemented. The previous saved P0401 result remains intact.
 
 ## What it reads
 
@@ -33,11 +33,17 @@ Manufacturer-specific failure-record decoding, module identification, additional
 
 Safety parameters are not a firmware-version attestation: the application and matching verified firmware must be installed together. Do not deploy this development branch wholesale over the car's different driving-control branch. Port just the diagnostic changes onto `deploy/volt-obd`, as was done for the first scanner.
 
-The new safety changes are saved in local opendbc commit `c65c6038` (following the earlier emissions-scanner commit `34427888`). They have not been pushed. Application changes remain in the development working tree.
+The original development safety changes are in opendbc commit `c65c6038` (following `34427888`). The device-compatible port is opendbc `e3cff012`, pinned by application commit `a1137316f`. Both ports were pushed to the respective james-coder GitHub repositories on branch `deploy/volt-gm-diagnostics`. The unrelated development-branch changes were not deployed.
 
-The scanner-only port is prepared locally in `/tmp/volt-obd-deploy.TUFdeg`, preserving the installed touch-first inspector and driving controls. Its opendbc commit is `e3cff012`; application changes are uncommitted. Native params/pandad and H7 firmware builds pass. Port regression testing now passes all 137 scanner/UI tests and 14 subtests, including the existing native CAN touch tests. The remaining UI failures were resolved by building visionipc and restoring/building the checkout's Git LFS font and icon assets. The touch test fixture addresses `CanSignalsLayout`, the inspector inside the diagnostic tab wrapper. GM safety tests pass (277 tests, 21 skipped); the full port safety suite also passes (3,194 tests, 392 skipped). The simulated GM-details screen renders and was visually inspected.
+The scanner-only port is in `/tmp/volt-obd-deploy.TUFdeg`, preserving the installed touch-first inspector and driving controls. Native params/pandad and H7 firmware builds pass. Port regression testing passes all 137 scanner/UI tests and 14 subtests, including the existing native CAN touch tests. The remaining UI failures were resolved by building visionipc and restoring/building the checkout's Git LFS font and icon assets. The touch test fixture addresses `CanSignalsLayout`, the inspector inside the diagnostic tab wrapper. GM safety tests pass (277 tests, 21 skipped); the full port safety suite also passes (3,194 tests, 392 skipped). The simulated GM-details screen renders and was visually inspected.
 
-The latest read-only device check confirmed ignition off, offroad, no live carState, and panda safety mode `noOutput` with no faults. No additional device writes, firmware flashes, or scans were performed during ignition-off preparation. Deployment and live validation still require stable power and a suitable parked vehicle setup; local test success is not vehicle validation.
+During deployment, fresh vehicle state confirmed Park, zero speed, controls disabled, and a 12 V supply above 13 V. The previous manager was stopped cleanly. Native params/pandad and H7 firmware were built on the comma, then firmware was flashed through the standard pandad helper and its complete signature verified. Firmware SHA-256: `c2603a85c25958fcd33f78d5131489656622968f4de857eaa86d0d00aa1c0c2c`.
+
+On-device tests passed: 113 scanner/UI tests plus 14 subtests, and 277 GM safety tests (21 skipped). Manager restarted in tmux window `comma:gm-manager`. Post-start checks showed live valid CAN, Park, zero speed, disabled controls, GM safety parameter 28, no panda faults, zero safety-blocked transmissions, and UI/card/controlsd/pandad running. Both scanner statuses were ready; no request was pending. `ObdLastScan` retained its original timestamp, `2026-09-12T07:09:52.034213+00:00`.
+
+Rollback binaries are in `/data/gm-deploy.bqmyBl/rollback-binaries.tar.gz` (params, pandad, signed H7 firmware, and bootstub). Previous application `0c9cb558b` and opendbc `eca95a16` remain on `deploy/volt-obd`. Roll back only while parked with stable power: stop manager, restore both previous commits and their matching binaries (or rebuild), flash/verify matching firmware, then restart manager. Do not mix application and safety versions.
+
+No codes were cleared, no expanded diagnostic requests or actuator commands were transmitted, and no road test or full-device reboot was performed. Await confirmation of an outdoor parked setup before the first expanded live scan.
 
 ## Reports and export
 

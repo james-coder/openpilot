@@ -19,6 +19,7 @@ from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper
+from openpilot.selfdrive.car.obd_scan_controller import ObdScanController
 
 REPLAY = "REPLAY" in os.environ
 
@@ -147,6 +148,8 @@ class Car:
     self.params.put("CarParams", cp_bytes, block=True)
     self.params.put("CarParamsCache", cp_bytes)
     self.params.put("CarParamsPersistent", cp_bytes)
+    self.obd_scanner = ObdScanController(self.CP, self.params, replay=REPLAY)
+    self._obd_can_batches = []
 
     self.v_cruise_helper = VCruiseHelper(self.CP)
 
@@ -161,6 +164,7 @@ class Car:
 
     can_strs = messaging.drain_sock_raw(self.can_sock, wait_for_one=True)
     can_list = can_capnp_to_list(can_strs)
+    self._obd_can_batches = can_list
 
     # Update carState from CAN
     CS = self.CI.update(can_list)
@@ -248,6 +252,10 @@ class Car:
     if not self.CP.passive and initialized:
       self.controls_update(CS, self.sm['carControl'])
 
+    diagnostics = self.obd_scanner.step(time.monotonic(), self._obd_can_batches, CS, self.sm, initialized)
+    if diagnostics:
+      self.pm.send('sendcan', can_list_to_can_capnp(diagnostics, msgtype='sendcan', valid=CS.canValid))
+
     self.initialized_prev = initialized
     self.CS_prev = CS
 
@@ -255,6 +263,10 @@ class Car:
     while not evt.is_set():
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
+      try:
+        self.obd_scanner.poll_params()
+      except Exception:
+        cloudlog.exception("Check-engine parameter mailbox unavailable")
       time.sleep(0.1)
 
   def card_thread(self):

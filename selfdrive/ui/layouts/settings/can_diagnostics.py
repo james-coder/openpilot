@@ -16,6 +16,7 @@ from openpilot.system.ui.lib.application import gui_app, FontWeight, FONT_SCALE,
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
 from openpilot.system.ui.widgets.scroller_tici import Scroller
+from openpilot.system.ui.widgets.list_view import ITEM_BASE_HEIGHT, multiple_button_item
 
 REFRESH_INTERVAL = .1
 TEXT_COLOR = rl.Color(232, 239, 247, 255)
@@ -131,7 +132,7 @@ class InfoRow(Widget):
     label(self.value() if callable(self.value) else self.value, rect.x+20, rect.y+60, rect.width-40, 42)
 
 
-class CanDiagnosticsLayout(Widget):
+class CanSignalsLayout(Widget):
   def __init__(self):
     super().__init__()
     self.session = None
@@ -828,3 +829,35 @@ class CanDiagnosticsLayout(Widget):
       for rect, start, end in self._graph_rects:
         if rl.check_collision_point_rec(event.pos, rect):
           self.cursor = start+(event.pos.x-rect.x)/rect.width*(end-start)
+
+
+class CanDiagnosticsLayout(Widget):
+  """Keep the established signal browser and the emissions scanner in one panel."""
+  def __init__(self):
+    super().__init__()
+    from openpilot.selfdrive.ui.layouts.settings.obd_diagnostics import ObdDiagnosticsLayout
+    self._views = [CanSignalsLayout(), ObdDiagnosticsLayout()]
+    self._selected = 0
+    self._tabs = multiple_button_item("", "", ["Signals", "Check engine"], 0, button_width=350, callback=self._select)
+
+  def _select(self, index):
+    if index != self._selected:
+      self._views[self._selected].hide_event()
+      self._selected = index
+      self._views[self._selected].show_event()
+
+  def show_event(self):
+    super().show_event()
+    self._tabs.show_event()
+    self._views[self._selected].show_event()
+
+  def hide_event(self):
+    super().hide_event()
+    self._tabs.hide_event()
+    self._views[self._selected].hide_event()
+
+  def _render(self, rect):
+    tabs = rl.Rectangle(rect.x, rect.y, rect.width, ITEM_BASE_HEIGHT)
+    self._tabs.set_parent_rect(tabs)
+    self._tabs.render(tabs)
+    self._views[self._selected].render(rl.Rectangle(rect.x, rect.y+ITEM_BASE_HEIGHT, rect.width, rect.height-ITEM_BASE_HEIGHT))

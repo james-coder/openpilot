@@ -100,6 +100,11 @@ def main():
       except OSError:
         pass
     stop.wait(10)
+  # Catch a segment created during the last polling interval before ignition-off.
+  try:
+    preserver.update()
+  except (OSError, ValueError):
+    pass  # Never delay normal manager shutdown to recover diagnostic evidence.
 
 
 if __name__ == '__main__':

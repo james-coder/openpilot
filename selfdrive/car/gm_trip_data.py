@@ -100,6 +100,7 @@ class TripEvidence:
   def finish(self):
     self._close()
     return {'vehicle_confirmed_volt': self.volt, 'first_mono': self.first, 'last_mono': self.last, 'utc_anchor': self.utc_anchor,
+            'missing_passive_signals': sorted({'engine_rpm', 'speed_m_s', 'pedal_pressed', 'dbc_throttle_percent', 'dbc_coolant_c'} - self.stats.keys()),
             'can_frames_by_bus': self.buses, 'can_batch_gaps_over_250ms': self.can_gaps, 'invalid_samples': self.invalid,
             'signals': self.stats, 'candidate_windows': self.windows,
             'limitations': 'Pedal release is NOT confirmed throttle closure. RPM proves rotation, not combustion. ' +

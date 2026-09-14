@@ -121,15 +121,43 @@ plus 314 GM safety tests run with 22 skipped. Rendered EGR result screens were
 visually inspected. These checks establish software behavior, not actual Volt
 support for the optional diagnostic interfaces.
 
-This upgrade has **not been flashed or scanned on the car yet**. During the
-implementation check, the comma was reachable but ignition was off, with no fresh
-gear/speed state. The previously deployed app/firmware and saved vehicle results
-were left untouched. Before deployment: confirm an outdoor supervised parked
-setup with stable power, back up the matching app/safety revisions and binaries,
-deploy matching revisions, build on-device, flash via pandad, verify the full
-signature, and restart. Capture the first manual scan and compare every transmitted
-request to the allowlist; check Panda faults and blocked-TX counters. Unsupported
-optional identifiers are a valid result, not permission to broaden the allowlist.
+Deployed and live-validated on 2026-09-14: application `d621f6da`, safety
+`629889cf`, unchanged Panda source `7ffc9165`. The signed H7 image SHA-256 is
+`cf4fee369c3c660589a6d22482e721af80c9388f664fc379159463c177fe5ef1`.
+The full firmware signature matched after flashing, and restarted UI/card/
+controlsd/pandad were running with safety parameter 60. On-device checks passed:
+82 scanner/UI tests plus 14 subtests; 314 GM safety tests run, 22 skipped.
+
+One manual read-only scan began at `2026-09-14T17:54:12.691217+00:00`
+(request `29ac9213d92044c4bcb8492e96d9e55d`). All 41 diagnostic transmissions
+matched the allowlist and had hardware transmit echoes. Final Panda faults,
+blocked-TX and invalid-RX counters were zero; the vehicle remained in Park,
+stationary, with controls disabled. The earlier emissions report was unchanged;
+old reports and the new version-2 report were archived. No codes were cleared,
+no engine start or actuator command was sent, and no car reboot was required.
+
+Actual ECM findings:
+
+- P0401 remained stored, pending and permanent, with MIL on. GM ECM replies
+  contained P0401 and the expected disconnected-ASCM U0104, not another EGR
+  circuit code. Twelve connected-bus modules returned end markers.
+- MID 31 returned A9/FD: 2.087 kPa within returned inclusive limits -32.768 to
+  2.399 kPa (stored quick-test result passed). A8 was not returned; absence of
+  a record does not establish service-routine support. A2/05 was preserved raw
+  as unknown scaling. This read did not execute a new flow test or establish
+  that P0401 was resolved; the monitor execution time is unknown.
+- PID 69 was not advertised, so no actual-position feedback was obtained.
+  PID 6B supported fields A and C using wide-range encoding, both 36 C; B and D
+  were unsupported. These fields do not establish cooler sensor placement.
+- Eight calibration IDs and eight CVNs were read successfully. Parked engine
+  speed was zero, commanded EGR zero, coolant 33 C, MAP 87 kPa and BARO 86 kPa.
+  The P0401 freeze frame matched the earlier report. These sequential engine-off
+  readings do not test exhaust flow.
+
+Unsupported optional identifiers are a valid result, not permission to broaden
+the allowlist. Rollback binaries and previous saved reports were retained in
+`/data/gm-egr-backup.rWmVCG/rollback.tar`; prior application `d0d0efa9`, safety
+`e3cff012`. Private raw reports/captures are deliberately not committed.
 
 ## Protocol sources
 

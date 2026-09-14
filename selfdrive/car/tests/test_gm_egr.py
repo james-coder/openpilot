@@ -49,11 +49,11 @@ def reply_for(frame):
   return bytes([service + 0x40, pid]) + data
 
 
-def simulate():
-  scanner = GmEgrScanner()
+def simulate(*, logging=False):
+  scanner = GmEgrScanner(logging=logging)
   scanner.start('egr-test', VEHICLE, 100.)
   frames, remaining, sent = [], [], []
-  for step in range(12001):
+  for step in range(25001 if logging else 12001):
     now = 100 + step / 100
     out = scanner.tick(now, frames, '')
     frames = []

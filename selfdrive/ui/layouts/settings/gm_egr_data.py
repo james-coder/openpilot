@@ -5,6 +5,7 @@ import re
 
 from openpilot.selfdrive.car.gm_diagnostics import PIDS
 from openpilot.selfdrive.car.gm_egr_data import MAX_CAPTURE, MAX_REPLY, MAX_REPORT_BYTES, QUERY_KEYS, decode
+from openpilot.selfdrive.car.gm_egr_analysis import analyze, samples_from_report
 from openpilot.selfdrive.ui.layouts.settings.obd_diagnostics_data import valid_report, result_rows
 
 
@@ -16,6 +17,17 @@ def valid_egr(report, vehicle):
       return False
     if 'archive_error' in report and not isinstance(report['archive_error'], str):
       return False
+    if 'samples' in report:
+      if len(report['samples']) > 300:
+        return False
+      samples_from_report(report)
+      vehicle_samples = report.get('vehicle_samples')
+      if not isinstance(vehicle_samples, list) or len(vehicle_samples) > 260:
+        return False
+      for sample in vehicle_samples:
+        if (not isinstance(sample, dict) or any(type(sample.get(key)) not in (int, float) or not math.isfinite(sample[key])
+                                               for key in ('mono', 'speed_m_s')) or sample.get('source') != 'validated carState'):
+          return False
     emissions = report.get('emissions', {})
     if emissions and valid_report(emissions, vehicle) is None:
       return False
@@ -60,6 +72,14 @@ def egr_rows(report):
   rows = [('EGR evidence', 'Read-only', 'These are stored results and sequential parked readings, not a commanded service-bay test.')]
   if report.get('archive_error'):
     rows.append(('Archive failure', 'Not saved', report['archive_error']))
+  if 'samples' in report:
+    analysis = analyze(report)
+    feedback = analysis['feedback']
+    rows.append(('Bounded parked log', f"{analysis['sample_count']} replies", report.get('log_limitations', '')))
+    rows.append(('Derived feedback (NOT measured position)', f"{len(feedback['estimates'])} usable estimates",
+                 feedback['limitations'] + ' Rejections: ' + str(feedback['rejected'])))
+    rows.append(('P0401 driving-event analysis', analysis['deceleration']['state'].replace('_', ' '),
+                 analysis['deceleration']['limitations']))
   rows.extend(result_rows(report.get('emissions', {})))
   readings = report.get('readings', {})
   priority = {'06:31': 0, '01:69': 1, '01:6B': 2, '01:01': 3, '01:41': 4}

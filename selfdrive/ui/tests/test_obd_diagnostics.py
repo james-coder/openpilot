@@ -110,3 +110,19 @@ def test_egr_only_results_remain_visible_and_cancellable(layout):
   assert layout._active and layout._report == report and not layout._faulted
   layout._request()
   assert layout._params.put.call_args.args[1]['command'] == 'cancel'
+
+
+def test_egr_log_panel_requires_existing_egr_flag_and_queues_bounded_log(layout):
+  from openpilot.selfdrive.ui.layouts.settings.gm_diagnostics import GmEgrLogLayout
+  layout.__class__ = GmEgrLogLayout
+  panel.ui_state.sm['pandaStates'][0].safetyParam = 28
+  layout._update_state()
+  assert layout._reason
+  panel.ui_state.sm['pandaStates'][0].safetyParam = 60
+  layout._last_poll = 0.
+  layout._update_state()
+  assert not layout._reason and not layout._faulted
+  layout._request()
+  assert layout._params.put.call_args.args[1]['command'] == 'log_egr'
+  layout._request()
+  assert layout._params.put.call_args.args[1]['command'] == 'cancel'

@@ -123,14 +123,17 @@ class ObdScanController:
         for scanner in (self.scanner, self.gm_scanner):
           if request['request_id'] == scanner.status.get('request_id'):
             scanner.cancel()
-      elif valid and request.get('command') in ('scan', 'scan_gm'):
-        if request['command'] == 'scan_gm' and not self.gm_scanner.active:
+      elif valid and request.get('command') in ('scan', 'scan_gm', 'log_egr'):
+        logging = request['command'] == 'log_egr'
+        if request['command'] in ('scan_gm', 'log_egr') and not self.gm_scanner.active:
           enhanced = bool(pandas) and all(p.safetyParam & EGR_SAFETY_FLAG for p in pandas)
-          if enhanced != isinstance(self.gm_scanner, GmEgrScanner):
-            self.gm_scanner = GmEgrScanner() if enhanced else GmDiagnosticScanner()
-        scanner = self.gm_scanner if request['command'] == 'scan_gm' else self.scanner
+          if enhanced != isinstance(self.gm_scanner, GmEgrScanner) or logging != getattr(self.gm_scanner, 'logging', False):
+            self.gm_scanner = GmEgrScanner(logging=logging) if enhanced else GmDiagnosticScanner()
+        scanner = self.scanner if request['command'] == 'scan' else self.gm_scanner
         other = self.scanner if scanner is self.gm_scanner else self.gm_scanner
         blocked = (gm_reason if scanner is self.gm_scanner else reason) or ('Another diagnostic scan is running.' if other.active else '')
+        if logging and not isinstance(scanner, GmEgrScanner):
+          blocked = blocked or 'Matching EGR diagnostic firmware required for logging.'
         if not scanner.active:
           if blocked:
             scanner.status = {'version': 1, 'request_id': request['request_id'], 'vehicle': self.vehicle, 'state': 'error', 'message': blocked}
@@ -143,6 +146,10 @@ class ObdScanController:
     if isinstance(self.gm_scanner, GmEgrScanner) and not all(p.safetyParam & EGR_SAFETY_FLAG for p in pandas):
       egr_reason = egr_reason or 'Matching EGR diagnostic firmware required.'
     sends += self.gm_scanner.tick(now, frames, egr_reason)
+    if self.gm_scanner.active and getattr(self.gm_scanner, 'logging', False) and not egr_reason:
+      samples = self.gm_scanner.status['vehicle_samples']
+      if not samples or now - samples[-1]['mono'] >= 1.:
+        samples.append({'mono': now, 'speed_m_s': CS.vEgo, 'source': 'validated carState', 'gear': str(CS.gearShifter)})
     signature = (self.scanner.revision, reason)
     if signature != self._signature or (self.scanner.active and now - self._last_publish >= .5):
       status = copy.deepcopy(self.scanner.status)

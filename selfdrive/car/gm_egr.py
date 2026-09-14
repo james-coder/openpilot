@@ -11,10 +11,14 @@ from openpilot.selfdrive.car.obd_scan import MAX_FRAMES_PER_TICK, ObdScanner
 TOTAL_TIMEOUT = 120.
 MAX_REQUESTS = 48
 FLOW_CONTROL = bytes.fromhex('30 00 0A 00 00 00 00 00')
+# Same firmware allowlist and 500 ms request spacing. No driving-time polling.
+LOG_SECONDS = 120.
+LOG_QUERIES = tuple((1, pid) for pid in (0x0C, 0x2C, 0x2D, 0x2C, 0x0B, 0x33, 0x05, 0x0F, 0x6B, 0x69, 0x41))
 
 
 class GmEgrScanner:
-  def __init__(self):
+  def __init__(self, *, logging=False):
+    self.logging = logging
     self.active = False
     self.revision = 0
     self.report = None
@@ -34,12 +38,20 @@ class GmEgrScanner:
     self._buffer = []
     self._message = None
     self._last_tx = -100.
+    self._log_started = None
+    self._sampled = False
+    self._log_index = 0
     self.status = {'version': 2, 'profile': 'gm', 'state': 'scanning', 'request_id': request_id, 'vehicle': vehicle,
                    'timestamp': datetime.now(UTC).isoformat(), 'started_mono': now,
                    'modules': {}, 'context': {}, 'emissions': {}, 'readings': {},
                    'evidence': [], 'message': 'Reading emissions codes before EGR evidence...', 'progress': 0,
                    'coverage': 'Connected bus 0 only; silent modules and other networks are unverified.',
                    'limitations': 'Stored test results and sequential parked snapshots, not an actuator test or driving-safety assessment.'}
+    if self.logging:
+      self.status.update(samples=[], vehicle_samples=[], log_duration_s=LOG_SECONDS,
+                         log_limitations='Parked polling only; throttle unavailable from the verified allowlist. ' +
+                         'Sequential samples cannot resolve the approximately 0.4-second P0401 monitor. ' +
+                         'Derived normalized feedback is not independent actual-position feedback.')
     self._child = ObdScanner()
     self._child.start(request_id, vehicle, now)
     self.revision += 1
@@ -63,7 +75,7 @@ class GmEgrScanner:
     readings = self.status['readings']
     ids, cvns = readings.get('09:04', {}).get('calibration_ids', []), readings.get('09:06', {}).get('cvns', [])
     self.status['calibration_pairing'] = 'ordered' if ids and len(ids) == len(cvns) else 'unavailable_or_count_mismatch'
-    # Never derive actual position from the legacy relative-error PID.
+    # Never present legacy relative-error PID as measured actual position.
     if readings.get('01:2C', {}).get('value') == 0 and readings.get('01:2D', {}).get('state') == 'ok':
       readings['01:2D'].update(state='not_applicable', error='Relative EGR error at zero command is not a flow measurement')
       readings['01:2D'].pop('value', None)
@@ -98,10 +110,23 @@ class GmEgrScanner:
   def _next(self, now):
     self._message = None
     self._buffer.clear()
+    self._sampled = False
     readings = self.status['readings']
-    while self._index + 1 < len(QUERIES):
-      self._index += 1
-      service, pid = QUERIES[self._index]
+    if self._index + 1 >= len(QUERIES) and self.logging:
+      if self._log_started is None:
+        self._log_started = now
+      if now - self._log_started >= LOG_SECONDS:
+        self._finish()
+        return
+      # At most one cycle of unsupported identifiers; no unbounded search.
+      queries = [LOG_QUERIES[(self._log_index + i) % len(LOG_QUERIES)] for i in range(len(LOG_QUERIES))]
+    else:
+      queries = QUERIES[self._index + 1:]
+    for service, pid in queries:
+      if self._log_started is None:
+        self._index += 1
+      else:
+        self._log_index += 1
       self._key = f'{service:02X}:{pid:02X}'
       request = bytes([service, pid])
       result = {'state': 'timeout', 'request': request.hex(), 'error': 'No response; support unknown'}
@@ -116,10 +141,14 @@ class GmEgrScanner:
       self._request = request
       self._deadline = now + (8. if (service, pid) in ((1, 0x69), (6, 0x31), (9, 4), (9, 6)) else 2.)
       self._out.append(context_request(service, pid))
-      self.status.update(message=f'Reading ECM {self._key} (read-only)...', progress=.4 + .6 * self._index / len(QUERIES))
+      self.status.update(message=f"{'Logging' if self._log_started is not None else 'Reading'} ECM {self._key} (read-only)...",
+                         progress=.4 + .6 * self._index / len(QUERIES))
       self.revision += 1
       return
-    self._finish()
+    if self.logging and self._log_started is None:
+      self._next(now)
+    else:
+      self._finish()
 
   def _engine(self, now, frames):
     if self._message is None:
@@ -131,6 +160,8 @@ class GmEgrScanner:
       return  # Discard frames queued for the previous query.
     result = self.status['readings'][self._key]
     if result['state'] != 'timeout':
+      if self._log_started is not None and now - self._last_tx >= .51:
+        self._next(now)
       return
     for addr, data, bus in frames:
       if (addr, bus) != (0x7E8, 0):
@@ -165,6 +196,9 @@ class GmEgrScanner:
         else:
           result.update(decode(*self._request, reply), state='ok')
           result.pop('error', None)
+        if self.logging and not self._sampled:
+          self.status['samples'].append({'key': self._key, **copy.deepcopy(result)})
+          self._sampled = True
         self.revision += 1
         break
       except (AssertionError, ValueError, IndexError) as error:
@@ -179,7 +213,7 @@ class GmEgrScanner:
     if block_reason or len(frames) > MAX_FRAMES_PER_TICK:
       self.cancel(block_reason or 'Excessive diagnostic traffic')
       return []
-    if now - self._started >= TOTAL_TIMEOUT:
+    if now - self._started >= TOTAL_TIMEOUT + (LOG_SECONDS + 10 if self.logging else 0):
       self._finish('Session deadline reached; previous saved report retained.')
       return []
     for frame in frames:
@@ -204,7 +238,7 @@ class GmEgrScanner:
     for frame in self._out:
       if frame.dat != FLOW_CONTROL:
         self._requests += 1
-        if self._requests > MAX_REQUESTS:
+        if self._requests > (300 if self.logging else MAX_REQUESTS):
           self.cancel('Request limit exceeded')
           return []
         self._last_tx = now

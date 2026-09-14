@@ -137,3 +137,20 @@ def test_trip_process_only_volt_and_onroad(mocker):
   assert not volt_trip_logging(False, mocker.Mock(), cp)
   cp.carFingerprint = 'another vehicle'
   assert not volt_trip_logging(True, mocker.Mock(), cp)
+
+
+def test_unbounded_segment_number_rejected_before_range_allocation(tmp_path):
+  folder = tmp_path / 'route--999999999'
+  folder.mkdir()
+  save_log(str(folder / 'rlog.zst'), [params().as_reader()])
+  with pytest.raises(ValueError, match='Segment number'):
+    index_route(tmp_path)
+
+
+def test_snapshot_comparison_never_claims_fresh_execution_or_missing_identity():
+  from openpilot.tools.car_porting.gm_trip_report import compare_snapshots
+  item = {'vehicle_identity_hash': None, 'timestamp': '2026-09-14T00:00:00+00:00', 'emissions': {}, 'readings': {}}
+  result = compare_snapshots({'before': item, 'after': item})
+  assert result['same_vehicle'] is None
+  assert result['fresh_monitor_execution'] == 'unproven'
+  assert result['phases'][0]['ecm_dtc_statuses']['pending']['state'] == 'not_read'

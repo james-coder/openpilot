@@ -23,7 +23,7 @@ def snapshot(path):
   if not valid_gm_report(report, report.get('vehicle')):
     raise ValueError('Invalid diagnostic snapshot')
   return {'source': str(path), 'sha256': hashlib.sha256(raw).hexdigest(), 'timestamp': report.get('timestamp'),
-          'vehicle_identity_hash': hashlib.sha256(json.dumps(report['vehicle'], sort_keys=True).encode()).hexdigest(),
+          'vehicle_identity_hash': hashlib.sha256(json.dumps(report['vehicle'], sort_keys=True).encode()).hexdigest() if report['vehicle'].get('vin') else None,
           'emissions': report.get('emissions', {}).get('ecus', {}), 'readings': report.get('readings', {}),
           'modules': report.get('modules', {}), 'context': report.get('context', {})}
 
@@ -41,7 +41,7 @@ def compare_snapshots(snapshots):
                    'mode06': item['readings'].get('06:31', {'state': 'not_read'})})
   identities = {s['vehicle_identity_hash'] for s in snapshots.values()}
   calibrations = {tuple(s['readings'].get('09:04', {}).get('calibration_ids', [])) for s in snapshots.values()}
-  return {'phases': phases, 'same_vehicle': len(identities) == 1 if phases else None,
+  return {'phases': phases, 'same_vehicle': len(identities) == 1 if phases and None not in identities else None,
           'same_calibration_lists': len(calibrations) == 1 and all(calibrations) if phases else None,
           'fresh_monitor_execution': 'unproven', 'note': 'Separate acquired results are not evidence of separate monitor executions. ' +
           'No data is relabeled as post-drive or post-cleaning automatically; phase association is supplied by the operator.'}
@@ -63,6 +63,8 @@ def index_route(root, route=None, *, cancelled=lambda: False, emit=None):
             'segments': [], 'problems': [], 'limitations': 'Passive context, not an EGR flow test or driving-safety assessment. ' +
             'Re-reading Mode 06 does not prove fresh monitor execution; snapshots are acquisition-timestamped only.'}
   numbers = [int(p.name.rsplit('--', 1)[1]) for p in folders]
+  if max(numbers) >= 2000:
+    raise ValueError('Segment number exceeds extraction bound')
   report['missing_segments'] = sorted(set(range(max(numbers) + 1)) - set(numbers))
   for folder in folders:
     if cancelled():

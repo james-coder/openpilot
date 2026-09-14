@@ -54,12 +54,16 @@ class TripEvidence:
         self.latest_engine = None
         self._close()
       self.last_can = t
+      can_decode = self.volt and event.valid
       for frame in event.can:
-        bus = str(frame.src)
+        src = frame.src
+        bus = str(src)
         self.buses[bus] = self.buses.get(bus, 0) + 1
-        if not self.volt or not event.valid or frame.src != 0 or len(frame.dat) != 8:
+        if not can_decode or src != 0 or frame.address not in (0xC9, 0x4C1, 0x1C4):
           continue
         data = frame.dat
+        if len(data) != 8:
+          continue
         values = {}
         if frame.address == 0xC9:
           rpm = int.from_bytes(data[1:3], 'big') / 4

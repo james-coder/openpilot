@@ -22,7 +22,7 @@ copy. Appends to an open segment remain visible through the link. Normal route
 cleanup can remove its own filename without losing the pinned data. Video is not
 pinned. The private parent directory also protects raw vehicle identifiers.
 
-Preservation stops adding links at a 2-GiB total pin budget or below 6 GiB free
+Preservation stops adding links at an 8-GiB total pin budget or below 6 GiB free
 space. An already linked active segment can finish growing past the budget.
 Existing pins are never silently deleted. Normal loggerd/deleter behavior is not
 changed. `status.json` and the Trip context menu show last preservation status,

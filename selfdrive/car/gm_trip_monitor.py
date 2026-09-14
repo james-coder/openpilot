@@ -13,7 +13,7 @@ import tempfile
 import threading
 
 TRIP_ROOT = Path('/data/media/0/diagnostics/gm/trips')
-MAX_PIN_BYTES = 2 * 1024**3
+MAX_PIN_BYTES = 8 * 1024**3
 MIN_FREE_BYTES = 6 * 1024**3
 SEGMENT = re.compile(r'(.+)--([0-9]+)$')
 

@@ -1,9 +1,21 @@
 # Volt EGR: motion versus restriction evidence
 
-Implemented locally September 14, 2026. This addition does not alter Panda safety,
+Deployed to the comma3 September 14, 2026 (logging application `279721281`,
+offroad UI compatibility fix `4217da1d5`). This addition does not alter Panda safety,
 send output controls, enter diagnostic sessions, clear faults, or guess Mode 22
-identifiers. Bench results are not vehicle results. Deployment/live validation of
-this logging addition remains separate from the earlier deployed snapshot scan.
+identifiers. Bench results are not vehicle results. On-device validation passed
+100 diagnostic/UI tests plus 14 subtests, and three network-worker/poller tests.
+The vehicle reported ignition off and Panda no-output during installation.
+UI, manager, hardwared and pandad restarted successfully; no live EGR log was
+started. Engine-running evidence collection remains pending.
+
+Panda source/safety revisions and signed firmware were unchanged; firmware SHA-256
+remains `cf4fee369c3c660589a6d22482e721af80c9388f664fc379159463c177fe5ef1`.
+The saved baseline archive's SHA-256 remains
+`4add928490280910aa587d388c0b2dde29b43357d793fb7e93a94f9ea0c8af8f`.
+The device retains the previous application at branch
+`backup/egr-before-log-20260914` (`d621f6da`); the application update used a
+clean fast-forward, not a replacement of the driving-control branch.
 
 ## Why engine-off did not give position
 

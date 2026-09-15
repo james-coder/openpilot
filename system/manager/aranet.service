@@ -1,0 +1,22 @@
+[Unit]
+Description=Passive Aranet4 cabin history (no vehicle control)
+After=multi-user.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data/openpilot
+Environment=PYTHONPATH=/data/openpilot
+ExecStart=/usr/local/venv/bin/python -m openpilot.selfdrive.car.aranet
+Restart=on-failure
+RestartSec=30
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+MemoryMax=96M
+CPUQuota=10%
+StandardOutput=null
+StandardError=null
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

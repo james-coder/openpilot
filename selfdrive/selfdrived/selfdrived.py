@@ -106,7 +106,8 @@ class SelfdriveD:
 
     self.CS_prev = car.CarState.new_message()
     self.AM = AlertManager()
-    self.events = Events()
+    recognition_attempts = 0 if REPLAY or car_recognized else (self.params.get("CarRecognitionAttempts") or 0)
+    self.events = Events(car_recognition_attempts=recognition_attempts)
 
     self.initialized = False
     self.enabled = False
@@ -140,7 +141,9 @@ class SelfdriveD:
 
     if not car_recognized:
       self.events.add(EventName.carUnrecognized, static=True)
-      set_offroad_alert("Offroad_CarUnrecognized", True)
+      extra = (f"Vehicle identification failed after {recognition_attempts} attempt{'s' if recognition_attempts != 1 else ''}."
+               if 1 <= recognition_attempts <= 3 else None)
+      set_offroad_alert("Offroad_CarUnrecognized", True, extra_text=extra)
     elif self.CP.passive:
       self.events.add(EventName.dashcamMode, static=True)
 

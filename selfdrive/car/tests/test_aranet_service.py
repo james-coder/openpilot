@@ -210,3 +210,13 @@ def test_installer_restores_readonly_root_after_failure(monkeypatch):
   with pytest.raises(RuntimeError), install.writable_root():
     raise RuntimeError('injected copy failure')
   assert calls == [['mount', '-o', 'remount,rw', '/'], ['mount', '-o', 'remount,ro', '/']]
+
+
+def test_bluez_tool_receives_eof_pipe_not_systemd_devnull(monkeypatch):
+  monkeypatch.setattr(bluetooth, 'offroad', lambda: None)
+  def tool(argv, **kwargs):
+    assert kwargs['input'] == b''
+    assert kwargs['timeout'] == 10
+    return SimpleNamespace(returncode=0, stdout=b'Index list with 0 items', stderr=b'')
+  monkeypatch.setattr(bluetooth.subprocess, 'run', tool)
+  assert bluetooth.run_checked(['btmgmt', 'info']) == 'Index list with 0 items'

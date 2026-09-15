@@ -57,6 +57,10 @@ safe-initialization waits, failures, paused/stale/offline states and sample age.
 Local packets are bounded to 4096 bytes and independently validated by the
 recorder. Errors include a bounded stage/exit/error summary instead of suppressing
 all subprocess diagnostics.
+BlueZ command tools receive an EOF pipe, not systemd's default /dev/null stdin:
+a device read-only comparison found that `btmgmt info` hangs with the latter.
+The HCI interface is also checked for UP/non-INIT state before enabling LE;
+the appearance of `hci0` alone does not prove initialization is complete.
 
 Pause/resume creates/removes only `/data/aranet/paused`. Pause disconnects the
 recorder, which stops passive scanning without resetting the controller. History

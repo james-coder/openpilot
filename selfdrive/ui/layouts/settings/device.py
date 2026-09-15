@@ -41,6 +41,14 @@ class DeviceLayout(Widget):
 
     ui_state.add_offroad_transition_callback(self._offroad_transition)
 
+  def _open_aranet(self):
+    try:
+      from openpilot.selfdrive.ui.layouts.settings.aranet import AranetLayout
+      gui_app.push_widget(AranetLayout())
+    except Exception:
+      cloudlog.exception('Optional Aranet screen unavailable')
+      gui_app.push_widget(alert_dialog('Cabin history unavailable. Driving is unaffected.'))
+
   def _initialize_items(self):
     self._pair_device_btn = button_item(lambda: tr("Pair Device"), lambda: tr("PAIR"), lambda: tr(DESCRIPTIONS['pair_device']),
                                         callback=lambda: gui_app.push_widget(PairingDialog()))
@@ -54,6 +62,7 @@ class DeviceLayout(Widget):
                                            left_callback=self._reboot_prompt, right_callback=self._power_off_prompt)
 
     items = [
+      button_item('Cabin air / Aranet4', 'GRAPH', callback=self._open_aranet, enabled=ui_state.is_offroad),
       text_item(lambda: tr("Dongle ID"), self._params.get("DongleId") or (lambda: tr("N/A"))),
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
       self._pair_device_btn,

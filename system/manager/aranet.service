@@ -16,6 +16,7 @@ CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
 MemoryMax=96M
 CPUQuota=5%
+CPUAccounting=true
 NoNewPrivileges=true
 CapabilityBoundingSet=
 RestrictAddressFamilies=AF_UNIX

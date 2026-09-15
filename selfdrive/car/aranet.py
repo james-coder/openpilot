@@ -191,7 +191,7 @@ def main():
               continue
             msg = decode_message(raw)
             last_message = time.monotonic()
-            message_timeout = 150 if msg.get('state') == 'initializing' else 15
+            message_timeout = 210 if msg.get('state') == 'initializing' else 15
             if msg['type'] == 'advertisement':
               last_advertisement, written = consume_advertisement(msg, history)
               if written is not None:

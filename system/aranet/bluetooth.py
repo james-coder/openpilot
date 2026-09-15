@@ -38,13 +38,16 @@ def run_checked(argv, timeout=10):
   offroad()
   # Only fixed trusted tools/modules are called; no packet/payload logging.
   try:
-    result = subprocess.run(argv, capture_output=True, timeout=timeout)
+    # BlueZ's shell event loop stalls with systemd's /dev/null stdin. An EOF
+    # pipe selects working noninteractive behavior (verified with read-only info).
+    result = subprocess.run(argv, input=b'', capture_output=True, timeout=timeout)
   except subprocess.TimeoutExpired as exc:
     detail = ((exc.stdout or b'') + (exc.stderr or b'')).decode(errors='replace')[-180:]
     raise RuntimeError(f'{Path(argv[0]).name} timed out: {detail or "no tool output"}') from exc
   if result.returncode:
     detail = result.stderr.decode(errors='replace').strip().splitlines()
     raise RuntimeError(f'{Path(argv[0]).name} exit {result.returncode}: ' + (detail[-1][:180] if detail else 'no error detail'))
+  return result.stdout.decode(errors='replace')
 
 
 class Radio:
@@ -91,7 +94,17 @@ class Radio:
           raise RuntimeError('HCI attachment failed')
         time.sleep(.1)
       run_checked([str(ASSETS / 'bin/hciconfig'), 'hci0', 'up'])
-      run_checked([str(ASSETS / 'bin/btmgmt'), '-i', '0', 'le', 'on'])
+      # Sysfs appearance alone is not readiness: hci0 can still be DOWN INIT.
+      deadline = time.monotonic() + 30
+      while True:
+        info = run_checked([str(ASSETS / 'bin/hciconfig'), '-a', 'hci0'])
+        flags = next((line.split() for line in info.splitlines() if 'RUNNING' in line), [])
+        if 'UP' in flags and 'INIT' not in flags:
+          break
+        if time.monotonic() >= deadline:
+          raise RuntimeError('Bluetooth controller did not finish initialization')
+        time.sleep(.5)
+      run_checked([str(ASSETS / 'bin/btmgmt'), '-i', '0', 'le', 'on'], 30)
     except BaseException:
       self.close()
       raise
@@ -130,6 +143,7 @@ def main():
   signal.signal(signal.SIGTERM, shutdown)
   log_path = Path('/var/log/aranet-bluetooth')
   handler = RotatingFileHandler(log_path / 'service.log', maxBytes=262144, backupCount=2)
+  handler.setFormatter(logging.Formatter('%(asctime)s %(levelname)s %(message)s'))
   LOG.addHandler(handler)
   LOG.setLevel(logging.INFO)
   radio = Radio()

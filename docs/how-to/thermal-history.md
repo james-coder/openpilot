@@ -1,14 +1,40 @@
 # Thermal history and parked fan trial
 
-Local implementation only. No deployment or change to the device's running fan
-curve has been performed. Physical-device fault, cold-boot and cooling validation
-remain required before deployment.
+Installed on the comma 3X (device branch `deploy/volt-gm-egr`) on 2026-09-15,
+after live ignition-off/no-output verification. Thermal changes: `f9d097791`;
+Bluetooth boot-permission fix: `605091505`. No Panda firmware or safety changes.
 
 Local verification: 216 tests passed across thermal/fan/power monitoring,
 selfdrived and existing Aranet suites. Native Params compilation, targeted Ruff
 and diff checks passed. Populated/empty history screens rendered at comma 3 size;
 text bounds were checked and the populated screenshot inspected. These are local
 tests and synthetic previews, not device/cooling/noise validation.
+
+Device verification: native Params build; 169 tests across thermal/fan/power,
+selfdrived and Aranet; actual optional thermal service SIGKILL/restart with fresh
+manager health remaining normal; and a live-data offscreen UI render. History
+was observed accumulating, with bounded storage and idle scheduling. These tests
+do not establish physical driving engagement, cooling performance or fan noise.
+
+The first deployment reboot exposed a pre-existing Bluetooth startup-order bug:
+the root helper could create deviceState/pandaStates msgq files as root:comma 0644,
+preventing comma-user manager/UI from opening them read/write. Its systemd unit
+now uses UMask=0002 with Group=comma. Three isolated on-device cross-UID tests
+reproduced the old failure and verified both startup orders with the fix. The
+repair changed only group-write permission on the two affected shared files;
+no global driving health exemption or Panda configuration change was made.
+This demonstrates why optional-process health tests alone are insufficient:
+shared-resource permissions and real boot ordering also require verification.
+
+The repeat reboot passed (boot e5e6e23d-7bb2-46a9-8571-29a4794e3d4a): root-first
+IPC files were group-writable, manager/device/Panda/peripheral telemetry was fresh
+and valid, no expected manager process was missing, and the thermal service had
+zero restarts and new timeline samples. Cellular-bound HTTPS returned HTTP 200
+through ppp0 after reboot with Wi-Fi left connected for SSH. No modem changes were
+made; the earlier failed-start boot had repeated PPP hangups, so one successful
+reconnect is not a long-term cellular reliability guarantee. This was a software
+reboot, not a physical power-removal/cold-soak test. Real-road engagement and
+hot-parked cooling/noise comparisons remain unverified.
 
 ## Existing versus new recording
 
@@ -68,10 +94,11 @@ checks. It runs as comma, SCHED_IDLE/nice19, idle I/O, memory cap64MiB, with no
 capabilities and only local message sockets. Its absence, crash or storage failure
 must not inhibit engagement. The service does not depend on Aranet/Bluetooth.
 
-For a future verified-offroad deployment, create `/data/thermal-history` owned by
-comma:comma, mode0755, install `system/hardware/thermal-history.service` in systemd's
-persistent unit directory and enable it. AGNOS root is normally read-only: preserve
-and restore that state during installation. Do not install while moving. Compile
+For a verified-offroad deployment, use `system.hardware.install_thermal_history`:
+it creates `/data/thermal-history` owned by comma:comma, mode0755, installs
+`system/hardware/thermal-history.service` in systemd's persistent unit directory
+and enables it. AGNOS root is normally read-only: the installer preserves and
+restores that state. Do not install while moving. Compile
 the new Params key before running the modified hardwared/UI. Normal reboots preserve
 history; OS replacements require separate verification of service installation.
 

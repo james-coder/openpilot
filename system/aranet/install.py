@@ -4,6 +4,7 @@ sudo /usr/local/venv/bin/python -m openpilot.system.aranet.install
 Uses already provisioned, hash-pinned device assets; never downloads at boot.
 """
 import argparse
+from contextlib import contextmanager
 import hashlib
 import json
 import os
@@ -24,6 +25,22 @@ BIN_HASHES = {
   'hciconfig': 'f1de33bc8bfcdfa65d95c8c6b59d4d3e8e2873f1337c282eb7e5e62f8418f561',
   'btmgmt': 'f67995fdf60cd9a44fe4c74c8338d7aba410eef219cf3719efa7e23f438472e3',
 }
+
+
+@contextmanager
+def writable_root():
+  # AGNOS uses a read-only ext4 root; its apt_setup/apt_teardown use this same
+  # remount mechanism. Limit the writable interval to our two unit installations.
+  options = subprocess.check_output(['findmnt', '-n', '-o', 'OPTIONS', '/'], text=True).strip().split(',')
+  restore = 'ro' in options
+  if restore:
+    offroad()
+    subprocess.run(['mount', '-o', 'remount,rw', '/'], check=True)
+  try:
+    yield
+  finally:
+    if restore:
+      subprocess.run(['mount', '-o', 'remount,ro', '/'], check=True)
 
 
 def regular(path):
@@ -74,7 +91,9 @@ def main():
   offroad()
   units = ['aranet.service', 'aranet-bluetooth.service']
   if args.disable:
-    subprocess.run(['systemctl', 'disable', '--now', *units], check=True)
+    subprocess.run(['systemctl', 'stop', *units], check=True)
+    with writable_root():
+      subprocess.run(['systemctl', 'disable', *units], check=True)
     return
   entries = verify_assets(args.assets)
   # Old manager registration must be removed and manager restarted before installation.
@@ -105,15 +124,18 @@ def main():
   (ASSETS / 'manifest.json').write_text(json.dumps(dict(binary_sha256=BIN_HASHES, firmware_sha256=HASHES), indent=2))
   user = pwd.getpwnam('comma')
   migrate_history(Path('/data/aranet'), user.pw_uid, user.pw_gid)
-  for source, name in [('system/manager/aranet.service', units[0]), ('system/aranet/aranet-bluetooth.service', units[1])]:
-    target = Path('/etc/systemd/system') / name
-    if target.exists() or target.is_symlink():
-      regular(target)
-    shutil.copyfile(Path(BASEDIR) / source, target)
-    os.chmod(target, 0o644)
   offroad()
+  with writable_root():
+    for source, name in [('system/manager/aranet.service', units[0]), ('system/aranet/aranet-bluetooth.service', units[1])]:
+      target = Path('/etc/systemd/system') / name
+      if target.exists() or target.is_symlink():
+        regular(target)
+      shutil.copyfile(Path(BASEDIR) / source, target)
+      os.chmod(target, 0o644)
+    subprocess.run(['systemctl', 'enable', *units], check=True)
   subprocess.run(['systemctl', 'daemon-reload'], check=True)
-  subprocess.run(['systemctl', 'enable', '--now', *units], check=True)
+  offroad()
+  subprocess.run(['systemctl', 'start', *units], check=True)
 
 
 if __name__ == '__main__':

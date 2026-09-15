@@ -220,3 +220,17 @@ def test_bluez_tool_receives_eof_pipe_not_systemd_devnull(monkeypatch):
     return SimpleNamespace(returncode=0, stdout=b'Index list with 0 items', stderr=b'')
   monkeypatch.setattr(bluetooth.subprocess, 'run', tool)
   assert bluetooth.run_checked(['btmgmt', 'info']) == 'Index list with 0 items'
+
+
+def test_history_filters_malformed_and_future_samples(tmp_path, monkeypatch):
+  monkeypatch.setattr(aranet.time, 'time', lambda: 100000.)
+  history = aranet.History(tmp_path)
+  try:
+    history.add(aranet.decode(payload()), -63, now=100000.)
+    history.db.execute('insert into readings values(1,99990,NULL,20,1000,40,90,120,-60)')
+    history.db.execute('insert into readings values(2,100100,500,20,1000,40,90,120,-60)')
+    history.db.commit()
+    rows = aranet.read_history(tmp_path)
+    assert len(rows) == 1 and rows[0][1] == 1159
+  finally:
+    history.db.close()

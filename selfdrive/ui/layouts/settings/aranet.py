@@ -76,8 +76,10 @@ class AranetLayout(Widget):
       try:
         self.rows = read_history(seconds=self.hours * 3600)
         state = json.loads((ROOT / 'status.json').read_text())
-        self.message = state['message'] if now - state['time'] < 90 else 'Collector offline; history retained'
-      except (OSError, ValueError, KeyError, sqlite3.Error):
+        if not isinstance(state['message'], str):
+          raise ValueError('Invalid status message')
+        self.message = state['message'][:240] if 0 <= now - state['time'] < 90 else 'Collector offline; history retained'
+      except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
         self.message = 'Collector unavailable; history retained'
     rl.draw_rectangle_rec(r, rl.Color(8, 14, 24, 255))
     self.buttons = []

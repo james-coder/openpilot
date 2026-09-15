@@ -1,0 +1,28 @@
+[Unit]
+Description=Optional read-only lifetime thermal history
+After=local-fs.target
+
+[Service]
+User=comma
+Group=comma
+WorkingDirectory=/data/openpilot
+Environment=PYTHONPATH=/data/openpilot
+ExecStart=/usr/local/venv/bin/python -m openpilot.system.hardware.thermal_history
+Restart=on-failure
+RestartSec=60
+Nice=19
+CPUSchedulingPolicy=idle
+IOSchedulingClass=idle
+MemoryMax=64M
+NoNewPrivileges=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/thermal-history
+UMask=0022
+StandardOutput=null
+StandardError=null
+
+[Install]
+WantedBy=multi-user.target

@@ -16,8 +16,11 @@ for (const file of [
   'comparison.html',
   'comparison-close-vehicle.html',
   'radar-example.html',
+  'braking-audit.json',
+  'can-coverage.json',
 ])
   fs.copyFileSync(path.join(source, file), path.join(fixture, file));
+fs.symlinkSync(path.join(source, 'diagnostics-ui'), path.join(fixture, 'diagnostics-ui'));
 fs.symlinkSync(path.join(source, 'runs'), path.join(fixture, 'runs'));
 const assisted = path.join(fixture, 'assisted-v1');
 fs.mkdirSync(assisted);
@@ -61,6 +64,19 @@ try {
     await page.goto(base + '/#' + name);
     await page.locator('.document h1').waitFor();
   }
+  await page.goto(base + '/#braking');
+  await page.getByRole('heading', { name: 'What happens before the stop?' }).waitFor();
+  assert.equal(await page.getByRole('img', { name: /over time/ }).count(), 3);
+  assert.equal(await page.locator('[aria-label="Recorded stop"] option').count(), 2);
+  await page.getByLabel('Inspect braking time').fill('60');
+  await page.getByLabel('Braking event selection').selectOption('lead');
+  assert.equal(await page.locator('[aria-label="Recorded stop"] option').count(), 8);
+  await page.screenshot({ path: path.join(artifacts, 'braking.png'), fullPage: true });
+  await page.goto(base + '/#can-review');
+  await page.getByRole('heading', { name: 'CAN debugger improvements' }).waitFor();
+  for (const img of await page.locator('.can-preview').all()) await img.evaluate((i) => i.decode());
+  assert.match(await page.locator('table').innerText(), /503/);
+  await page.screenshot({ path: path.join(artifacts, 'can-review.png'), fullPage: true });
   await page.goto(base + '/#manual');
   const canvas = page.getByLabel('Road frame: drag to draw a plate box');
   await canvas.waitFor();

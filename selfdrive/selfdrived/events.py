@@ -51,10 +51,17 @@ EVENT_NAME = {v: k for k, v in EventName.schema.enumerants.items()}
 
 
 class Events:
-  def __init__(self):
+  def __init__(self, car_recognition_attempts: int = 0):
     self.events: list[int] = []
     self.static_events: list[int] = []
     self.event_counters = dict.fromkeys(EVENTS.keys(), 0)
+    self.recognition_alerts = {}
+    if 1 <= car_recognition_attempts <= 3:
+      attempts = f"{car_recognition_attempts} Attempt{'s' if car_recognition_attempts != 1 else ''} Failed"
+      self.recognition_alerts = {
+        EventName.carUnrecognized: NormalPermanentAlert("Dashcam Mode", f"Car Unrecognized: {attempts}", priority=Priority.LOWEST),
+        EventName.startupNoCar: StartupAlert("Car Unrecognized", f"{attempts} - Dashcam Mode"),
+      }
 
   @property
   def names(self) -> list[int]:
@@ -85,6 +92,8 @@ class Events:
       for et in event_types:
         if et in types:
           alert = EVENTS[e][et]
+          if et == ET.PERMANENT and e in self.recognition_alerts:
+            alert = self.recognition_alerts[e]
           if not isinstance(alert, Alert):
             alert = alert(*callback_args)
 
@@ -309,8 +318,14 @@ def posenet_invalid_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.Sub
   return NoEntryAlert(msg, alert_text_1="Posenet Speed Invalid")
 
 
+def driving_process_failures(manager_state) -> set[str]:
+  # Aranet is optional cabin telemetry, never an engagement/disengagement dependency.
+  # Keep all other processes fail-closed, including unknown/new process names.
+  return {p.name for p in manager_state.processes if not p.running and p.shouldBeRunning and p.name != 'aranetd'}
+
+
 def process_not_running_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
-  not_running = [p.name for p in sm['managerState'].processes if not p.running and p.shouldBeRunning]
+  not_running = sorted(driving_process_failures(sm['managerState']))
   msg = ', '.join(not_running)
   return NoEntryAlert(msg, alert_text_1="Process Not Running")
 
@@ -903,6 +918,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   EventName.radarFault: {
     ET.SOFT_DISABLE: soft_disable_alert("Radar Error: Restart the Car"),
     ET.NO_ENTRY: NoEntryAlert("Radar Error: Restart the Car"),
+  },
+
+  EventName.voltProtectionDegraded: {
+    ET.SOFT_DISABLE: soft_disable_alert("Braking Protection Unavailable: Take Control"),
+    ET.NO_ENTRY: NoEntryAlert("Braking Protection Unavailable"),
   },
 
   EventName.radarTempUnavailable: {

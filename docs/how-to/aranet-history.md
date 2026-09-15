@@ -6,6 +6,34 @@ scale. Windows: 2 hours, 24 hours, 7 days, 30 days. Pause / Resume stops/restart
 scanning without deleting history. Missing/stale samples are labelled and outages break lines.
 There are no HVAC commands, vehicle transmissions, pairing, or GATT connections.
 
+## Engagement independence (required)
+
+An initial integration incorrectly allowed a stopped `aranetd` to raise the global
+`processNotRunning` no-entry/soft-disable event. Recorder-only and screen tests did
+not catch that integration failure. This caused a reported loss of openpilot
+availability and was not an acceptable consequence of an optional cabin feature.
+
+The driving process-health check and its alert text now use one shared filter that
+excludes only `aranetd`. Manager continues reporting its true process state; every
+other process, including unrecognized future names, retains its existing safety
+behavior. Cabin logging failure must not prevent engagement or cause disengagement.
+
+Regression tests: `pytest selfdrive/selfdrived/tests/test_optional_cabin_process.py`.
+These exercise the real selfdrived event path and engagement state machine with
+simulated absent/stopped/crashed/permission-denied/cold-boot-unavailable states.
+They also inject a scheduling permission failure into an isolated collector child
+and feed its actual manager process-state report through that event path. A
+negative control restores the old filter and reproduces the engagement failure.
+Every other configured process remains blocking; simultaneous camera and CAN
+faults still block engagement and disable an enabled state machine.
+
+These are host-side tests, not device cold-boot or driving validation. They do not
+replace parked device checks of startup, crash, duplicate launchers, missing
+Bluetooth, and permissions before deployment. The recorder's original exit cause
+must be established from device logs separately from this dependency fix.
+
+## Recording and resources
+
 Selected device: owner's previously identified Aranet4 2954E, CE:24:29:74:F2:C2. Another
 sensor is never selected automatically. Integrations advertisements must be enabled. Current
 observed measurement interval is 120 seconds; repeated advertisements are deduplicated using

@@ -40,8 +40,13 @@ not stolen. If the radio is absent onroad, logging waits for a safe offroad
 opportunity. Already-initialized passive reception can continue during a drive.
 A helper crash can therefore leave a gap until the next safe initialization.
 
-Both services use nice 19, SCHED_IDLE, idle I/O priority, 30-second failure
-backoff and 5% CPU quotas each. MemoryMax is 128 MiB for the Bluetooth helper
+Both services use nice 19, SCHED_IDLE, idle I/O priority and 30-second failure
+backoff. Each requests a 5% CPU quota, but device verification found that the
+current 4.9 kernel exposes only the memory controller through cgroup v2:
+there is no cpu.max and the CPU quota is NOT enforced on this kernel. Do not
+describe it as a hard CPU cap. Idle scheduling and bounded work remain active;
+actual usage must be measured. No cgroup hierarchy/kernel changes are made here.
+MemoryMax is 128 MiB for the Bluetooth helper
 (including children) and 96 MiB for recording. These limits do not eliminate
 kernel interrupt, radio coexistence or other shared-resource effects.
 

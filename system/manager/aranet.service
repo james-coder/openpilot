@@ -1,6 +1,6 @@
 [Unit]
 Description=Passive Aranet4 cabin history (no vehicle control)
-After=multi-user.target
+After=local-fs.target
 
 [Service]
 Type=simple

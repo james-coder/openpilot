@@ -24,9 +24,9 @@ from openpilot.system.aranet.safety import offroad, UnsafeInitialization
 LOG = logging.getLogger('aranet-bluetooth')
 
 
-def stop(child):
+def stop(child, sig=signal.SIGTERM):
   if child is not None and child.poll() is None:
-    child.terminate()
+    child.send_signal(sig)
     try:
       child.wait(timeout=3)
     except subprocess.TimeoutExpired:
@@ -107,7 +107,7 @@ class Radio:
       raise
 
   def stop_scan(self):
-    stop(self.scanner)
+    stop(self.scanner, signal.SIGINT)
     self.scanner = None
     if self.receiver is not None:
       self.receiver.close()

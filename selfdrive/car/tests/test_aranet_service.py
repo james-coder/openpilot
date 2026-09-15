@@ -199,3 +199,13 @@ def test_corrupt_asset_rejected_before_install(tmp_path):
   (tmp_path / 'usr/bin/hciattach').write_bytes(b'wrong')
   with pytest.raises(RuntimeError, match='checksum'):
     install.verify_assets(tmp_path)
+
+
+def test_installer_restores_readonly_root_after_failure(monkeypatch):
+  calls = []
+  monkeypatch.setattr(install, 'offroad', lambda: None)
+  monkeypatch.setattr(install.subprocess, 'check_output', lambda *a, **k: 'ro,relatime')
+  monkeypatch.setattr(install.subprocess, 'run', lambda args, **kwargs: calls.append(args))
+  with pytest.raises(RuntimeError), install.writable_root():
+    raise RuntimeError('injected copy failure')
+  assert calls == [['mount', '-o', 'remount,rw', '/'], ['mount', '-o', 'remount,ro', '/']]

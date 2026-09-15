@@ -92,6 +92,10 @@ The installer refuses stale/unsafe telemetry, an old live manager collector,
 unverified assets and symlink targets. It migrates only named history files to
 comma ownership, retaining their contents. It installs/enables both persistent
 units. There is no privileged or blocking hook in manager startup.
+AGNOS has a read-only root filesystem. Installation briefly remounts it writable
+only to install/enable these two units, then restores its original read-only
+state even if installation fails. This follows the device's existing package
+maintenance mechanism; no partition resizing or other OS configuration occurs.
 
 For an application release changing unit definitions, run the installer again
 offroad. A clean checkout must contain the recorder, UI integration, helper,

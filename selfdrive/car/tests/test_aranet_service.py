@@ -19,6 +19,8 @@ def test_no_manager_dependency():
   root = Path(__file__).resolve().parents[3]
   text = (root / 'system/manager/aranet.service').read_text()
   assert 'User=comma' in text and 'CapabilityBoundingSet=\n' in text
+  bluetooth_unit = (root / 'system/aranet/aranet-bluetooth.service').read_text()
+  assert 'Group=comma\n' in bluetooth_unit and 'UMask=0002\n' in bluetooth_unit
   for filename in ('system/manager/aranet.service', 'system/aranet/aranet-bluetooth.service'):
     text = (root / filename).read_text()
     assert 'Requires=' not in text and 'BindsTo=' not in text

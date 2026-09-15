@@ -6,6 +6,9 @@ After=local-fs.target
 Type=simple
 User=root
 Group=comma
+# msgq subscribers may create shared files before publishers at boot. Preserve
+# group write access so comma-user driving processes can open them O_RDWR.
+UMask=0002
 WorkingDirectory=/data/openpilot
 Environment=PYTHONPATH=/data/openpilot
 ExecStart=/usr/local/venv/bin/python -m openpilot.system.aranet.bluetooth

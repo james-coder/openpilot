@@ -51,10 +51,17 @@ EVENT_NAME = {v: k for k, v in EventName.schema.enumerants.items()}
 
 
 class Events:
-  def __init__(self):
+  def __init__(self, car_recognition_attempts: int = 0):
     self.events: list[int] = []
     self.static_events: list[int] = []
     self.event_counters = dict.fromkeys(EVENTS.keys(), 0)
+    self.recognition_alerts = {}
+    if 1 <= car_recognition_attempts <= 3:
+      attempts = f"{car_recognition_attempts} Attempt{'s' if car_recognition_attempts != 1 else ''} Failed"
+      self.recognition_alerts = {
+        EventName.carUnrecognized: NormalPermanentAlert("Dashcam Mode", f"Car Unrecognized: {attempts}", priority=Priority.LOWEST),
+        EventName.startupNoCar: StartupAlert("Car Unrecognized", f"{attempts} - Dashcam Mode"),
+      }
 
   @property
   def names(self) -> list[int]:
@@ -85,6 +92,8 @@ class Events:
       for et in event_types:
         if et in types:
           alert = EVENTS[e][et]
+          if et == ET.PERMANENT and e in self.recognition_alerts:
+            alert = self.recognition_alerts[e]
           if not isinstance(alert, Alert):
             alert = alert(*callback_args)
 

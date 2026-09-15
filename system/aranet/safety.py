@@ -24,7 +24,9 @@ class OffroadGate:
           raise UnsafeInitialization('Waiting for ignition off')
         return
       if now >= deadline:
-        raise UnsafeInitialization('Waiting for fresh device/Panda telemetry')
+        missing = ', '.join(f'{k}: seen={self.sm.seen[k]}, valid={self.sm.valid[k]}, age={now-self.sm.recv_time[k]:.1f}s'
+                            for k in self.sm.services if not self.sm.seen[k] or not self.sm.valid[k] or now-self.sm.recv_time[k] >= 2)
+        raise UnsafeInitialization('Waiting for fresh telemetry (' + missing + ')')
       time.sleep(.05)
 
 

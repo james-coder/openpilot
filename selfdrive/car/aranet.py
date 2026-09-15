@@ -179,6 +179,7 @@ def main():
           feed.connect(str(SOCKET))
           status('Connected; waiting for Bluetooth status', 'waiting_helper', last_advertisement, last_write)
           last_status = 0.
+          last_helper_state = None
           last_message = time.monotonic()
           message_timeout = 15
           while not (ROOT / 'paused').exists():
@@ -195,7 +196,8 @@ def main():
               last_advertisement, written = consume_advertisement(msg, history)
               if written is not None:
                 last_write = written
-            if time.monotonic() - last_status >= 5:
+            helper_changed = msg['type'] == 'status' and msg.get('state') != last_helper_state
+            if time.monotonic() - last_status >= 5 or helper_changed:
               state, detail = msg.get('state', 'listening'), msg.get('message', 'Listening for Aranet4 2954E')
               if not isinstance(state, str) or not isinstance(detail, str):
                 raise ValueError('Invalid helper status')
@@ -206,6 +208,8 @@ def main():
                   state, detail = 'sensor_stale', 'Sensor stale; no fresh readings'
               status(detail, state, last_advertisement, last_write)
               last_status = time.monotonic()
+            if msg['type'] == 'status':
+              last_helper_state = msg.get('state')
       except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
         state = 'storage_failed' if isinstance(exc, sqlite3.Error) else 'unavailable'
         status(f'{type(exc).__name__}: {exc}', state, last_advertisement, last_write)

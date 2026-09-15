@@ -37,7 +37,11 @@ def stop(child, sig=signal.SIGTERM):
 def run_checked(argv, timeout=10):
   offroad()
   # Only fixed trusted tools/modules are called; no packet/payload logging.
-  result = subprocess.run(argv, capture_output=True, timeout=timeout)
+  try:
+    result = subprocess.run(argv, capture_output=True, timeout=timeout)
+  except subprocess.TimeoutExpired as exc:
+    detail = ((exc.stdout or b'') + (exc.stderr or b'')).decode(errors='replace')[-180:]
+    raise RuntimeError(f'{Path(argv[0]).name} timed out: {detail or "no tool output"}') from exc
   if result.returncode:
     detail = result.stderr.decode(errors='replace').strip().splitlines()
     raise RuntimeError(f'{Path(argv[0]).name} exit {result.returncode}: ' + (detail[-1][:180] if detail else 'no error detail'))

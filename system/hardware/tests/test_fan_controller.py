@@ -27,7 +27,7 @@ class TestFanController:
   def test_offroad_limits(self, mocker, controller_class):
     controller = patched_controller(mocker, controller_class)
     self.wind_up(controller)
-    assert controller.update(100, False) <= 30
+    assert controller.update(100, False) <= 40
 
   @pytest.mark.parametrize("controller_class", ALL_CONTROLLERS)
   def test_no_fan_wear(self, mocker, controller_class):

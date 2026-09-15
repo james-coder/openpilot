@@ -62,6 +62,8 @@ class DeviceLayout(Widget):
                                            left_callback=self._reboot_prompt, right_callback=self._power_off_prompt)
 
     items = [
+      button_item('Thermal exposure history', 'VIEW', callback=self._open_thermal_history, enabled=ui_state.is_offroad),
+      button_item('Parked cooling: 40% trial cap', 'CONFIGURE', callback=self._configure_parked_cooling, enabled=ui_state.is_offroad),
       button_item('Cabin air / Aranet4', 'GRAPH', callback=self._open_aranet, enabled=ui_state.is_offroad),
       text_item(lambda: tr("Dongle ID"), self._params.get("DongleId") or (lambda: tr("N/A"))),
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
@@ -76,6 +78,32 @@ class DeviceLayout(Widget):
       self._power_off_btn,
     ]
     return items
+
+  def _open_thermal_history(self):
+    try:
+      from openpilot.selfdrive.ui.layouts.settings.thermal_history import ThermalHistoryLayout
+      gui_app.push_widget(ThermalHistoryLayout())
+    except Exception:
+      cloudlog.exception('Optional thermal history unavailable')
+      gui_app.push_widget(alert_dialog('Thermal history unavailable. Driving is unaffected.'))
+
+  def _configure_parked_cooling(self):
+    try:
+      disabled = self._params.get_bool('ParkedCoolingDisabled')
+
+      def configure(result):
+        if result == DialogResult.CONFIRM:
+          try:
+            self._params.put_bool('ParkedCoolingDisabled', not disabled, block=True)
+          except Exception:
+            cloudlog.exception('Could not save parked cooling preference')
+
+      gui_app.push_widget(ConfirmDialog(
+        'Enable 40% parked fan cap above 75C?\nInternal temperature is not screen temperature.' if disabled else
+        'Return to the original parked fan curve?\nOnroad cooling and battery shutdown are unchanged.',
+        'Enable' if disabled else 'Use original', callback=configure))
+    except Exception:
+      gui_app.push_widget(alert_dialog('Parked cooling settings unavailable.'))
 
   def _offroad_transition(self):
     self._power_off_btn.action_item.right_button.set_visible(ui_state.is_offroad())

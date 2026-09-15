@@ -34,6 +34,21 @@ must be established from device logs separately from this dependency fix.
 
 ## Recording and resources
 
+### Incident verification and rollout
+
+On 2026-09-15, device logs confirmed the collector exited with
+`PermissionError` opening `/data/aranet/collector.lock`. The lock,
+`history.sqlite`, and `status.json` were owned by root while the manager
+collector runs as comma. Their ownership was corrected to comma:comma, without
+deleting history. The earlier standalone root launcher must not be used alongside
+the manager or to recreate root-owned storage.
+
+The engagement fix passed 97 host tests and 71 isolated regression/state-machine
+tests on the comma before reboot. Live carState showed zero speed and Park, with
+selfdriveState disengaged before installation and reboot. This is not a road
+test or a claim that every optional-feature failure mode has been device-tested.
+The dependency fix is independent of whether Bluetooth recording succeeds.
+
 Selected device: owner's previously identified Aranet4 2954E, CE:24:29:74:F2:C2. Another
 sensor is never selected automatically. Integrations advertisements must be enabled. Current
 observed measurement interval is 120 seconds; repeated advertisements are deduplicated using

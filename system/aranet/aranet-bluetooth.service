@@ -1,6 +1,6 @@
 [Unit]
 Description=Optional passive cabin Bluetooth receiver (no vehicle control)
-After=multi-user.target
+After=local-fs.target
 
 [Service]
 Type=simple

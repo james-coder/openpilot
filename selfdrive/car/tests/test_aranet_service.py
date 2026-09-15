@@ -22,6 +22,7 @@ def test_no_manager_dependency():
   for filename in ('system/manager/aranet.service', 'system/aranet/aranet-bluetooth.service'):
     text = (root / filename).read_text()
     assert 'Requires=' not in text and 'BindsTo=' not in text
+    assert 'After=multi-user.target' not in text  # Would cycle with WantedBy at boot.
     assert 'CPUSchedulingPolicy=idle' in text and 'CPUQuota=5%' in text
     assert 'RestartSec=30' in text and 'MemoryMax=' in text
 

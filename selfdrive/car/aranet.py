@@ -96,8 +96,13 @@ def read_history(root=ROOT, seconds=86400):
   if not (root / 'history.sqlite').exists():
     return []
   with contextlib.closing(sqlite3.connect(f'file:{root}/history.sqlite?mode=ro', uri=True, timeout=.05)) as db:
-    return db.execute('SELECT t,co2,temp,humidity,interval,battery,rssi FROM readings WHERE t >= ? ORDER BY t LIMIT ?',
-                      (time.time() - seconds, MAX_ROWS)).fetchall()  # noqa: TID251 -- persisted wall timestamps
+    now = time.time()  # noqa: TID251 -- persisted wall timestamps
+    rows = db.execute('SELECT t,co2,temp,humidity,interval,battery,rssi FROM readings WHERE t >= ? AND t <= ? ORDER BY t LIMIT ?',
+                      (now - seconds, now, MAX_ROWS)).fetchall()
+    # Do not feed malformed/NULL database values or future-clock samples into UI drawing.
+    return [row for row in rows if all(type(x) in (int, float) and math.isfinite(x) for x in row)
+            and 0 <= row[1] <= 32767 and 0 <= row[2] <= 1638.35 and 0 <= row[3] <= 100
+            and 1 <= row[4] <= 3600 and 0 <= row[5] <= 100 and -127 <= row[6] <= 0]
 
 
 def plot_samples(rows, column, buckets=300):

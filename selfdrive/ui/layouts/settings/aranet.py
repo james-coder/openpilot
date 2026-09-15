@@ -7,7 +7,31 @@ import pyray as rl
 from openpilot.selfdrive.car.aranet import ROOT, read_history, plot_samples
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
+
+
+def status_lines(message, width, measure):
+  lines, line = [], ''
+  for word in str(message).split():
+    candidate = (line + ' ' + word).strip()
+    if measure(candidate) <= width:
+      line = candidate
+    else:
+      if line:
+        lines.append(line)
+      line = word
+  if line:
+    lines.append(line)
+  result = []
+  for i, line in enumerate(lines[:2]):
+    truncated = measure(line) > width or (i == 1 and len(lines) > 2)
+    if truncated:
+      while line and measure(line + '...') > width:
+        line = line[:-1]
+      line += '...'
+    result.append(line)
+  return result
 
 
 class AranetLayout(Widget):
@@ -70,7 +94,10 @@ class AranetLayout(Widget):
     if latest and age > max(180, latest[4]*2):
       freshness = 'STALE / sensor missing | ' + freshness
     self.text(f'Aranet4 2954E | {freshness}', r.x+35, r.y+180, 29)
-    self.text(self.message, r.x+35, r.y+223, 27)
+    def measure(text):
+      return measure_text_cached(self.font, text, 24).x
+    for i, line in enumerate(status_lines(self.message, r.width-70, measure)):
+      self.text(line, r.x+35, r.y+223+i*27, 24)
     available = max(270, r.height-360)
     for index, (column, label, color, fraction) in enumerate([
       (1, 'CO2 (ppm)', rl.Color(0, 235, 255, 255), .50),

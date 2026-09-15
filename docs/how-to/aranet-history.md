@@ -1,91 +1,134 @@
 # Aranet4 cabin history
 
-Settings → Device → Cabin air / Aranet4 → GRAPH (offroad menu).
-CO2 is the large cyan trace; temperature is amber and humidity magenta, each with its own
-scale. Windows: 2 hours, 24 hours, 7 days, 30 days. Pause / Resume stops/restarts passive
-scanning without deleting history. Missing/stale samples are labelled and outages break lines.
-There are no HVAC commands, vehicle transmissions, pairing, or GATT connections.
+Settings → Device → Cabin air / Aranet4 → GRAPH (offroad only).
+CO₂ is cyan and dominant; temperature is amber and humidity magenta, on separate
+scales. Missing/stale samples are labeled and gaps are not connected.
 
-## Engagement independence (required)
+## Ownership and driving independence
 
-An initial integration incorrectly allowed a stopped `aranetd` to raise the global
-`processNotRunning` no-entry/soft-disable event. Recorder-only and screen tests did
-not catch that integration failure. This caused a reported loss of openpilot
-availability and was not an acceptable consequence of an optional cabin feature.
+Two optional systemd services replace the experimental manager/root launchers:
 
-The driving process-health check and its alert text now use one shared filter that
-excludes only `aranetd`. Manager continues reporting its true process state; every
-other process, including unrecognized future names, retains its existing safety
-behavior. Cabin logging failure must not prevent engagement or cause disengagement.
+- `aranet-bluetooth.service` owns the dedicated Bluetooth UART, HCI attachment,
+  and passive scan. It runs privileged but never writes cabin history.
+- `aranet.service` runs as `comma`, with no capabilities and only Unix sockets.
+  It consumes a versioned receive-only local feed and writes bounded history.
 
-Regression tests: `pytest selfdrive/selfdrived/tests/test_optional_cabin_process.py`.
-These exercise the real selfdrived event path and engagement state machine with
-simulated absent/stopped/crashed/permission-denied/cold-boot-unavailable states.
-They also inject a scheduling permission failure into an isolated collector child
-and feed its actual manager process-state report through that event path. A
-negative control restores the old filter and reproduces the engagement failure.
-Every other configured process remains blocking; simultaneous camera and CAN
-faults still block engagement and disable an enabled state machine.
+Neither service is a dependency of manager, selfdrived, or driving engagement.
+Manager no longer imports/starts the recorder. The exact-name `aranetd`
+watchdog exemption remains for compatibility; all other process checks retain
+their existing behavior. Opening the optional menu lazily imports its code;
+missing optional modules must not break the main settings screen.
 
-These are host-side tests, not device cold-boot or driving validation. They do not
-replace parked device checks of startup, crash, duplicate launchers, missing
-Bluetooth, and permissions before deployment. The recorder's original exit cause
-must be established from device logs separately from this dependency fix.
+The helper accepts no device commands, pairing, GATT, or remote connections.
+Only the selected Aranet4 2954E (`CE:24:29:74:F2:C2`) is forwarded, at most
+once per second. Backpressure drops telemetry instead of blocking other work.
+No CAN, Panda, HVAC, Wi-Fi, GPS or modem configuration changes are involved.
 
-## Recording and resources
+## Startup, failure and resources
 
-### Incident verification and rollout
+Initialization uses the previously validated WCN3990 UART/firmware sequence:
+only `/dev/btpower`, `/dev/ttyHS1` and Bluetooth rfkill entries are eligible.
+Device-supplied firmware hashes, ROM/product identity, acknowledgement sequence,
+and resulting patch version are checked. No ROM-only fallback or partition
+flashing is performed. The existing H4 transport/sleep settings are retained;
+Bluetooth idle-power/IBS optimization is not part of this repair.
 
-On 2026-09-15, device logs confirmed the collector exited with
-`PermissionError` opening `/data/aranet/collector.lock`. The lock,
-`history.sqlite`, and `status.json` were owned by root while the manager
-collector runs as comma. Their ownership was corrected to comma:comma, without
-deleting history. The earlier standalone root launcher must not be used alongside
-the manager or to recreate root-owned storage.
+Power/reset/firmware initialization requires fresh, valid device/Panda telemetry:
+ignition off, offroad and controls disallowed. The gate is checked throughout
+initialization. Occupied UARTs and pre-existing externally owned controllers are
+not stolen. If the radio is absent onroad, logging waits for a safe offroad
+opportunity. Already-initialized passive reception can continue during a drive.
+A helper crash can therefore leave a gap until the next safe initialization.
 
-The engagement fix passed 97 host tests and 71 isolated regression/state-machine
-tests on the comma before reboot. Live carState showed zero speed and Park, with
-selfdriveState disengaged before installation and reboot. This is not a road
-test or a claim that every optional-feature failure mode has been device-tested.
-The dependency fix is independent of whether Bluetooth recording succeeds.
+Both services use nice 19, SCHED_IDLE, idle I/O priority, 30-second failure
+backoff and 5% CPU quotas each. MemoryMax is 128 MiB for the Bluetooth helper
+(including children) and 96 MiB for recording. These limits do not eliminate
+kernel interrupt, radio coexistence or other shared-resource effects.
 
-Selected device: owner's previously identified Aranet4 2954E, CE:24:29:74:F2:C2. Another
-sensor is never selected automatically. Integrations advertisements must be enabled. Current
-observed measurement interval is 120 seconds; repeated advertisements are deduplicated using
-their sample age. Receipt time minus advertised age is an estimate, not a sensor clock.
+The SQLite database stays at `/data/aranet/history.sqlite`, outside route uploads.
+Its existing schema/history are preserved: 30 days, at most 21,600 rows, 4 MiB
+database (page-size aware), and approximately another 4 MiB worst-case rollback
+journal. Helper logs rotate at 256 KiB with two backups (under 1 MiB total).
+No continuous raw BLE or firmware-transfer dump is retained.
 
-Storage: `/data/aranet/history.sqlite`, outside uploaded routes. At most 21,600 rows and
-30 days of samples; at most one reading approximately per minute. SQLite max_page_count=1024
-with default 4096-byte pages limits the database to 4 MiB; rollback journal can temporarily
-use roughly another 4 MiB. Tiny status/lock/pause files are additional. No raw BLE recordings.
-Pressure, battery and RSSI are retained with each sample but only CO2/temperature/humidity
-are graphed. Fixed row slots reuse space rather than accumulating history indefinitely.
+Status retains `time`/`message` compatibility and adds `state`,
+`last_advertisement`, and `last_write`. Listening is not recording. The UI shows
+safe-initialization waits, failures, paused/stale/offline states and sample age.
+Local packets are bounded to 4096 bytes and independently validated by the
+recorder. Errors include a bounded stage/exit/error summary instead of suppressing
+all subprocess diagnostics.
 
-The collector sets Linux SCHED_IDLE, nice 19 and idle I/O priority before scanning, independently
-of driving processes. The scanner inherits these settings. Both manager and systemd launches
-apply them; failure to set the policy stops startup rather than scanning at normal priority.
-SCHED_IDLE is a very-low-priority CPU policy, not an isolation guarantee for kernel Bluetooth
-interrupts, radio coexistence, memory or shared locks. Idle I/O effectiveness depends on the
-storage scheduler. Missing samples under load are preferable to competing with driving tasks.
-The collector uses bounded
-packets, database and graph rendering. Manager starts `aranetd` on TICI only where the prior
-Bluetooth helper `/data/bluetooth-test/probe.py` is installed. This is installation-specific,
-not general stock-AGNOS Bluetooth support. That validated helper handles firmware initialization
-only when fresh telemetry confirms ignition off. If the controller is missing while driving,
-the collector waits rather than resetting it. Reception can continue during a drive.
+Pause/resume creates/removes only `/data/aranet/paused`. Pause disconnects the
+recorder, which stops passive scanning without resetting the controller. History
+remains readable. CO₂ is not CO detection or a safe-driving assessment.
 
-For initial deployment without restarting manager, `system/manager/aranet.service` can be
-installed in `/run/systemd/system/` and started. This is a temporary launcher; after reboot,
-openpilot manager owns the collector. A nonblocking lock prevents two collectors. The runtime
-service is limited to 96 MiB memory / 10% CPU; manager launches use the collector's own bounded
-data structures and idle scheduling, not those systemd limits. Do not run other BLE experiments
-concurrently with the collector; pause it first.
+## Reproducible installation and rollback
 
-Remote pause: create `/data/aranet/paused`; resume: remove that specific marker. The directory
-must be writable by the UI user (`comma` on this installation). Retained history stays available
-if Bluetooth fails. BlueTooth cold-boot/long-drive endurance remains to be established; a working
-short capture is not proof of hours-long reliability. CO2 is not CO detection or a safe-driving
-assessment. There is no automatic ventilation yet.
+The existing Bluetooth-enabled kernel is a prerequisite. No new flash is needed.
+Ordinary application updates use tracked code; systemd unit installation and
+root-owned assets persist outside the checkout. An OS/kernel replacement must
+be checked separately; do not silently reflash it.
 
-Validation: `pytest selfdrive/car/tests/test_aranet.py`; synthetic UI preview:
-`BIG=1 SCALE=1 OFFSCREEN=1 python -m tools.profiling.render_aranet /tmp/aranet-preview.png`.
+The installer verifies all assets before installing them in
+`/data/aranet-bluetooth`:
+
+- BlueZ 5.72 Ubuntu arm64 tools, each SHA-256 pinned in the installer. Original
+  package: `bluez_5.72-0ubuntu5.5_arm64.deb`, SHA-256
+  `ced50bcaee2c563ba965ff5faa70ae54fc3e22b8ebc09ccf9474beed63eda9d4`.
+- Device-supplied `crbtfw21.tlv` and `crnv21.bin`, pinned in the firmware module.
+  Preserve proprietary firmware on the device, not in the public git repository.
+- The default source is the previously provisioned `/data/bluetooth-test`;
+  `--assets DIRECTORY` accepts the same `usr/bin` and `firmware` layout.
+
+On a safely parked, ignition-off device, after installing the tracked code and
+restarting manager so its former collector is no longer running:
+
+```sh
+cd /data/openpilot
+sudo env PYTHONPATH=/data/openpilot /usr/local/venv/bin/python -m openpilot.system.aranet.install
+```
+
+The installer refuses stale/unsafe telemetry, an old live manager collector,
+unverified assets and symlink targets. It migrates only named history files to
+comma ownership, retaining their contents. It installs/enables both persistent
+units. There is no privileged or blocking hook in manager startup.
+
+For an application release changing unit definitions, run the installer again
+offroad. A clean checkout must contain the recorder, UI integration, helper,
+tests, services and installer. Verify updater staging too; dirty/untracked files
+are not a release mechanism.
+
+Feature-only rollback (offroad) retains history and the engagement fix:
+
+```sh
+sudo env PYTHONPATH=/data/openpilot /usr/local/venv/bin/python -m openpilot.system.aranet.install --disable
+```
+
+## Incident and verification
+
+The initial integration treated a dead recorder as a driving-process failure.
+Recorder/storage tests missed the connection to engagement. Device logs later
+confirmed root-owned `collector.lock` caused PermissionError under manager's
+comma user. The database and status file were root-owned too. Correcting those
+files and exempting only the optional recorder removed that engagement block,
+but did not initialize Bluetooth after reboot.
+
+The subsequent review found zero fresh samples, no HCI adapter, insufficient
+Bluetooth permissions, hidden helper errors, and Aranet files missing from clean
+deployment staging. This repair addresses those separate failures; service
+liveness alone is never evidence of successful recording.
+
+Tests cover firmware parsing and safety gates, protocol/measurement validation,
+bounded storage/retries, missing helpers, duplicate collectors, file ownership,
+optional screen imports, and actual selfdrived event/state-machine behavior.
+Run:
+
+```sh
+pytest -n0 selfdrive/car/tests/test_aranet.py selfdrive/car/tests/test_aranet_service.py selfdrive/selfdrived/tests
+BIG=1 SCALE=1 OFFSCREEN=1 python -m tools.profiling.render_aranet /tmp/aranet-preview.png
+```
+
+Deployment acceptance requires three distinct new sensor measurements visible in
+SQLite and the graph, pause/resume, service restart, and reboot verification.
+Record true cold power-up and subsequent drive/endurance results separately;
+host tests or a warm reboot do not establish those results.

@@ -4,6 +4,8 @@ After=multi-user.target
 
 [Service]
 Type=simple
+User=comma
+Group=comma
 WorkingDirectory=/data/openpilot
 Environment=PYTHONPATH=/data/openpilot
 ExecStart=/usr/local/venv/bin/python -m openpilot.selfdrive.car.aranet
@@ -13,7 +15,14 @@ Nice=19
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
 MemoryMax=96M
-CPUQuota=10%
+CPUQuota=5%
+NoNewPrivileges=true
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/data/aranet
+UMask=0022
 StandardOutput=null
 StandardError=null
 KillMode=mixed

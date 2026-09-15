@@ -14,7 +14,7 @@ layout.poll = time.monotonic()
 now = time.time()  # noqa: TID251 -- fixture matches persisted wall timestamps
 layout.rows = [(now-86400+i*120, 900+450*math.sin(i/65), 23+2*math.sin(i/70), 40+10*math.sin(i/80), 120, 90, -62)
                for i in range(721) if not 350 < i < 390]
-layout.message = 'Synthetic preview | Logging enabled'
+layout.message = sys.argv[2] if len(sys.argv) > 2 else 'Synthetic preview | Logging enabled'
 rl.begin_texture_mode(target)
 layout.render(rl.Rectangle(0, 0, 2160, 1080))
 rl.end_texture_mode()

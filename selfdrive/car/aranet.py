@@ -5,6 +5,7 @@ Advertisement layout: Anrijs/Aranet4-Python, client.py, revision
 """
 import contextlib
 import json
+import math
 import os
 from pathlib import Path
 import socket
@@ -62,13 +63,18 @@ class History:
   def __init__(self, root=ROOT):
     root.mkdir(parents=True, exist_ok=True)
     self.db = sqlite3.connect(root / 'history.sqlite', timeout=1)
-    self.db.execute('PRAGMA journal_mode=DELETE')
-    self.db.execute('PRAGMA max_page_count=1024')  # Default 4096-byte pages: 4 MiB.
-    self.db.execute('''CREATE TABLE IF NOT EXISTS readings
-                       (slot INTEGER PRIMARY KEY, t REAL, co2 REAL, temp REAL, pressure REAL,
-                        humidity REAL, battery INTEGER, interval INTEGER, rssi INTEGER)''')
-    row = self.db.execute('SELECT slot,t FROM readings ORDER BY t DESC LIMIT 1').fetchone()
-    self.slot, self.last = row if row else (-1, 0)
+    try:
+      self.db.execute('PRAGMA journal_mode=DELETE')
+      page_size = self.db.execute('PRAGMA page_size').fetchone()[0]
+      self.db.execute(f'PRAGMA max_page_count={4 * 1024 * 1024 // page_size}')
+      self.db.execute('''CREATE TABLE IF NOT EXISTS readings
+                         (slot INTEGER PRIMARY KEY, t REAL, co2 REAL, temp REAL, pressure REAL,
+                          humidity REAL, battery INTEGER, interval INTEGER, rssi INTEGER)''')
+      row = self.db.execute('SELECT slot,t FROM readings ORDER BY t DESC LIMIT 1').fetchone()
+      self.slot, self.last = row if row else (-1, 0)
+    except BaseException:
+      self.db.close()
+      raise
 
   def add(self, values, rssi, now=None):
     now = time.time() if now is None else now  # noqa: TID251 -- history must survive reboots
@@ -110,79 +116,103 @@ def plot_samples(rows, column, buckets=300):
   return result
 
 
-def status(message):
-  tmp = ROOT / 'status.tmp'
-  tmp.write_text(json.dumps({'time': time.time(), 'message': message}))  # noqa: TID251 -- cross-process persisted status
-  tmp.replace(ROOT / 'status.json')
+def status(message, state='unavailable', last_advertisement=None, last_write=None):
+  payload = {'time': time.time(), 'message': message[:240], 'state': state,  # noqa: TID251 -- persisted wall timestamps
+             'last_advertisement': last_advertisement, 'last_write': last_write}
+  try:
+    tmp = ROOT / 'status.tmp'
+    tmp.write_text(json.dumps(payload))
+    tmp.replace(ROOT / 'status.json')
+  except OSError:
+    # Status storage can fail too. Never turn that into a tight exception loop.
+    pass
 
 
 def background_priority():
-  """Fail closed before scanning if the requested Linux background policy cannot be set.
-
-  Applied in-process so manager and systemd launches behave alike; children inherit it.
-  """
+  """Fail closed before scanning if Linux background policy cannot be set."""
   os.setpriority(os.PRIO_PROCESS, 0, 19)
   os.sched_setscheduler(0, os.SCHED_IDLE, os.sched_param(0))
   subprocess.run(['/usr/bin/ionice', '-c', '3', '-p', str(os.getpid())], check=True, timeout=5)
 
 
+def consume_advertisement(message, history):
+  """Validate the local feed independently of its sender; return reception/write times."""
+  from openpilot.system.aranet.protocol import MAX_PACKET
+  if message.get('address') != SENSOR:
+    raise ValueError('Unexpected sensor')
+  raw = message.get('raw')
+  if not isinstance(raw, str) or len(raw) != 44 or len(raw) > MAX_PACKET:
+    raise ValueError('Invalid advertisement')
+  values = decode(bytes.fromhex(raw))
+  rssi, received = message.get('rssi'), message.get('received')
+  if values is None or type(rssi) is not int or not -127 <= rssi <= 0:
+    raise ValueError('Invalid measurement or RSSI')
+  if type(received) not in (int, float) or not math.isfinite(received) or abs(time.time() - received) > 30:  # noqa: TID251
+    raise ValueError('Invalid reception timestamp')
+  wrote = history.add(values, rssi, now=received)
+  return received, received if wrote else None
+
+
 def main():
   import fcntl
+  from openpilot.system.aranet.protocol import SOCKET, MAX_PACKET, decode_message
   background_priority()
   def shutdown(signum, frame):
     raise SystemExit(0)
   signal.signal(signal.SIGTERM, shutdown)
   os.umask(0o022)
+  # A duplicate launcher exits rather than competing for the database.
   ROOT.mkdir(exist_ok=True)
-  lock = (ROOT / 'collector.lock').open('w')
-  fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-  history = History()
-  while True:
-    scanner = None
-    try:
-      if (ROOT / 'paused').exists():
-        status('Logging paused')
-        time.sleep(5)
-        continue
-      if not Path('/sys/class/bluetooth/hci0').exists():
-        status('Bluetooth unavailable; waiting for ignition-off initialization')
-        # Existing validated helper refuses bring-up unless fresh telemetry confirms ignition off.
-        subprocess.run(['/usr/local/venv/bin/python', '/data/bluetooth-test/probe.py', '--bring-up'],
-                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=120, check=True)
-      with socket.socket(socket.AF_BLUETOOTH, socket.SOCK_RAW, socket.BTPROTO_HCI) as sock:
-        sock.bind((0,))
-        sock.setsockopt(0, 2, struct.pack('<IIIH', 1 << 4, 0, 1 << (0x3e-32), 0))
-        sock.settimeout(2)
-        scanner = subprocess.Popen(['/data/bluetooth-test/usr/bin/hcitool', '-i', 'hci0', 'lescan', '--passive', '--duplicates'],
-                                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-        status('Listening for Aranet4 2954E')
-        last_status = time.monotonic()
-        while not (ROOT / 'paused').exists():
-          if scanner.poll() is not None:
-            raise RuntimeError('BLE scanner stopped')
-          try:
-            packet = sock.recv(4096)
-          except TimeoutError:
-            packet = b''
-          for address, raw, rssi in advertisements(packet):
-            if address == SENSOR:
-              values = decode(raw)
-              if values:
-                history.add(values, rssi)
-          if time.monotonic() - last_status >= 30:
-            status('Listening for Aranet4 2954E')
-            last_status = time.monotonic()
-    except (OSError, RuntimeError, sqlite3.Error, subprocess.SubprocessError) as exc:
-      status(f'Collector unavailable: {type(exc).__name__}; retrying')
-      time.sleep(15)
-    finally:
-      if scanner is not None and scanner.poll() is None:
-        scanner.send_signal(signal.SIGINT)
-        try:
-          scanner.wait(timeout=3)
-        except subprocess.TimeoutExpired:
-          scanner.kill()
-          scanner.wait()
+  with (ROOT / 'collector.lock').open('w') as lock:
+    fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    last_advertisement = last_write = None
+    while True:
+      history = None
+      try:
+        if (ROOT / 'paused').exists():
+          status('Logging paused', 'paused', last_advertisement, last_write)
+          time.sleep(5)
+          continue
+        history = History(ROOT)
+        with socket.socket(socket.AF_UNIX, socket.SOCK_SEQPACKET) as feed:
+          feed.settimeout(2)
+          feed.connect(str(SOCKET))
+          status('Connected; waiting for Bluetooth status', 'waiting_helper', last_advertisement, last_write)
+          last_status = 0.
+          last_message = time.monotonic()
+          message_timeout = 15
+          while not (ROOT / 'paused').exists():
+            try:
+              raw = feed.recv(MAX_PACKET + 1)
+            except TimeoutError:
+              if time.monotonic() - last_message > message_timeout:
+                raise RuntimeError('Bluetooth helper stopped responding') from None
+              continue
+            msg = decode_message(raw)
+            last_message = time.monotonic()
+            message_timeout = 150 if msg.get('state') == 'initializing' else 15
+            if msg['type'] == 'advertisement':
+              last_advertisement, written = consume_advertisement(msg, history)
+              if written is not None:
+                last_write = written
+            if time.monotonic() - last_status >= 5:
+              state, detail = msg.get('state', 'listening'), msg.get('message', 'Listening for Aranet4 2954E')
+              if not isinstance(state, str) or not isinstance(detail, str):
+                raise ValueError('Invalid helper status')
+              if state == 'listening' and last_write is not None:
+                if time.time() - last_write <= 240:  # noqa: TID251 -- persisted sample freshness
+                  state, detail = 'recording', 'Recording Aranet4 2954E'
+                else:
+                  state, detail = 'sensor_stale', 'Sensor stale; no fresh readings'
+              status(detail, state, last_advertisement, last_write)
+              last_status = time.monotonic()
+      except (OSError, RuntimeError, ValueError, sqlite3.Error) as exc:
+        state = 'storage_failed' if isinstance(exc, sqlite3.Error) else 'unavailable'
+        status(f'{type(exc).__name__}: {exc}', state, last_advertisement, last_write)
+        time.sleep(30)
+      finally:
+        if history is not None:
+          history.db.close()
 
 
 if __name__ == '__main__':

@@ -68,8 +68,6 @@ procs = [
   DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
 
   NativeProcess("loggerd", "system/loggerd", ["./loggerd"], logging),
-  PythonProcess("aranetd", "selfdrive.car.aranet", always_run,
-                enabled=TICI and os.path.exists('/data/bluetooth-test/probe.py')),
   NativeProcess("encoderd", "system/loggerd", ["./encoderd"], only_onroad),
   NativeProcess("stream_encoderd", "system/loggerd", ["./encoderd", "--stream"], notcar),
   PythonProcess("logmessaged", "system.logmessaged", always_run),

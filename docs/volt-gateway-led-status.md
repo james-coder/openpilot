@@ -1,0 +1,108 @@
+# White Panda gateway LED indications — not deployed
+
+These are **new gateway patterns**, not interpretations of the original firmware
+currently installed on the labeled Panda. Nothing has been flashed.
+
+## One-time startup color check
+
+After a verified application slot is selected, exercise each color individually:
+
+| Slot | First color | Second color | Third color |
+| --- | --- | --- | --- |
+| A | Red | Green | Blue |
+| B | Red | Blue | Green |
+
+Each color stays on for **800 ms**, followed by **200 ms off**. After the three
+colors there is another **one-second dark interval**, then normal indication.
+This makes a missing, wrong-color or mispopulated LED visually apparent. There
+is no optical/current feedback: the software cannot certify that a light lit.
+
+The animation is scheduled, never a blocking sleep. Boot, application work and
+CAN servicing continue. Confirmation during the animation does not restart it.
+It plays only once per initialized LED state, not every status poll or timer
+wrap. The real board integration must carry the LED state and monotonic clock
+across loader/application handoff to preserve that behavior.
+
+Before a slot is selected, blue blinks at 500 ms on/off. No slot is advertised
+before verification. Fault, recovery or update indications interrupt the startup
+cycle; a failed boot may therefore go directly to red without completing a
+three-color test. Do not diagnose a failed LED solely from such an interrupted
+sequence. Fault-clearing does not replay an interrupted introduction.
+
+## Normal patterns
+
+| Pattern | Meaning |
+| --- | --- |
+| Green, one short pulse every four seconds | Confirmed slot A selected |
+| Green, two short pulses every four seconds | Confirmed slot B selected |
+| Blue, one/two short pulses every four seconds | Unconfirmed trial in A/B |
+| Green/blue, three short pulses | Corresponding state but slot unknown; not normal production operation |
+| Alternating blue/green, 500 ms each | Update state (reserved for recovery/updater integration) |
+| Red, one long second every four seconds | Recovery waiting (reserved for the actual recovery service) |
+| Red, numbered short pulses every four seconds | Fault category below |
+
+Short pulses are 150 ms on/150 ms off. Fault codes have a long dark gap between
+groups, even at eight pulses. Count *within one group*, not across cycles.
+Green means verified/confirmed image metadata, **not** a complete health check,
+CAN-transmission permission or proof that the gateway is safe to use on a car.
+
+| Red pulses | Category | Current source |
+| --- | --- | --- |
+| 1 | No bootable application | Boot selection failure; not necessarily a signature failure |
+| 2 | Selected image violates target/layout/vector policy | Boot port |
+| 3 | Storage read/write/erase/readback failure | Latched boot storage error |
+| 4 | Invalid trusted configuration | Boot initialization |
+| 5 | CAN bus-off/driver fault | Reserved; board CAN driver not integrated |
+| 6 | Watchdog reset | Reserved; hardware reset-cause integration pending |
+| 7 | Crypto/key/entropy failure | Public-key initialization now; RNG integration pending |
+| 8 | Internal invariant or invalid indication | Panic/status validation |
+
+An assertion following a storage failure preserves code 3 rather than hiding it
+behind code 8. A CPU halt, reset loop, absent power or dead red LED can prevent
+any visible error code. A future watchdog handler must record reset cause and
+disable optional transmissions independently; it must not wait for a blink
+sequence. LED rendering never feeds a watchdog, confirms a trial or enables TX.
+
+## Wiring evidence and implementation
+
+Historical Panda commit `3b35621671aaa6de3fc66d85d30e4208a77e2489`,
+`board/boards/white.h:29` (`white_set_led`), identifies active-low outputs:
+
+- Red: GPIOC pin 9.
+- Green: GPIOC pin 7.
+- Blue: GPIOC pin 6.
+
+Evidence archive: `/home/james/diagnostics/volt-gateway/history/panda-3b356216.tar`.
+This is source evidence, not continuity/optical verification of this individual
+old board. Do not reuse the mapping on Tres or another Panda revision.
+
+`firmware/status_led.c` computes colors with constant work and no allocation,
+delays, interrupts or CAN access. `vgw_white_led_bsrr` computes one atomic
+GPIOC set/reset-register value touching only those three pins. It does not
+write registers. The future board adapter must establish clocks and preload
+the inactive output levels before configuring the correct pins as outputs.
+Use one LED owner, poll around 20 Hz and skip missed samples rather than
+catching up. LED errors must never affect the vehicle-facing safety boundary.
+
+`boot_port.c` exposes an observational three-byte state/slot/error snapshot;
+it works without linking the renderer. Trailer validation remains a boot
+integrity check independent of LED presence. The LED renderer consumes its
+result, not the other way around. Update/recovery/runtime fault ownership and
+priority still require integration with the actual board main loop.
+
+## Tests and limits
+
+Final offline validation passed **1,046 tests, zero failures/skips**, including
+282 LED cases and eight ARM boot cases, plus lint/build/static-analysis checks.
+See [artifact evidence](evidence/volt-gateway/boot-led-20260916.json).
+
+Native tests cover all 256 RGB-mask inputs, exact active-low pin masks, pulse
+timing, both startup orders, all colors, one-shot behavior, confirmation during
+startup, preemption, clock wrap, skipped ticks, malformed status and null/absent
+renderer calls. ARM boot tests also compare LED enabled versus disabled:
+selection, confirmation, executed probe and resulting flash remain identical.
+
+These are software tests, not physical LED inspection, brightness/color testing,
+GPIO timing measurements or parked/driving validation. Physical LED validation
+is part of the later authorized bench image test; no separate risky CAN test is
+needed to inspect colors.

@@ -13,16 +13,22 @@ static const struct flash_area slots[2] = {
 static vgw_boot_io io;
 static bool ready, failed;
 static int selected = -1;
+static uint8_t indication[3] = {VGW_LED_BOOT, 255, 0};
+static void indicate(uint8_t state, uint8_t slot, uint8_t code) {
+  indication[0] = state; indication[1] = slot; indication[2] = code;
+}
+void vgw_boot_get_status(uint8_t out[3]) { if (out) memcpy(out, indication, sizeof(indication)); }
 static uint8_t verification_key[91];
 static uint8_t expected_target[44];
 static const unsigned int key_length = sizeof(verification_key);
 const struct bootutil_key bootutil_keys[] = {{verification_key, &key_length}};
 const int bootutil_key_cnt = 1;
 
-static int error(void) { failed = true; return -1; }
+static int error(void) { failed = true; indicate(VGW_LED_FAULT, 255, VGW_LED_STORAGE); return -1; }
 bool vgw_boot_faulted(void) { return failed; }
 void vgw_boot_service(void) { if (ready) io.service(io.context); }
 _Noreturn void vgw_boot_panic(void) {
+  if (!failed) indicate(VGW_LED_FAULT, 255, VGW_LED_INTERNAL);
   failed = true;
   if (ready) io.panic(io.context);
   for (;;) { __asm__ volatile ("" ::: "memory"); }
@@ -37,6 +43,7 @@ bool vgw_boot_init(const vgw_boot_io *binding, const uint8_t public_der[91], con
   static const uint8_t prefix[26] = {0x30,0x59,0x30,0x13,0x06,0x07,0x2a,0x86,0x48,0xce,0x3d,0x02,0x01,
     0x06,0x08,0x2a,0x86,0x48,0xce,0x3d,0x03,0x01,0x07,0x03,0x42,0x00};
   ready = false; failed = false; selected = -1;
+  indicate(VGW_LED_FAULT, 255, VGW_LED_CONFIG);
   memset(&io, 0, sizeof(io));
   memset(verification_key, 0, sizeof(verification_key));
   if (!binding || !public_der || !target || !binding->read || !binding->write || !binding->erase ||
@@ -44,11 +51,12 @@ bool vgw_boot_init(const vgw_boot_io *binding, const uint8_t public_der[91], con
   vgw_crypto crypto;
   bool ok = vgw_crypto_init(&crypto, public_der + sizeof(prefix), 65);
   vgw_crypto_free(&crypto);
-  if (!ok) return false;
+  if (!ok) { indicate(VGW_LED_FAULT, 255, VGW_LED_CRYPTO); return false; }
   memcpy(verification_key, public_der, sizeof(verification_key));
   memcpy(expected_target, target, sizeof(expected_target));
   io = *binding;
   ready = true;
+  indicate(VGW_LED_BOOT, 255, 0);
   return true;
 }
 
@@ -118,7 +126,8 @@ int vgw_boot_select(vgw_boot_choice *out) {
   FIH_DECLARE(result, FIH_FAILURE);
   FIH_CALL(boot_go, result, &response);
   if (failed) return -2; /* Upstream copy_done failure may otherwise return success. */
-  if (FIH_NOT_EQ(result, FIH_SUCCESS)) return -1;
+  if (FIH_NOT_EQ(result, FIH_SUCCESS)) { indicate(VGW_LED_FAULT, 255, VGW_LED_NO_IMAGE); return -1; }
+  indicate(VGW_LED_FAULT, 255, VGW_LED_IMAGE_POLICY);
   int slot = response.br_image_off == VGW_BOOT_SLOT0 ? 0 : response.br_image_off == VGW_BOOT_SLOT1 ? 1 : -1;
   if (slot < 0 || response.br_flash_dev_id != 0 || !response.br_hdr) return -3;
   const struct image_header *h = response.br_hdr;
@@ -137,7 +146,13 @@ int vgw_boot_select(vgw_boot_choice *out) {
   /* Conservative 128-KiB RAM envelope until exact board RAM is established. */
   if ((vectors[0] & 7) || vectors[0] <= 0x20000000U || vectors[0] > 0x20020000U ||
       !(vectors[1] & 1) || (vectors[1] & ~1U) < start + 8 || (vectors[1] & ~1U) >= start + h->ih_img_size) return -3;
+  struct boot_swap_state state;
+  if (boot_read_swap_state(&slots[slot], &state) || failed) return -2;
+  /* Handoff integrity check, independent of whether any LED is installed. */
+  if (state.magic != BOOT_MAGIC_GOOD || state.copy_done != BOOT_FLAG_SET ||
+      (state.image_ok != BOOT_FLAG_SET && state.image_ok != BOOT_FLAG_UNSET)) return -3;
   selected = slot;
+  indicate(state.image_ok == BOOT_FLAG_SET ? VGW_LED_RUNNING : VGW_LED_TRIAL, (uint8_t)slot, 0);
   *out = (vgw_boot_choice){(uint32_t)slot, start, vectors[0], vectors[1]};
   return slot;
 }
@@ -147,7 +162,9 @@ bool vgw_boot_confirm(void) {
   const struct flash_area *area = &slots[selected];
   struct boot_swap_state state;
   if (boot_read_swap_state(area, &state) || failed || state.magic != BOOT_MAGIC_GOOD || state.copy_done != BOOT_FLAG_SET) return false;
-  if (state.image_ok == BOOT_FLAG_SET) return true;
+  if (state.image_ok == BOOT_FLAG_SET) { indicate(VGW_LED_RUNNING, (uint8_t)selected, 0); return true; }
   if (state.image_ok != BOOT_FLAG_UNSET || boot_write_image_ok(area) || failed) return false;
-  return boot_read_swap_state(area, &state) == 0 && !failed && state.image_ok == BOOT_FLAG_SET;
+  bool ok = boot_read_swap_state(area, &state) == 0 && !failed && state.image_ok == BOOT_FLAG_SET;
+  if (ok) indicate(VGW_LED_RUNNING, (uint8_t)selected, 0);
+  return ok;
 }

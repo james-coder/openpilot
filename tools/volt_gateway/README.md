@@ -1,5 +1,11 @@
 # Volt gateway off-device work
 
+`mcuboot_port.py --arm` and `boot_emulation.py` execute the real loader and
+crypto on Cortex-M4 emulation and run signed slot-local Thumb probes. They do
+not implement hardware startup, a flash peripheral or independent CAN recovery.
+`firmware/status_led.c` adds optional nonblocking startup/status/error patterns;
+see [LED meanings and limitations](../../docs/volt-gateway-led-status.md).
+
 `mcuboot_port.py` now builds the actual pinned MCUboot direct-XIP/revert C loader
 against memory-backed flash and the real crypto backend. Tests cover trial,
 confirmation, revert and storage failures; it is **not flashable firmware**.

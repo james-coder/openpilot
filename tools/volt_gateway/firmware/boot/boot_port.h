@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include "status_led.h"
 
 /* OFF-DEVICE CANDIDATE. STM32F413/423 RM0430 Table 5 geometry, conditional on
  * identifying the actual chip. First 256 KiB are excluded from these APIs;
@@ -37,6 +38,8 @@ int vgw_boot_select(vgw_boot_choice *);
  * Board integration must gate this call on actual application self-tests. */
 bool vgw_boot_confirm(void);
 bool vgw_boot_faulted(void);
+/* Observational local status; board may render it or ignore it entirely. */
+void vgw_boot_get_status(uint8_t out_state_slot_error[3]);
 void vgw_boot_service(void);
 _Noreturn void vgw_boot_panic(void);
 #endif

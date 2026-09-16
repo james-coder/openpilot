@@ -18,10 +18,14 @@ TARGET = b'test-device!' + hashlib.sha256(b'candidate-layout-only').digest()
 MAGIC = bytes.fromhex('77c295f360d2ef7f3552500f2cb67980')
 
 
-def image(key, slot, version, *, confirmed=False, target=TARGET, stack=0x20020000, reset=None):
+def image(key, slot, version, *, confirmed=False, target=TARGET, stack=0x20020000, reset=None, probe=False):
   """Ephemeral fixture only; never a deployable or production-signed image."""
   start = 0x08000000 + SLOTS[slot] + 512
   payload = struct.pack('<II', stack, start + 9 if reset is None else reset) + b'\x00\xbf' * 124
+  if probe:
+    # Thumb leaf: movs r0,#(0xa0+slot); ldr r1,literal; str r0,[r1]; bx lr.
+    code = struct.pack('<HHHHI', 0x20a0 + slot, 0x4901, 0x6008, 0x4770, 0x20017000)
+    payload = (payload[:8] + code).ljust(256, b'\x00')
   protected = struct.pack('<HHHH', 0x6908, 8 + len(target), 0xa0, len(target)) + target
   header = struct.pack('<IIHHIIBBHII', 0x96f3b83d, SLOTS[slot], 512, len(protected), len(payload),
                        0x100, version, 0, 0, 0, 0).ljust(512, b'\x00')
@@ -50,6 +54,7 @@ def library(tmp_path_factory):
     ('vgw_test_setup', C.c_int, [p, p, p, u]), ('vgw_test_boot', C.c_int, []),
     ('vgw_test_confirm', C.c_int, []), ('vgw_test_copy', C.c_int, [p, u]),
     ('vgw_test_fault', None, [u, u, u]), ('vgw_test_mutations', u, []),
+    ('vgw_boot_get_status', None, [p]),
   ):
     fn = getattr(lib, name)
     fn.restype, fn.argtypes = result, args
@@ -82,8 +87,13 @@ def test_trial_then_revert(library, key):
   a = image(key, 0, 1, confirmed=True)
   flash = Flash(library, key, a, image(key, 1, 2))
   assert library.vgw_test_boot() == 1
+  status = C.create_string_buffer(3)
+  library.vgw_boot_get_status(status)
+  assert status.raw == bytes([2, 1, 0])
   assert flash.snapshot()[SLOTS[1] + SLOT_SIZE - 32] == 1
   assert library.vgw_test_boot() == 0
+  library.vgw_boot_get_status(status)
+  assert status.raw == bytes([1, 0, 0])
   assert flash.snapshot()[SLOTS[0]:SLOTS[1]] == a
   assert flash.snapshot()[SLOTS[1]:] == b'\xff' * SLOT_SIZE
 
@@ -183,6 +193,9 @@ def test_reject_bad_image(library, key, defect):
 def test_both_invalid_no_boot(library, key):
   flash = Flash(library, key)
   assert library.vgw_test_boot() == -1
+  status = C.create_string_buffer(3)
+  library.vgw_boot_get_status(status)
+  assert status.raw == bytes([5, 255, 1])
   assert library.vgw_test_confirm() == 0
   assert flash.snapshot() == flash.initial
 

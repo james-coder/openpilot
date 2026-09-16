@@ -1,5 +1,11 @@
 # Secure CAN update design — not deployed
 
+Follow-up: the [ARM loader harness](volt-gateway-boot-port.md) now executes actual
+MCUboot verification/selection and a signed slot-specific Thumb probe, including
+confirmation/reboot and unconfirmed-trial revert. It still uses mapped-memory
+storage, not STM32 flash, and lacks real startup/interrupt handoff and CAN
+recovery. [LED boot/error indications](volt-gateway-led-status.md) are optional.
+
 Latest: [actual MCUboot C direct-XIP/revert integration](volt-gateway-boot-port.md)
 now exercises trial/confirm/revert against simulated persistent flash with real
 C signature checks. This is separate from the older Python boot model below.

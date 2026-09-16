@@ -1,5 +1,18 @@
 # Volt gateway implementation status and gates
 
+## ARM loader execution and LED indication — 2026-09-16
+
+The [boot harness](volt-gateway-boot-port.md) now executes actual MCUboot and
+crypto instructions on an emulated Cortex-M4, then executes a signed slot-local
+Thumb probe. Confirm/reboot in A and B, trial revert and invalid-image rejection
+are exercised. This is not a hardware reset handoff or STM32 flash simulation.
+
+Added [nonblocking LED patterns](volt-gateway-led-status.md), including the
+requested slow all-color startup check: A=red/green/blue, B=red/blue/green.
+They do not grant permissions or affect boot decisions. Hardware LED wiring
+verification, actual loader/application state handoff, CAN recovery and board
+startup/flash/watchdog/RNG integration remain open. No device changes.
+
 ## Actual MCUboot C direct-XIP/revert integration — 2026-09-16
 
 The [new boot port](volt-gateway-boot-port.md) now tests the real MCUboot loader

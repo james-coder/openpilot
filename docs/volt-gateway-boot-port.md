@@ -1,5 +1,31 @@
 # MCUboot direct-XIP/revert C integration — off-device only
 
+## Cortex-M4 execution and LED status follow-up
+
+`mcuboot_port.py --arm` now links the actual loader and crypto into a
+`NEVER_FLASH-boot.elf` CPU harness. `boot_emulation.py` executes it under Unicorn
+without host cryptographic hooks. A signed Thumb leaf-function probe runs from
+the selected slot and records a slot-specific value in RAM. Tests persist the
+mapped flash across simulated resets, verify confirmation in either slot,
+revert an unconfirmed trial and reject invalid signatures/bindings/vectors.
+
+This demonstrates **actual selected ARM instructions executing**, not hardware
+startup: the probe returns as a function, without changing MSP/VTOR or managing
+interrupt ownership. Mapped writable memory is not an STM32 flash controller.
+The first 256 KiB of emulated loader address space is read/execute-only; image
+slots permit writes for the simulation. This is not hardware flash protection.
+
+Boot state now feeds an optional [LED indicator](volt-gateway-led-status.md),
+including a once-only slow R/G/B versus R/B/G slot indication. Native boot works
+without linking its renderer, and ARM tests verify rendering disabled does not
+change selection, confirmation, probe execution or resulting image storage.
+The historical milestone sections below retain their original test scope.
+
+The follow-up regression run passed **1,046 tests, zero failures/skips**.
+The CPU harness links 22,014 bytes of text, 24 bytes of data and 25,164 bytes
+of BSS; these are **not** full-board loader/RAM budgets and exclude stack and
+missing drivers/recovery code. See [evidence](evidence/volt-gateway/boot-led-20260916.json).
+
 ## What is now implemented
 
 `tools/volt_gateway/mcuboot_port.py` builds immutable MCUboot 2.4.0 commit
@@ -97,14 +123,16 @@ test binding with GCC. Only upstream unused-parameter warnings are suppressed.
 
 ## Still required before a flashable release
 
-This is a native C test library, **not a deployable bootstub**. It does not prove
-ARM startup/link size, hardware flash-stall timing, watchdog/RX servicing during
-verification, real stack high-water use, electrical power-loss behavior or
-application execution. The current FIH profile is explicitly OFF pending
+These native and ARM test harnesses are **not a deployable bootstub**. They do
+not prove hardware ARM startup/full-loader link size, hardware flash-stall
+timing, watchdog/RX servicing during verification, real stack high-water use,
+electrical power-loss behavior or complete application startup. The ARM harness
+does execute a selected signed leaf-function probe, as described above.
+The current FIH profile is explicitly OFF pending
 target integration; this is not a fault-injection-hardened production build.
 
-Next: integrate the selected loader into an ARM execution harness, then target
-startup/flash adapters and the authenticated CAN recovery service. Recovery
+Next after the ARM execution milestone above: target startup/flash adapters
+and the authenticated CAN recovery service. Recovery
 must retain controller/bitrate, identities, keys and transport IDs independently
 of both invalid application slots. Provisioned secrets, RNG, protected-loader
 enforcement, interrupted programming and restored-original-image recovery

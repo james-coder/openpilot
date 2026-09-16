@@ -59,11 +59,32 @@ def test_stale_or_absent_is_not_fresh():
     assert not observer.freshness(*args)
 
 
+def test_diag_gate_rechecks_state_after_wait(monkeypatch):
+  monkeypatch.setattr(diag.time, 'monotonic', lambda: 100)
+  class SM(dict):
+    seen = {'managerState': True}
+    valid = {'managerState': True}
+    recv_time = {'managerState': 100}
+    def update(self, timeout):
+      pass
+  sm = SM(managerState=SimpleNamespace(processes=[SimpleNamespace(name='qcomgpsd', running=False, shouldBeRunning=False)]))
+  calls = []
+  def offroad():
+    calls.append(1)
+    if len(calls) == 2:
+      raise RuntimeError('Vehicle state changed')
+  with pytest.raises(RuntimeError, match='state changed'):
+    diag.gate(sm, offroad)
+  assert len(calls) == 2
+
+
 def test_status_bounded_and_private(tmp_path):
   p = tmp_path/'status'
   assert not observer.local_status(p, ['connected'])['available']
   p.write_text('{"connected": true, "imei": "secret"}')
-  assert observer.local_status(p, ['connected']) == {'available': True, 'connected': True}
+  status = observer.local_status(p, ['connected'])
+  assert status['available'] and status['connected'] and status['age_seconds'] < 2
+  assert 'imei' not in status
   p.write_text('x'*4097)
   assert not observer.local_status(p, ['connected'])['available']
   p.write_text('[]')

@@ -53,6 +53,13 @@ int main(void) {
   exe = tmp_path / 'initialization'
   subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror', str(c), '-o', str(exe)], check=True)
   subprocess.run([str(exe)], check=True)
+  # The exact deployed regression must fail when the original buggy assignment
+  # is substituted. Return a code instead of aborting/creating a core file.
+  mutated = c.read_text().replace(assignments[0], 'intf->authorized = !!HCD_INTF_AUTHORIZED(hcd);')
+  mutated = mutated.replace('#include <assert.h>', '#define assert(x) do { if (!(x)) return 97; } while (0)')
+  c.write_text(mutated)
+  subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror', '-Wno-unused-function', '-Wno-unused-parameter', str(c), '-o', str(exe)], check=True)
+  assert subprocess.run([str(exe)], check=False).returncode == 97
 
 
 def test_exact_descriptor_and_all_single_byte_changes():

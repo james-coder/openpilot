@@ -33,6 +33,7 @@ def gate(sm, offroad):
       gps = [p for p in sm['managerState'].processes if p.name == 'qcomgpsd']
       if len(gps) != 1 or any(p.running or p.shouldBeRunning for p in gps):
         raise RuntimeError('GPS ownership unavailable or active; refusing DIAG access')
+      offroad()  # State may have changed while waiting for manager telemetry.
       return
   raise RuntimeError('Fresh manager state unavailable')
 

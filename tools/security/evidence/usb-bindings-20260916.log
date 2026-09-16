@@ -1,0 +1,66 @@
+c[?7l[2J[0mSeaBIOS (version 1.15.0-1)
+Booting from ROM..c[?7l[2JBINDING_LAB_KERNEL
+6.8.0-90-generic
+CONFIGURED
+{"case": "cycle_0_normal_before", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "cycle_0_modified", "status": "pass", "mode": 1, "drivers": []}
+CONFIGURED
+{"case": "cycle_0_normal_after", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "cycle_1_normal_before", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "cycle_1_modified", "status": "pass", "mode": 2, "drivers": []}
+CONFIGURED
+{"case": "cycle_1_normal_after", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "cycle_2_normal_before", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "cycle_2_modified", "status": "pass", "mode": 3, "drivers": []}
+CONFIGURED
+{"case": "cycle_2_normal_after", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "cycle_3_normal_before", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "cycle_3_modified", "status": "pass", "mode": 4, "drivers": []}
+CONFIGURED
+{"case": "cycle_3_normal_after", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "cycle_4_normal_before", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "cycle_4_modified", "status": "pass", "mode": 5, "drivers": []}
+CONFIGURED
+{"case": "cycle_4_normal_after", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "cycle_5_normal_before", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "cycle_5_modified", "status": "pass", "mode": 6, "drivers": []}
+CONFIGURED
+{"case": "cycle_5_normal_after", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "cycle_6_normal_before", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "cycle_6_modified", "status": "pass", "mode": 7, "drivers": []}
+CONFIGURED
+{"case": "cycle_6_normal_after", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "cycle_7_normal_before", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "cycle_7_modified", "status": "pass", "mode": 1, "drivers": []}
+CONFIGURED
+{"case": "cycle_7_normal_after", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "cycle_8_normal_before", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "cycle_8_modified", "status": "pass", "mode": 2, "drivers": []}
+CONFIGURED
+{"case": "cycle_8_normal_after", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "cycle_9_normal_before", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "cycle_9_modified", "status": "pass", "mode": 3, "drivers": []}
+CONFIGURED
+{"case": "cycle_9_normal_after", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+{"case": "absent", "status": "pass", "mode": 0, "drivers": []}
+CONFIGURED
+{"case": "absent_recovery", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "crash", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "crash_recovery", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+CONFIGURED
+{"case": "interrupt", "status": "pass", "mode": 0, "drivers": []}
+CONFIGURED
+{"case": "interrupt_recovery", "status": "pass", "mode": 0, "drivers": ["option", "option", "option", "option", "qmi_wwan"]}
+BINDING_LAB_DONE
+[   29.397391] reboot: Power down

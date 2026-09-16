@@ -18,13 +18,16 @@ def local_status(path, keys):
   try:
     with Path(path).open('rb') as f:
       data = f.read(4097)
+      modified = os.fstat(f.fileno()).st_mtime
     if len(data) > 4096:
       return {'available': False}
     obj = json.loads(data)
     if not isinstance(obj, dict):
       return {'available': False}
     # Only explicitly requested scalar fields. No modem IDs or GPS coordinates.
-    return {'available': True, **{k: obj[k] for k in keys if k in obj and isinstance(obj[k], (bool, int, float))}}
+    age = time.time() - modified  # noqa: TID251 -- filesystem mtime uses wall time
+    return {'available': True, 'age_seconds': age,
+            **{k: obj[k] for k in keys if k in obj and isinstance(obj[k], (bool, int, float))}}
   except (OSError, ValueError, TypeError):
     return {'available': False}
 
@@ -42,6 +45,10 @@ def main():
   from opendbc.car import structs
   from openpilot.common.params import Params
   params = Params()
+  import subprocess
+  print(json.dumps({'metadata': {'kernel': Path('/proc/version').read_text().strip(),
+                                'boot': Path('/proc/sys/kernel/random/boot_id').read_text().strip(),
+                                'revision': subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True, timeout=3).strip()}}), flush=True)
   sm = messaging.SubMaster(['deviceState', 'pandaStates', 'managerState', 'gpsLocationExternal', 'carState'])
   start = time.monotonic()
   while time.monotonic()-start < args.seconds:

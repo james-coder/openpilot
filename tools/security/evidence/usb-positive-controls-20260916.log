@@ -1,0 +1,10 @@
+c[?7l[2J[0mSeaBIOS (version 1.15.0-1)
+Booting from ROM...
+c[?7l[2JBINDING_LAB_KERNEL
+6.8.0-90-generic
+{"case": "positive_keyboard", "status": "pass", "drivers": ["usbhid"]}
+{"case": "positive_mouse", "status": "pass", "drivers": ["usbhid"]}
+{"case": "positive_storage", "status": "pass", "drivers": ["usb-storage"]}
+{"case": "positive_ethernet", "status": "pass", "drivers": ["cdc_ether", "cdc_ether"]}
+POSITIVE_CONTROLS_DONE
+[    9.254278] reboot: Power down

@@ -15,7 +15,8 @@ int main(int argc, char **argv) {
   if (argc == 2 && !strcmp(argv[1], "--profile")) {
     return fwrite(expected, 1, sizeof(expected), stdout) == sizeof(expected) ? 0 : 1;
   }
-  if (argc != 2 || access("/disposable-usb-lab", F_OK)) return 2;
+  int allow_config = argc == 3 && !strcmp(argv[2], "--allow-config");
+  if ((argc != 2 && !allow_config) || access("/disposable-usb-lab", F_OK)) return 2;
   unsigned mode = strtoul(argv[1], NULL, 10);
   if (mode > 7) return 2;
   unsigned char descriptors[512];
@@ -57,9 +58,23 @@ int main(int argc, char **argv) {
       out.io.length=ctrl.wLength<2?ctrl.wLength:2;
       if (ioctl(fd, USB_RAW_IOCTL_EP0_WRITE, &out)<0) break;
     } else if (ctrl.bRequest==USB_REQ_SET_CONFIGURATION) {
-      /* Default-denied devices must never reach this operation. */
-      puts("UNEXPECTED_SET_CONFIGURATION"); fflush(stdout);
-      ioctl(fd, USB_RAW_IOCTL_EP0_STALL, 0);
+      if (!allow_config) {
+        puts("UNEXPECTED_SET_CONFIGURATION"); fflush(stdout);
+        ioctl(fd, USB_RAW_IOCTL_EP0_STALL, 0);
+        continue;
+      }
+      for (size_t offset=18; offset+2<=18+config_len; offset+=descriptors[offset]) {
+        if (!descriptors[offset]) return 1;
+        if (descriptors[offset+1]==USB_DT_ENDPOINT &&
+            ioctl(fd, USB_RAW_IOCTL_EP_ENABLE, descriptors+offset)<0) { perror("enable endpoint"); return 1; }
+      }
+      if (ioctl(fd, USB_RAW_IOCTL_CONFIGURE, 0)<0) { perror("configure"); return 1; }
+      if (ioctl(fd, USB_RAW_IOCTL_EP0_READ, &out)<0) break;
+      puts("CONFIGURED"); fflush(stdout);
+    } else if (allow_config && (ctrl.bRequestType & USB_TYPE_MASK) != USB_TYPE_STANDARD) {
+      /* Fixed zero/ACK control replies only; not QMI/AT emulation or USB data. */
+      out.io.length=ctrl.wLength<sizeof(out.data)?ctrl.wLength:sizeof(out.data);
+      if (ioctl(fd, (ctrl.bRequestType & USB_DIR_IN)?USB_RAW_IOCTL_EP0_WRITE:USB_RAW_IOCTL_EP0_READ, &out)<0) break;
     } else { ioctl(fd, USB_RAW_IOCTL_EP0_STALL, 0); }
   }
   close(fd);

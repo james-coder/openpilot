@@ -88,3 +88,13 @@ def test_untrusted_parent_does_nothing(target, monkeypatch):
   with pytest.raises(RuntimeError, match='Untrusted'):
     installer.install(SOURCE)
   assert not target
+
+
+def test_missing_kernel_condition_refused_before_remount(target, tmp_path):
+  source = tmp_path / 'source'
+  source.mkdir()
+  (source / 'authorize.py').write_text('pass\n')
+  (source / installer.UNIT.name).write_text('[Service]\nExecStart=/bin/true\n')
+  with pytest.raises(RuntimeError, match='kernel gate'):
+    installer.install(source)
+  assert not target

@@ -61,3 +61,19 @@ disable failure. These do not prove candidate-kernel USB behavior.
 
 No boot partition, slot selection, Panda safety or running kernel was changed
 during the preflight. Do not use this document as a completed flash report.
+
+## Prepared on the comma (not flashed)
+
+Committed/pushed 892ff6471 and fast-forwarded the device under fresh offroad
+checks. Installed the root-owned authorizer and enabled its unit. An explicit
+start request was correctly SKIPPED: ConditionResult=no, ActiveState=inactive,
+SubState=dead. The current kernel has no policy marker, so the authorizer did
+not execute or alter USB authorization. Root filesystem returned read-only.
+LTE-bound HTTPS returned 200 afterward; no modem restart or reboot was used.
+
+To withdraw preparation on the known-good kernel, disable the newly installed
+comma-modem-usb.service; there is no manager/watchdog configuration to undo.
+Do not disable the service on a future default-deny kernel and expect LTE/GPS
+to work: restoring the known-good kernel is the rollback for that policy.
+Physical recovery and hostile-USB testing remain open; neither boot slot has
+been written.

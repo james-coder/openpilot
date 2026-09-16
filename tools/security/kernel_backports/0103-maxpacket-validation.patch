@@ -1,0 +1,26 @@
+From: Pavel Hofman <pavel.hofman@ivitera.com>
+Subject: [PATCH] usb: core: config: fix validation of wMaxPacketValue entries
+
+Upstream: 1a3910c80966e4a76b25ce812f6bea0ef1b1d530
+Stable-4.9: 35531ec82046dc072bb841c452b7cea193af42f3
+Fixes: aed9d65ac327 (USB: validate wMaxPacketValue entries in endpoint descriptors)
+
+Context-adapted backport: preserve the upstream one-line semantic correction,
+but use the vendor's existing validation comment. Do not import the unrelated
+zero-maxpacket skipping regression or its warning-only context. Both maximum
+packet size and transaction bits must reach the existing validation logic.
+Original author retained above; this context adaptation is not an upstream
+format-patch export. Apply after 0100, 0101 and 0102. Off-device only.
+
+diff --git a/drivers/usb/core/config.c b/drivers/usb/core/config.c
+--- a/drivers/usb/core/config.c
++++ b/drivers/usb/core/config.c
+@@ -407,7 +407,7 @@
+ 	}
+ 
+ 	/* Validate the wMaxPacketSize field */
+-	maxp = usb_endpoint_maxp(&endpoint->desc);
++	maxp = le16_to_cpu(endpoint->desc.wMaxPacketSize);
+ 
+ 	/* Find the highest legal maxpacket size for this endpoint */
+ 	i = 0;		/* additional transactions per microframe */

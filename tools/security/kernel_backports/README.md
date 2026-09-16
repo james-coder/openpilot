@@ -68,3 +68,17 @@ other controllers. It does not exempt peripheral-supplied hub class IDs.
 The regression compiles the actual assignment from `usb_set_configuration`
 and checks root/direct-child/behind-hub topology with both controller policy
 and default authorization states. This is not live USB enumeration testing.
+
+## Next parser-only candidate (not deployed)
+
+Apply 0102 then 0103 **after 0100+0101**, not after the standalone 0001–0003
+series. 0102 is the unmodified stable duplicate-endpoint patch; 0103 preserves
+the upstream one-line wMaxPacketSize correction with vendor-specific context.
+The review/0005 and review/0006 exports remain audit references; do not apply
+both those and 0102/0103.
+
+The original deployed source/build and Bluetooth rollback images are untouched.
+Source-derived regressions and ARM64 config.o cross-compilation passed; no full
+kernel image, flash or hardware test was performed for this new candidate.
+See docs/MODEM_PARSER_CANDIDATE_20260916.md for provenance, compatibility
+follow-ups, reproducible tests and remaining gates.

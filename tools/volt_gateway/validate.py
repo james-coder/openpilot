@@ -57,7 +57,7 @@ def run(output: Path):
   output.mkdir(parents=True, exist_ok=False, mode=0o700)
   source = Path(__file__).parent
   hashes = {str(p.relative_to(repo)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in sorted(source.rglob('*')) if p.is_file() and p.suffix in ('.py', '.c', '.h', '.ld', '.rs', '.json', '.txt')
+            for p in sorted(source.rglob('*')) if p.is_file() and p.suffix in ('.py', '.c', '.h', '.S', '.ld', '.rs', '.json', '.txt')
             and '__pycache__' not in p.parts}
   report = {'source_sha256': hashes, 'python': sys.version, 'checks': {}, 'production_ready': False,
             'hardware': {'status': 'hardware-unverified', 'changed': False},
@@ -91,7 +91,7 @@ def run(output: Path):
   else:
     report['checks']['mcuboot_direct_xip'] = {'status': 'incomplete', 'reason': 'pinned boot/crypto dependency absent'}
   for name in ('authority', 'observe', 'update', 'status_led', 'white_board', 'white_flash',
-               'white_watchdog', 'white_startup', 'recovery_transport'):
+               'white_watchdog', 'white_startup', 'white_clock', 'white_rng', 'recovery_transport'):
     steps.append(('analyze_' + name, ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-fanalyzer', '-c',
                                     str(source / 'firmware' / (name + '.c')), '-o', str(output / (name + '-analyzed.o'))]))
   for name, argv in steps:

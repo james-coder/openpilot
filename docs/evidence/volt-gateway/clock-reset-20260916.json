@@ -1,0 +1,10 @@
+{
+  "scope": "White clock/RNG register models and flash-only ARM reset mechanics with poisoned SRAM",
+  "report": "/home/james/diagnostics/volt-gateway/builds/validation-clock-reset-20260916-01/report.json",
+  "report_sha256": "c998d1e04a819601e4e8e0d3f5a29cb81ad452085163e14581dd79dd7ca0e1c1",
+  "tests": {"passed": 1337, "failed": 0, "skipped": 0},
+  "checks": "lint, ARM core/crypto/loader builds, native crypto/loader builds and selected static analysis passed",
+  "hardware_changed": false,
+  "production_ready": false,
+  "remaining": "Compose complete reset-to-loader/application runtime, CAN driver/PHY, authenticated recovery dispatcher/TX shaping/provisioning and independent physical bench validation"
+}

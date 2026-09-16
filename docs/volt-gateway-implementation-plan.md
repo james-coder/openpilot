@@ -1,5 +1,14 @@
 # Volt gateway implementation status and gates
 
+## Clock, entropy and reset mechanics — 2026-09-16
+
+Added the historical White 96-MHz clock profile, bounded hardware RNG access,
+and ARM reset/vector/copy/zero mechanics. Tests load flash only with poisoned
+SRAM, then execute the actual reset instructions. These are off-device
+components, not a deployable loader/application. See
+[clock/reset evidence and remaining integration](volt-gateway-clock-reset.md).
+No Panda or production Tres changes were made.
+
 ## ARM physical binding and verified handoff — 2026-09-16
 
 Added real ARM MMIO/flash critical-section/reset bindings and connected verified

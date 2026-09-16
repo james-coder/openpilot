@@ -36,3 +36,52 @@ tests are not proof of a successful target boot, driving safety, or malicious
 USB containment. A pre-userspace failure still requires physical recovery;
 the timer cannot repair a kernel that never runs userspace. Malicious USB and
 fuzz testing are excluded from this actual vehicle.
+
+## Actual deployment and parked validation
+
+Flashed only boot_a after the independent timer was armed and a fresh offroad
+check passed. Complete readback matched
+`1f8135dd9f5004744ab634a0d705b2a25b99e4ae831859fcf8f6a6e244c4b0c9`.
+This differs from packaging's original-baseline-tail calculation: installation
+correctly computed the partition hash using the actual #4 tail. boot_b stayed
+unchanged. One managed reboot was performed; SSH returned on kernel #5 with
+about 52 seconds uptime. No ignition cycles or modem resets were requested.
+
+- Both protected root hubs bind hub, authorized=1; device and interface defaults
+  remain 0. Modem interfaces bind four option drivers and one qmi_wwan.
+- LTE-bound HTTPS returned 200; uncached DNS over ppp0 returned records with
+  network as the data source. These are separate checks, not inferred from the
+  passive report's connected state.
+- One enabled SIM profile was read without changing profiles. Five AT queries
+  passed bounded-parser/legacy parity checks. No DIAG command was sent.
+- Bluetooth hci0, both Aranet services and the audio card remained present.
+- 150 seconds of passive observation: 149 fresh manager/Panda samples, no
+  missing expected processes or Panda faults, 150 connected modem samples,
+  zero observed retries, two advancing Aranet write timestamps.
+- No BUG/Oops/WARNING/panic/Call-trace matches in the inspected boot dmesg;
+  authorizer journal showed startup without rejection messages.
+- Existing application revision remained 10f71636d. No application pull,
+  manager/watchdog changes or Panda update occurred.
+
+The validator was initially invoked with an incorrect Python import context,
+then incorrect CLI flags. Both launcher errors occurred before any query;
+module invocation with positional arguments succeeded. They were not modem
+or kernel faults.
+
+After all parked checks, the guarded confirmation rechecked safe state,
+partition hashes, authorizer activity, changed boot ID and exact running kernel.
+Trial phase is confirmed; rollback timer is disabled/inactive. Root returned
+read-only, with about 109 MiB free. Full #4 rollback is verified both root-owned
+on-device and locally at kernel-parser-trial/kernel4-rollback.img. The original
+Bluetooth recovery baseline and prior trial records are untouched. Local trial
+artifacts total about 115 MiB, below the 256 MiB additional-artifact budget.
+
+The sanitized passive report is committed as
+`tools/security/evidence/parser-kernel5-parked-20260916.json`.
+It deliberately leaves HTTPS unobserved because that check was external to the
+passive stream; the separate successful test is recorded above.
+
+Still unobserved: physical cold boot, sustained GPS, fresh vehicle recognition,
+actual driving engagement and adversarial USB behavior. qcomgpsd was stopped
+and not expected offroad; absence of GPS was not counted as failure. This
+confirms parked compatibility, not completion of the broader security audit.

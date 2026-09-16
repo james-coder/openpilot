@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "expected_build": "#5 SMP PREEMPT Wed Sep 16 00:08:05 MDT 2026",
+  "sources": [
+    {
+      "source": "b1394df42b28",
+      "status": "pass",
+      "events": 150
+    }
+  ],
+  "groups": [
+    {
+      "id": "9313e04b7663",
+      "kind": "live",
+      "revision": "10f71636d376cc58ffffee48366eb985139fdad1",
+      "checks": {
+        "input_integrity": {
+          "status": "pass"
+        },
+        "startup_transition": {
+          "status": "not_observed",
+          "count": 0
+        },
+        "vehicle_identification": {
+          "status": "not_observed"
+        },
+        "expected_processes": {
+          "status": "pass",
+          "samples": 149
+        },
+        "panda_faults": {
+          "status": "pass",
+          "samples": 149
+        },
+        "gps_sustained": {
+          "status": "not_observed",
+          "longest_fix_seconds": 0.0,
+          "samples": 0
+        },
+        "gps_accuracy_m": {
+          "median": null,
+          "p95": null
+        },
+        "gps_acquisition_seconds": null,
+        "cellular_state": {
+          "status": "pass",
+          "samples": 150,
+          "disconnected_samples": 0
+        },
+        "cellular_https": {
+          "status": "not_observed"
+        },
+        "aranet_writes": {
+          "status": "pass",
+          "distinct_timestamps": 2,
+          "maximum_gap_seconds": 46.479636907577515
+        },
+        "ordinary_engagement": {
+          "status": "not_observed",
+          "observed_enabled_samples": 0
+        },
+        "physical_cold_boot": {
+          "status": "not_observed"
+        }
+      }
+    }
+  ],
+  "scope": "Observations only; not certification of driving safety or USB containment"
+}

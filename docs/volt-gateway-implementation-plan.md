@@ -1,5 +1,12 @@
 # Volt gateway implementation status and gates
 
+## Startup/watchdog/recovery receiver — 2026-09-16
+
+Added bounded silent-startup composition, independent F413 watchdog with
+per-task progress gating, reset-cause capture, non-interrupt TIM2 timebase and
+bounded C ISO-TP recovery reassembly. See [watchdog audit and exact limits](volt-gateway-watchdog-startup.md).
+These remain off-device components, not a complete flashable recovery loader.
+
 ## Update/boot integration — 2026-09-16
 
 See [integration and remaining gates](volt-gateway-update-boot-integration.md).

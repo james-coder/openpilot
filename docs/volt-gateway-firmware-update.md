@@ -1,5 +1,12 @@
 # Secure CAN update design — not deployed
 
+Update: the target-crypto ARM harness and native integration suite now execute
+the [pinned C cryptographic backend](volt-gateway-target-crypto.md), including
+image/authorization verification and streaming received-image/readback hashes.
+The old host-hook harness remains separately tested. Storage and boot selection
+are still models, not a deployed A/B loader. Host-backed crypto references below
+describe the earlier harness, not the new variant.
+
 The new lifecycle suite joins framed/authenticated transport, the native C
 transaction, persistent storage modeling and reset/boot/confirm/revert decisions.
 It covers 81 update cut positions, 21 journal-transition interruption cases,

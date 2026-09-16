@@ -11,6 +11,8 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
+from openpilot.tools.volt_gateway.target_crypto import archive_path
+
 
 def junit_summary(path):
   if not path.is_file():
@@ -70,6 +72,14 @@ def run(output: Path):
     ('ruff', [sys.executable, '-m', 'ruff', 'check', 'tools/volt_gateway']),
     ('cortex_m4_build', [sys.executable, '-m', 'tools.volt_gateway.build_core', '--output', str(output / 'core')]),
   ]
+  crypto_archive = archive_path()
+  if crypto_archive.is_file():
+    for mode in ('arm', 'native'):
+      steps.append(('crypto_' + mode, [sys.executable, '-m', 'tools.volt_gateway.target_crypto',
+                                      '--archive', str(crypto_archive), '--output', str(output / ('crypto-' + mode)),
+                                      *(['--native'] if mode == 'native' else [])]))
+  else:
+    report['checks']['crypto_build'] = {'status': 'incomplete', 'reason': 'pinned Mbed TLS archive absent'}
   for name in ('authority', 'observe', 'update'):
     steps.append(('analyze_' + name, ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-fanalyzer', '-c',
                                     str(source / 'firmware' / (name + '.c')), '-o', str(output / (name + '-analyzed.o'))]))

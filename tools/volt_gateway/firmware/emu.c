@@ -1,8 +1,21 @@
 /* OFF-DEVICE HARNESS ONLY: no vector table, peripheral setup or release entry.
- * Crypto trap functions FAIL unless intercepted by the host emulator. */
+ * Default crypto traps FAIL unless intercepted. VGW_TARGET_CRYPTO instead
+ * executes pinned Mbed TLS on the emulated CPU; still no real peripherals. */
 #include "authority.h"
 #include "observe.h"
 #include "update.h"
+#ifdef VGW_TARGET_CRYPTO
+#include "crypto.h"
+static vgw_crypto crypto;
+#define vgw_emu_hash_start vgw_crypto_hash_start
+#define vgw_emu_hash_add vgw_crypto_hash_add
+#define vgw_emu_hash_finish vgw_crypto_hash_finish
+#define vgw_emu_verify vgw_crypto_verify
+#define vgw_emu_sha256 vgw_crypto_authority_hash
+#define CRYPTO_CONTEXT (&crypto)
+#else
+#define CRYPTO_CONTEXT 0
+#endif
 
 static vgw_authority authority;
 static vgw_observer observer;
@@ -14,6 +27,7 @@ static uint8_t slot[64];
 static bool trial;
 
 /* Host-backed cryptographic traps, NEVER production implementations. */
+#ifndef VGW_TARGET_CRYPTO
 __attribute__((noinline)) bool vgw_emu_hash_start(void *ctx) { (void)ctx; return false; }
 __attribute__((noinline)) bool vgw_emu_hash_add(void *ctx, const uint8_t *data, size_t size) {
   (void)ctx; (void)data; (void)size; return false;
@@ -21,6 +35,7 @@ __attribute__((noinline)) bool vgw_emu_hash_add(void *ctx, const uint8_t *data, 
 __attribute__((noinline)) bool vgw_emu_hash_finish(void *ctx, uint8_t out[32]) {
   (void)ctx; (void)out; return false;
 }
+#endif
 static bool sample(void *ctx, uint64_t *now, uint64_t *sampled, bool *allowed) {
   (void)ctx; *now = 3; *sampled = 3; *allowed = true; return true;
 }
@@ -49,6 +64,7 @@ static bool mark_trial(void *ctx, const uint8_t *manifest) {
   (void)ctx; (void)manifest; trial = true; return true;
 }
 
+#ifndef VGW_TARGET_CRYPTO
 __attribute__((noinline)) bool vgw_emu_verify(void *ctx, bool image, const uint8_t *p, size_t n, const uint8_t *sig) {
   (void)ctx; (void)image; (void)p; (void)n; (void)sig;
   return false;
@@ -58,6 +74,7 @@ __attribute__((noinline)) void vgw_emu_sha256(const uint8_t *p, size_t n, uint8_
   (void)p; (void)n;
   for (unsigned i = 0; i < 32; i++) out[i] = 0;
 }
+#endif
 
 /* GCC may emit these for structure copies even with -fno-builtin. */
 void *memcpy(void *dest, const void *src, size_t n) {
@@ -72,22 +89,56 @@ void *memset(void *dest, int value, size_t n) {
   return dest;
 }
 
+int memcmp(const void *left, const void *right, size_t n) {
+  const uint8_t *a = left, *b = right;
+  for (size_t i = 0; i < n; i++) if (a[i] != b[i]) return (int)a[i] - (int)b[i];
+  return 0;
+}
+
+void *memmove(void *dest, const void *src, size_t n) {
+  uint8_t *d = dest;
+  const uint8_t *s = src;
+  if ((uintptr_t)d <= (uintptr_t)s) {
+    for (size_t i = 0; i < n; i++) d[i] = s[i];
+  } else {
+    for (size_t i = n; i > 0; i--) d[i-1] = s[i-1];
+  }
+  return dest;
+}
+
 __attribute__((noinline,noreturn)) void vgw_emu_done(void) { for (;;) __asm__ volatile ("nop"); }
 
 void vgw_emu_entry(void) {
   const uint8_t *vectors = (const uint8_t *)0x20018000U;
+#ifdef VGW_TARGET_CRYPTO
+  if (!vgw_crypto_init(&crypto, vectors + VGW_SIGNED_IMAGE_SIZE + VGW_AUTHORIZATION_SIZE, 65)) {
+    vgw_emu_result = 32768;
+    vgw_emu_done();
+  }
+  /* Public known-answer fixture, NOT any deployed operational secret. */
+  const uint8_t expected_mac[32] = {
+    0xaf,0x61,0xb6,0x93,0x91,0x2e,0xfc,0x56,0xe2,0xe4,0x6f,0x94,0x97,0x19,0xea,0x10,
+    0xa9,0xe8,0x0d,0x68,0xf8,0xdc,0xfb,0x84,0xe2,0x6c,0xac,0x53,0x30,0xda,0x3c,0x74
+  };
+  uint8_t test_key[32], mac[32];
+  for (unsigned i = 0; i < sizeof(test_key); i++) test_key[i] = 'k';
+  if (!vgw_crypto_hmac(test_key, (const uint8_t *)"abc", 3, mac) || memcmp(mac, expected_mac, 32)) {
+    vgw_emu_result = 65536;
+    vgw_emu_done();
+  }
+#endif
   uint8_t device[12], layout[32], session[32], nonce[32], challenge[VGW_CHALLENGE_SIZE];
   for (unsigned i = 0; i < 12; i++) device[i] = 'd';
   for (unsigned i = 0; i < 32; i++) { layout[i] = 'l'; session[i] = 's'; nonce[i] = 'n'; }
   uint32_t failures = 0;
-  if (!vgw_authority_init(&authority, device, layout, VGW_PROGRAM, session, vgw_emu_verify, vgw_emu_sha256, 0)) failures |= 1;
+  if (!vgw_authority_init(&authority, device, layout, VGW_PROGRAM, session, vgw_emu_verify, vgw_emu_sha256, CRYPTO_CONTEXT)) failures |= 1;
   if (!vgw_authority_challenge(&authority, vectors, VGW_SIGNED_IMAGE_SIZE, 0, nonce, challenge)) failures |= 2;
   bool accepted = vgw_authority_accept(&authority, vectors + VGW_SIGNED_IMAGE_SIZE, VGW_AUTHORIZATION_SIZE, 0);
   vgw_emu_authorized = accepted ? 1U : 0U;
   if (vgw_authority_require(&authority, VGW_PROGRAM, 1) != accepted) failures |= 4;
   if (vgw_authority_accept(&authority, vectors + VGW_SIGNED_IMAGE_SIZE, VGW_AUTHORIZATION_SIZE, 1)) failures |= 8;
   if (vgw_authority_require(&authority, VGW_ENTER, 2)) failures |= 16;
-  vgw_update_io io = {.capacity=sizeof(slot), .erase_sizes={32,32}, .erase_count=2,
+  vgw_update_io io = {.ctx=CRYPTO_CONTEXT, .capacity=sizeof(slot), .erase_sizes={32,32}, .erase_count=2,
     .sample=sample, .erase=erase, .write=write_slot, .read=read_slot,
     .hash_start=vgw_emu_hash_start, .hash_add=vgw_emu_hash_add, .hash_finish=vgw_emu_hash_finish, .mark_trial=mark_trial};
   if (!vgw_update_init(&updater, &authority, &io)) failures |= 4096;

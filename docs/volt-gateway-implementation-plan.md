@@ -1,5 +1,16 @@
 # Volt gateway implementation status and gates
 
+## Target cryptographic backend — 2026-09-16
+
+The ARM harness now has a pinned Mbed TLS 3.6.7 backend executing P-256 verification,
+SHA256 and HMAC without host crypto hooks. Native update/transport/lifecycle tests
+also exercise this C backend, including modeled interruption and rollback.
+See [implementation and remaining obligations](volt-gateway-target-crypto.md).
+This closes the host-crypto shortcut for those tests, **not** the complete target
+firmware gate: RNG/drivers, actual loader/flash/boot/recovery and scheduling
+remain unimplemented or unverified. No device flash or production Tres change.
+Earlier sections describe earlier milestones; they do not supersede this update.
+
 ## Integrated lifecycle work — 2026-09-16
 
 The native transport harness now advances a virtual clock during fragment

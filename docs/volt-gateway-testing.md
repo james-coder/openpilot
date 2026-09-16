@@ -1,5 +1,25 @@
 # Gateway testing: integrated workflows, simulation and hardware evidence
 
+## Target crypto integration — 2026-09-16
+
+**686 passed, zero failed/skipped**, with Ruff, Cortex-M4/core builds, pinned
+ARM/native crypto builds and GCC analysis passing. Native crypto compilation
+includes analysis of the adapter. ARM reproducibility and no-host-crypto tests
+passed. [Public evidence summary](evidence/volt-gateway/target-crypto-20260916.json).
+Private report:
+`/home/james/diagnostics/volt-gateway/builds/validation-target-crypto-20260916-04/report.json`.
+
+The linked CPU harness has 22,596 bytes text, 8 initialized data and 60,656 BSS,
+including the 24-KiB crypto arena and observation buffers. This is not a whole-
+firmware resource budget, actual hardware timing or flash/boot validation.
+The ELF remains NEVER_FLASH and `production_ready` remains false.
+See [backend, tests and limitations](volt-gateway-target-crypto.md).
+
+Run `validation-target-crypto-20260916-02` was correctly invalidated because
+source changed during validation; its passing test count was not accepted as a
+release gate. Runs 03 and final 04 were rerun against stable source. Initial ARM
+instruction-limit failures are explained in the backend notes, not hidden.
+
 ## Latest integrated-lifecycle results — 2026-09-16
 
 **547 tests passed, zero failed/skipped**, including generated-input transport

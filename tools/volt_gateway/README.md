@@ -1,5 +1,12 @@
 # Volt gateway off-device work
 
+`target_crypto.py` builds a pinned Mbed TLS 3.6.7 C backend. The ARM harness can
+execute real verification, SHA256 and HMAC without host crypto hooks; native
+update/lifecycle tests exercise the same backend. This still is **not a flashable
+image**. Set `VOLTGW_MBEDTLS_ARCHIVE` to the verified official archive before
+validation; tests do not fetch it and missing dependency is reported as skipped.
+See [target crypto](../../docs/volt-gateway-target-crypto.md) for details and gates.
+
 Current lifecycle additions: `boot_model.py` and `test_lifecycle.py` join the C
 updater to persistent model storage and simulated reset/boot/confirm/revert.
 This is NOT a flashable loader or an actual booted application. The transport

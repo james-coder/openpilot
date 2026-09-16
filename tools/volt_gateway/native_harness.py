@@ -1,10 +1,11 @@
-"""Host execution of the portable C authority, with public-only host crypto.
+"""Host execution of the C authority, with host crypto or the pinned C backend.
 
 Test harness, not a device driver. ctypes and a host shared library do not emulate
 an STM32, its crypto implementation, CAN controller, reset path or flash hardware.
 """
 
 import ctypes as c
+from dataclasses import dataclass
 import hashlib
 from pathlib import Path
 import secrets
@@ -17,6 +18,12 @@ VERIFY = c.CFUNCTYPE(c.c_bool, c.c_void_p, c.c_bool, c.c_void_p, c.c_size_t, c.c
 HASH = c.CFUNCTYPE(None, c.c_void_p, c.c_size_t, c.c_void_p)
 
 
+@dataclass(frozen=True)
+class NativeLibraries:
+  core: Path
+  crypto: Path
+
+
 def compile_authority(output: Path):
   if output.exists():
     raise FileExistsError(output)
@@ -26,10 +33,21 @@ def compile_authority(output: Path):
 
 
 class NativeAuthority:
-  def __init__(self, library: Path, verification_key: bytes, device: bytes, layout: bytes, phase: Phase):
+  def __init__(self, library: Path | NativeLibraries, verification_key: bytes, device: bytes, layout: bytes, phase: Phase):
     key = public_key(verification_key)
     if len(device) != 12 or len(layout) != 32 or phase not in (Phase.ENTER, Phase.PROGRAM):
       raise AuthorityError('native harness configuration')
+    self.crypto_lib, self.crypto_state = None, None
+    if isinstance(library, NativeLibraries):
+      self.crypto_lib = backend = c.CDLL(str(library.crypto))
+      backend.vgw_crypto_size.restype = c.c_size_t
+      backend.vgw_crypto_init.argtypes = [c.c_void_p, c.c_void_p, c.c_size_t]
+      backend.vgw_crypto_init.restype = c.c_bool
+      self.crypto_state = c.create_string_buffer(backend.vgw_crypto_size())
+      point = b'\x04' + int(key.pointQ.x).to_bytes(32, 'big') + int(key.pointQ.y).to_bytes(32, 'big')
+      if not backend.vgw_crypto_init(self.crypto_state, point, len(point)):
+        raise AuthorityError('native crypto initialization rejected')
+      library = library.core
     self.lib = c.CDLL(str(library))
     self.lib.vgw_authority_size.restype = c.c_size_t
     self.lib.vgw_authority_init.argtypes = [c.c_void_p, c.c_void_p, c.c_void_p, c.c_uint8, c.c_void_p, VERIFY, HASH, c.c_void_p]
@@ -56,8 +74,14 @@ class NativeAuthority:
     def sha(data, size, out):
       c.memmove(out, hashlib.sha256(c.string_at(data, size)).digest(), 32)
 
-    self._verify, self._sha = VERIFY(check), HASH(sha)
-    if not self.lib.vgw_authority_init(self.state, device, layout, phase, secrets.token_bytes(32), self._verify, self._sha, None):
+    if self.crypto_lib is None:
+      self._verify, self._sha = VERIFY(check), HASH(sha)
+    else:
+      # Direct C function pointers: no Python verification/hash callback.
+      self._verify = VERIFY(('vgw_crypto_verify', self.crypto_lib))
+      self._sha = HASH(('vgw_crypto_authority_hash', self.crypto_lib))
+    if not self.lib.vgw_authority_init(self.state, device, layout, phase, secrets.token_bytes(32),
+                                     self._verify, self._sha, self.crypto_state):
       raise AuthorityError('native initialization rejected')
 
   def _time(self, now_ms):

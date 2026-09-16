@@ -1,7 +1,8 @@
 """Execute Cortex-M4 gateway-core instructions, NOT a whole White Panda model.
 
-The ELF has no vehicle drivers/vector table and must NEVER be flashed. Real
-ECDSA/SHA256 are performed by public-only host hooks; target crypto, interrupts,
+The ELF has no vehicle drivers/vector table and must NEVER be flashed.
+ECDSA/SHA256 default to public-only host hooks; target_crypto=True executes the
+pinned backend without crypto interception. Interrupts,
 flash timing, CAN, GPIO/mux/SWCAN, USB and electrical effects are not emulated.
 """
 
@@ -27,7 +28,7 @@ def build(output: Path):
                  check=True, capture_output=True, text=True, timeout=60)
 
 
-def run(elf: Path, signed_image: bytes, authorization: bytes, verification_key: bytes):
+def run(elf: Path, signed_image: bytes, authorization: bytes, verification_key: bytes, *, target_crypto=False):
   from elftools.elf.elffile import ELFFile
   from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_CODE, UC_PROT_READ, UC_PROT_EXEC, UC_PROT_WRITE
   from unicorn.arm_const import (UC_ARM_REG_SP, UC_ARM_REG_LR, UC_ARM_REG_PC, UC_ARM_REG_R0, UC_ARM_REG_R1,
@@ -54,6 +55,11 @@ def run(elf: Path, signed_image: bytes, authorization: bytes, verification_key: 
     symbols = {s.name:s['st_value'] for s in image.get_section_by_name('.symtab').iter_symbols()}
     entry = image['e_entry']
   cpu.mem_write(0x20018000, signed_image + authorization)
+  if target_crypto:
+    if 'vgw_crypto_verify' not in symbols or 'vgw_emu_verify' in symbols:
+      raise ValueError('expected linked target crypto, not host traps')
+    cpu.mem_write(0x20018000 + 368, b'\x04' + int(key.pointQ.x).to_bytes(32, 'big') + int(key.pointQ.y).to_bytes(32, 'big'))
+  cpu.mem_protect(0x20018000, 0x1000, UC_PROT_READ)
   cpu.reg_write(UC_ARM_REG_SP, 0x2001FFF0)
   state = {'completed':False, 'crypto_calls':0}
   stream_hash = None
@@ -64,6 +70,8 @@ def run(elf: Path, signed_image: bytes, authorization: bytes, verification_key: 
       state['completed'] = True
       machine.emu_stop()
       return
+    if target_crypto:
+      raise RuntimeError('target crypto must not use a host hook')
     if address == (symbols['vgw_emu_verify'] & ~1):
       is_image = machine.reg_read(UC_ARM_REG_R1)
       pointer, length = machine.reg_read(UC_ARM_REG_R2), machine.reg_read(UC_ARM_REG_R3)
@@ -102,11 +110,16 @@ def run(elf: Path, signed_image: bytes, authorization: bytes, verification_key: 
       machine.mem_write(dest, hashlib.sha256(bytes(machine.mem_read(pointer, length))).digest())
       machine.reg_write(UC_ARM_REG_PC, machine.reg_read(UC_ARM_REG_LR))
 
-  cpu.hook_add(UC_HOOK_CODE, hook)
-  cpu.emu_start(entry | 1, 0, timeout=5_000_000, count=2_000_000)
+  if target_crypto:
+    done = symbols['vgw_emu_done'] & ~1
+    cpu.hook_add(UC_HOOK_CODE, hook, begin=done, end=done)
+  else:
+    cpu.hook_add(UC_HOOK_CODE, hook)
+  cpu.emu_start(entry | 1, 0, timeout=20_000_000 if target_crypto else 5_000_000,
+                count=300_000_000 if target_crypto else 2_000_000)
   state['failure_bits'] = struct.unpack('<I', cpu.mem_read(symbols['vgw_emu_result'], 4))[0]
   state['authorized'] = bool(struct.unpack('<I', cpu.mem_read(symbols['vgw_emu_authorized'], 4))[0])
   state['updated'] = bool(struct.unpack('<I', cpu.mem_read(symbols['vgw_emu_updated'], 4))[0])
   if not state['completed']:
-    raise RuntimeError('emulation did not reach its completion marker within bounds')
+    raise RuntimeError(f'emulation did not complete within bounds; pc=0x{cpu.reg_read(UC_ARM_REG_PC):08x}')
   return state

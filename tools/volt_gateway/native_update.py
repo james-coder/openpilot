@@ -1,4 +1,4 @@
-"""Host adapter executing the real portable C updater. Not MCU flash/crypto."""
+"""Host C updater adapter; optional pinned C crypto, never physical MCU flash."""
 
 import ctypes as c
 import hashlib
@@ -75,9 +75,14 @@ class NativeUpdateEngine:
     def finish(_, out):
       c.memmove(out, self._hash.digest(), 32)
 
+    hashes = (START(wrap(start)), HASH_ADD(wrap(add)), BUFFER(wrap(finish)))
+    if authority.crypto_lib is not None:
+      hashes = (START(('vgw_crypto_hash_start', authority.crypto_lib)),
+                HASH_ADD(('vgw_crypto_hash_add', authority.crypto_lib)),
+                BUFFER(('vgw_crypto_hash_finish', authority.crypto_lib)))
     callbacks = (SAMPLE(wrap(sample)), ERASE(wrap(lambda _, offset, size: slot.erase(offset, size))),
                  DATA(wrap(lambda _, offset, data, size: slot.write(offset, c.string_at(data, size)))), DATA(wrap(read)),
-                 START(wrap(start)), HASH_ADD(wrap(add)), BUFFER(wrap(finish)),
+                 *hashes,
                  BUFFER(wrap(lambda _, data: slot.mark_trial(ImageManifest.unpack(c.string_at(data, 122))))))
     regions = tuple(slot.erase_regions)
     if not 1 <= len(regions) <= 16 or not 0 < slot.capacity <= 1048576:
@@ -87,7 +92,8 @@ class NativeUpdateEngine:
       if offset != end or type(size) is not int or not 0 < size <= slot.capacity - end:
         raise AuthorityError('native erase geometry')
       end += size
-    self.io = IO(None, slot.capacity, (c.c_uint32 * 16)(*(size for _, size in regions)), len(regions), *callbacks)
+    self.io = IO(c.cast(authority.crypto_state, c.c_void_p), slot.capacity,
+                 (c.c_uint32 * 16)(*(size for _, size in regions)), len(regions), *callbacks)
     self._callbacks = callbacks
     if not lib.vgw_update_init(self.buffer, authority.state, c.byref(self.io)):
       raise AuthorityError('native updater initialization rejected')

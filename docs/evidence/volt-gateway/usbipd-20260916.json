@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "usbipd_version": "5.3.0",
+  "windows_busid": "2-2",
+  "serial": "370022000651363038363036",
+  "instance_id": "USB\\VID_BBAA&PID_DDCC\\370022000651363038363036",
+  "wsl_client_ipv4": "172.21.244.169",
+  "windows_host_ipv4": "172.21.240.1",
+  "firewall_rule": "{6BA69F1B-06F2-40D8-BF8B-4D2F6C4821C2}",
+  "firewall_previous_remote": "LocalSubnet",
+  "firewall_current_remote": "172.21.244.169",
+  "forced_binding": false,
+  "auto_attach": false,
+  "linux_identity_query": {
+    "vid": "bbaa",
+    "pid": "ddcc",
+    "hardware_type_hex": "01",
+    "version": "v1.7.3-EON-unknown-RELEASE",
+    "ordinary_user_access_verified": true
+  },
+  "linux_permission": "0660 root:plugdev; exact application VID/PID/serial udev match",
+  "panda_vendor_out_requests_sent": false,
+  "flash_written": false,
+  "boot_mode_changed": false,
+  "complete_flash_backup": false,
+  "note": "USB host binding/attachment changed. This does not validate DFU re-enumeration or firmware recovery."
+}

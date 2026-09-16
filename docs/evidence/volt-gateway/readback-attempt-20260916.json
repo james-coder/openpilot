@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "serial": "370022000651363038363036",
+  "source_version_read_before_transition": "v1.7.3-EON-unknown-RELEASE",
+  "dfu_util_package": "0.9-1 amd64 (Ubuntu jammy)",
+  "device_operations": [{"type": "vendor_control_out", "request": "0xd1", "value": 1, "length": 0, "purpose": "enter softloader"}],
+  "windows_observed": "BBAA:DDEE at port 2-2 briefly appeared and was auto-bound; disappeared before USB/IP import completed",
+  "windows_event": "2026-09-16 02:23:14 local: Usbipd.ConnectedClient ClaimDevice FileNotFoundException",
+  "user_observed": "rapid green blinking after previously blue blinking",
+  "rom_dfu_entered": false,
+  "flash_bytes_read": 0,
+  "flash_written": false,
+  "protection_changed": false,
+  "auto_attach_client_stopped": true,
+  "linux_auto_attach_helper_stopped": true,
+  "recovery_action_requested": "one physical USB unplug/replug; no further mode transition until enumeration issue understood",
+  "application_restored": "not yet verified at time of recording",
+  "host_policy_changes": [
+    {"guid": "5b3e0fa0-367f-4a87-84d9-5b1ae633ddbf", "operation": "AutoBind", "busid": "2-2", "hardware_id": "bbaa:ddee"},
+    {"guid": "f54d1c8c-0147-44e4-a8bf-c7638ce43448", "operation": "AutoBind", "busid": "2-2", "hardware_id": "0483:df11"}
+  ],
+  "policy_note": "Narrow rules remain installed; no running auto-attach loop. USB/IP inbound still scoped to WSL client."
+}

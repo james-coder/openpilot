@@ -1,5 +1,6 @@
 [Unit]
 Description=Physical-port modem USB authorization (candidate kernel only)
+ConditionPathExists=/sys/firmware/devicetree/base/soc/ssusb@a800000/comma,untrusted-modem-host
 After=systemd-udevd.service
 Before=lte.service
 

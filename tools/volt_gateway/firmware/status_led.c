@@ -7,8 +7,8 @@ void vgw_led_init(vgw_status_led *s, uint32_t now) {
 void vgw_led_set(vgw_status_led *s, unsigned state, unsigned slot, unsigned error, uint32_t now) {
   if (!s) return;
   bool slot_valid = slot < 2 || slot == 255;
-  bool valid = state <= VGW_LED_FAULT && slot_valid &&
-    ((state == VGW_LED_FAULT && error >= 1 && error <= 8) || (state != VGW_LED_FAULT && error == 0));
+  bool valid = state <= VGW_LED_UPDATE_ERASE && slot_valid &&
+    ((state == VGW_LED_FAULT && error >= 1 && error <= 9) || (state != VGW_LED_FAULT && error == 0));
   if (!valid) { state = VGW_LED_FAULT; slot = 255; error = VGW_LED_INTERNAL; }
   if (s->state == state && s->slot == slot && s->error == error) return;
   s->since_ms=now; s->state=(uint8_t)state; s->slot=(uint8_t)slot; s->error=(uint8_t)error;
@@ -43,8 +43,13 @@ uint8_t vgw_led_sample(vgw_status_led *s, uint32_t now) {
                     s->state == VGW_LED_RUNNING ? VGW_LED_GREEN : VGW_LED_BLUE);
     case VGW_LED_RECOVERY: return elapsed % 4000U < 1000U ? VGW_LED_RED : 0;
     case VGW_LED_UPDATE: return elapsed % 1000U < 500U ? VGW_LED_BLUE : VGW_LED_GREEN;
+    case VGW_LED_UPDATE_WAIT: return elapsed % 2000U < 150U ? VGW_LED_BLUE : 0;
+    case VGW_LED_UPDATE_VERIFY: return elapsed % 1000U < 800U ? VGW_LED_BLUE : 0;
+    case VGW_LED_UPDATE_COMMIT: return VGW_LED_RED | VGW_LED_BLUE;
+    case VGW_LED_UPDATE_READY: return pulses(elapsed % 4000U, 4, VGW_LED_GREEN);
+    case VGW_LED_UPDATE_ERASE: return elapsed % 1000U < 500U ? VGW_LED_RED | VGW_LED_GREEN : 0;
     case VGW_LED_FAULT:
-      if (s->error < 1 || s->error > 8) break;
+      if (s->error < 1 || s->error > 9) break;
       return pulses(elapsed % 4000U, s->error, VGW_LED_RED);
     default: break;
   }

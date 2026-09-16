@@ -1,5 +1,14 @@
 # Volt gateway implementation status and gates
 
+## Update/boot integration — 2026-09-16
+
+See [integration and remaining gates](volt-gateway-update-boot-integration.md).
+Added inner-image validation and last-write trial commit in the actual MCUboot
+port, native C updater-to-loader tests, flash-register driver candidate and
+progress-sensitive update LEDs. Integration caught and fixed ignored build-number
+versions in boot selection. The complete hardware image and self-contained CAN
+recovery remain unfinished; no bench or vehicle flashing is claimed.
+
 ## Five-step board/release implementation follow-up — 2026-09-16
 
 See [explicit step-by-step status](volt-gateway-board-release.md). Live ROM

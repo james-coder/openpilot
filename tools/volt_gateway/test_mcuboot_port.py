@@ -55,6 +55,10 @@ def library(tmp_path_factory):
     ('vgw_test_confirm', C.c_int, []), ('vgw_test_copy', C.c_int, [p, u]),
     ('vgw_test_fault', None, [u, u, u]), ('vgw_test_mutations', u, []),
     ('vgw_boot_get_status', None, [p]),
+    ('vgw_test_stage', C.c_int, [u, p, u]),
+    ('vgw_test_commit', C.c_int, [u, u, u]),
+    ('vgw_test_storage', C.c_int, [u, u, u, p, u]),
+    ('vgw_boot_validate_candidate', C.c_bool, [u, u, u]),
   ):
     fn = getattr(lib, name)
     fn.restype, fn.argtypes = result, args

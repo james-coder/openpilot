@@ -41,7 +41,7 @@ def test_slot_pulses(leds, state, color, slot, count):
     assert leds.vgw_led_sample(C.byref(s), 4100 + t) == expected
 
 
-@pytest.mark.parametrize('code', range(1, 9))
+@pytest.mark.parametrize('code', range(1, 10))
 def test_fault_pulses(leds, code):
   s = Status()
   leds.vgw_led_init(C.byref(s), 0)
@@ -105,7 +105,7 @@ def test_fault_recovery_update_preempt_intro(leds, state, code):
   assert leds.vgw_led_sample(C.byref(s), 200) == 2
 
 
-@pytest.mark.parametrize('state,slot,code', [(99, 0, 0), (1, 2, 0), (5, 0, 0), (5, 0, 9), (2, 0, 1)])
+@pytest.mark.parametrize('state,slot,code', [(99, 0, 0), (1, 2, 0), (5, 0, 0), (5, 0, 10), (2, 0, 1)])
 def test_invalid_status_is_internal_fault(leds, state, slot, code):
   s = Status()
   leds.vgw_led_init(C.byref(s), 0)
@@ -124,3 +124,26 @@ def test_boot_recovery_update_and_absence(leds):
     leds.vgw_led_init(C.byref(s), 0)
     leds.vgw_led_set(C.byref(s), state, 255, 0, 0)
     assert [leds.vgw_led_sample(C.byref(s), t) for t in (0, 500, 1000, 1500)] == expected
+
+
+@pytest.mark.parametrize('state', [6, 7, 8, 9, 10])
+def test_update_phase_waveforms(leds, state):
+  s = Status()
+  start = 0xffffff00
+  leds.vgw_led_init(C.byref(s), start)
+  leds.vgw_led_set(C.byref(s), 2, 0, 0, start)
+  leds.vgw_led_set(C.byref(s), state, 255, 0, start)
+  assert not s.intro_active
+  for elapsed in range(8000):
+    phase = elapsed % 4000
+    expected = {
+      6: 4 if elapsed % 2000 < 150 else 0,
+      7: 4 if elapsed % 1000 < 800 else 0,
+      8: 5,
+      9: 2 if phase // 300 < 4 and phase % 300 < 150 else 0,
+      10: 3 if elapsed % 1000 < 500 else 0,
+    }[state]
+    now = (start + elapsed) & 0xffffffff
+    leds.vgw_led_set(C.byref(s), state, 255, 0, now)
+    assert s.since == start
+    assert leds.vgw_led_sample(C.byref(s), now) == expected

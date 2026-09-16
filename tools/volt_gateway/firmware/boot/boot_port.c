@@ -13,6 +13,7 @@ static const struct flash_area slots[2] = {
 static vgw_boot_io io;
 static bool ready, failed;
 static int selected = -1;
+static bool no_bootable_image;
 static uint8_t indication[3] = {VGW_LED_BOOT, 255, 0};
 static void indicate(uint8_t state, uint8_t slot, uint8_t code) {
   indication[0] = state; indication[1] = slot; indication[2] = code;
@@ -43,6 +44,7 @@ bool vgw_boot_init(const vgw_boot_io *binding, const uint8_t public_der[91], con
   static const uint8_t prefix[26] = {0x30,0x59,0x30,0x13,0x06,0x07,0x2a,0x86,0x48,0xce,0x3d,0x02,0x01,
     0x06,0x08,0x2a,0x86,0x48,0xce,0x3d,0x03,0x01,0x07,0x03,0x42,0x00};
   ready = false; failed = false; selected = -1;
+  no_bootable_image = false;
   indicate(VGW_LED_FAULT, 255, VGW_LED_CONFIG);
   memset(&io, 0, sizeof(io));
   memset(verification_key, 0, sizeof(verification_key));
@@ -116,25 +118,10 @@ int flash_area_id_from_multi_image_slot(int image, int slot) { return image == 0
 int flash_area_id_from_image_slot(int slot) { return flash_area_id_from_multi_image_slot(0, slot); }
 int flash_area_id_to_multi_image_slot(int image, int area) { return image == 0 && area >= 1 && area <= 2 ? area - 1 : -1; }
 
-int vgw_boot_select(vgw_boot_choice *out) {
-  selected = -1;
-  if (out) memset(out, 0, sizeof(*out));
-  if (!ready || !out) return -3;
-  if (failed) return -2;
-  struct boot_rsp response;
-  memset(&response, 0, sizeof(response));
-  FIH_DECLARE(result, FIH_FAILURE);
-  FIH_CALL(boot_go, result, &response);
-  if (failed) return -2; /* Upstream copy_done failure may otherwise return success. */
-  if (FIH_NOT_EQ(result, FIH_SUCCESS)) { indicate(VGW_LED_FAULT, 255, VGW_LED_NO_IMAGE); return -1; }
-  indicate(VGW_LED_FAULT, 255, VGW_LED_IMAGE_POLICY);
-  int slot = response.br_image_off == VGW_BOOT_SLOT0 ? 0 : response.br_image_off == VGW_BOOT_SLOT1 ? 1 : -1;
-  if (slot < 0 || response.br_flash_dev_id != 0 || !response.br_hdr) return -3;
-  const struct image_header *h = response.br_hdr;
-  if (h->ih_flags != IMAGE_F_ROM_FIXED || h->ih_load_addr != slots[slot].fa_off ||
+static int policy(unsigned slot, const struct image_header *h, vgw_boot_choice *out) {
+  if (slot>1 || !h || h->ih_magic != IMAGE_MAGIC || h->ih_flags != IMAGE_F_ROM_FIXED || h->ih_load_addr != slots[slot].fa_off ||
       h->ih_hdr_size != VGW_BOOT_HEADER_SIZE || h->ih_img_size < 8 || h->ih_img_size > VGW_BOOT_SLOT_SIZE - 1024) return -3;
-  /* Fixed protected-TLV schema excludes ambiguous/missing/duplicate binding.
-   * boot_go has already verified the signature over these protected bytes. */
+  /* Fixed protected schema; caller must also verify the signature. */
   uint8_t binding[52];
   static const uint8_t schema[8] = {0x08,0x69,52,0,0xa0,0,44,0};
   if (h->ih_protect_tlv_size != sizeof(binding)) return -3;
@@ -146,6 +133,30 @@ int vgw_boot_select(vgw_boot_choice *out) {
   /* Conservative 128-KiB RAM envelope until exact board RAM is established. */
   if ((vectors[0] & 7) || vectors[0] <= 0x20000000U || vectors[0] > 0x20020000U ||
       !(vectors[1] & 1) || (vectors[1] & ~1U) < start + 8 || (vectors[1] & ~1U) >= start + h->ih_img_size) return -3;
+  if (out) *out = (vgw_boot_choice){slot, start, vectors[0], vectors[1]};
+  return 0;
+}
+
+int vgw_boot_select(vgw_boot_choice *out) {
+  selected = -1; no_bootable_image = false;
+  if (out) memset(out, 0, sizeof(*out));
+  if (!ready || !out) return -3;
+  if (failed) return -2;
+  struct boot_rsp response;
+  memset(&response, 0, sizeof(response));
+  FIH_DECLARE(result, FIH_FAILURE);
+  FIH_CALL(boot_go, result, &response);
+  if (failed) return -2; /* Upstream copy_done failure may otherwise return success. */
+  if (FIH_NOT_EQ(result, FIH_SUCCESS)) {
+    no_bootable_image=true;
+    indicate(VGW_LED_FAULT, 255, VGW_LED_NO_IMAGE); return -1;
+  }
+  indicate(VGW_LED_FAULT, 255, VGW_LED_IMAGE_POLICY);
+  int slot = response.br_image_off == VGW_BOOT_SLOT0 ? 0 : response.br_image_off == VGW_BOOT_SLOT1 ? 1 : -1;
+  if (slot < 0 || response.br_flash_dev_id != 0 || !response.br_hdr) return -3;
+  vgw_boot_choice choice;
+  int rc=policy((unsigned)slot, response.br_hdr, &choice);
+  if (rc) return rc;
   struct boot_swap_state state;
   if (boot_read_swap_state(&slots[slot], &state) || failed) return -2;
   /* Handoff integrity check, independent of whether any LED is installed. */
@@ -153,8 +164,41 @@ int vgw_boot_select(vgw_boot_choice *out) {
       (state.image_ok != BOOT_FLAG_SET && state.image_ok != BOOT_FLAG_UNSET)) return -3;
   selected = slot;
   indicate(state.image_ok == BOOT_FLAG_SET ? VGW_LED_RUNNING : VGW_LED_TRIAL, (uint8_t)slot, 0);
-  *out = (vgw_boot_choice){(uint32_t)slot, start, vectors[0], vectors[1]};
+  *out = choice;
   return slot;
+}
+
+bool vgw_boot_validate_candidate(unsigned slot, uint32_t size, uint32_t version) {
+  if (!ready || failed || slot>1 || (int)slot==selected || (selected<0 && !no_bootable_image) ||
+      size<VGW_BOOT_HEADER_SIZE+64 || size>VGW_BOOT_SLOT_SIZE-64 || (size&3)) return false;
+  struct image_header header;
+  if (flash_area_read(&slots[slot],0,&header,sizeof(header)) || policy(slot,&header,NULL)) return false;
+  if (header.ih_ver.iv_major || header.ih_ver.iv_minor || header.ih_ver.iv_revision || header.ih_ver.iv_build_num!=version) return false;
+  uint32_t end=header.ih_hdr_size+header.ih_img_size+header.ih_protect_tlv_size;
+  if (end>size || size-end<4) return false;
+  uint8_t tlv[4];
+  if (flash_area_read(&slots[slot],end,tlv,sizeof(tlv))) return false;
+  uint32_t length=(uint32_t)tlv[2] | ((uint32_t)tlv[3]<<8);
+  if (tlv[0]!=7 || tlv[1]!=0x69 || length<4 || length>size-end || size-end-length>3) return false;
+  for (uint32_t i=end+length;i<size;i++) {
+    uint8_t padding;
+    if (flash_area_read(&slots[slot],i,&padding,1) || padding!=255) return false;
+  }
+  uint8_t tmp[256];
+  FIH_DECLARE(result, FIH_FAILURE);
+  FIH_CALL(bootutil_img_validate,result,NULL,&header,&slots[slot],tmp,sizeof(tmp),NULL,0,NULL);
+  return !failed && FIH_EQ(result,FIH_SUCCESS);
+}
+
+bool vgw_boot_commit_candidate(unsigned slot, uint32_t size, uint32_t version) {
+  if (!vgw_boot_validate_candidate(slot,size,version)) return false;
+  uint8_t trailer[64];
+  if (flash_area_read(&slots[slot],VGW_BOOT_SLOT_SIZE-sizeof(trailer),trailer,sizeof(trailer))) return false;
+  for (unsigned i=0;i<sizeof(trailer);i++) if (trailer[i]!=255) return false;
+  if (boot_write_magic(&slots[slot]) || failed) return false;
+  struct boot_swap_state state;
+  return boot_read_swap_state(&slots[slot],&state)==0 && !failed && state.magic==BOOT_MAGIC_GOOD &&
+    state.copy_done==BOOT_FLAG_UNSET && state.image_ok==BOOT_FLAG_UNSET;
 }
 
 bool vgw_boot_confirm(void) {

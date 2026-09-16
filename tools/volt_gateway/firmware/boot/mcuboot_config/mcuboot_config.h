@@ -3,6 +3,8 @@
 /* Candidate port, NOT a deployment configuration. Both modes must be present;
  * upstream's Cargo direct-xip feature alone does not enable revert. */
 #define MCUBOOT_DIRECT_XIP
+/* Release versions are 0.0.0+uint32. Ignoring build numbers ties both slots. */
+#define MCUBOOT_VERSION_CMP_USE_BUILD_NUMBER
 #define MCUBOOT_DIRECT_XIP_REVERT
 #define MCUBOOT_SIGN_EC256
 #define MCUBOOT_USE_MBED_TLS

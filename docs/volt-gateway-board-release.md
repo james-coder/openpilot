@@ -1,6 +1,6 @@
 # Board/release integration progress — not a flashable release
 
-Offline regression: **1,097 passed, zero failed/skipped**, with lint, ARM
+Previous offline regression: **1,097 passed, zero failed/skipped**, with lint, ARM
 builds and selected GCC analysis passing. This includes 27 image-packaging,
 five chip-inspection and 19 MMIO tests. See
 [validation evidence](evidence/volt-gateway/board-release-20260916.json).
@@ -13,15 +13,17 @@ five chip-inspection and 19 MMIO tests. See
    because the enclosure cannot be opened. Exact revision remains unknown.
 2. **Board startup/flash:** White-specific early quiescence and runtime identity
    primitives implemented/tested, but not integrated into actual reset startup.
-   Real flash operations, clock/watchdog/RNG integration and application handoff
-   remain unfinished. There is no claim of a complete board firmware here.
+   A bounded flash-register driver now has native register-model tests and an
+   ARM object build. Physical bindings, clock/watchdog/RNG integration and
+   application handoff remain unfinished. This is not complete board firmware.
 3. **Standalone CAN recovery:** remains unfinished. Existing authority/update
    cores are not a CAN driver or independently bootable recovery service. No
    production recovery IDs or provisioning material have been installed.
 4. **Signed-image pipeline:** implemented inner MCUboot image construction,
    strict verification and outer signed release packaging; tested against the
-   actual native C loader. Target updater integration still must verify the
-   inner image and commit the trailer last.
+   actual native C loader. Inner-image verification/last-write trailer commit
+   are now connected to the C updater through a native test adapter; production
+   board binding remains pending. See [integration](volt-gateway-update-boot-integration.md).
 5. **Complete-image validation and flashing:** not performed. The original
    labeled Panda remains unchanged in flash. Existing offline tests cannot
    justify replacing its bootstub with an incomplete recovery implementation.
@@ -90,8 +92,8 @@ payloads are not complete hardware firmware and must never be flashed.
 
 Finish reset/clock/watchdog/RNG and SRAM-resident flash servicing with hardware
 timeout/error tests; integrate authenticated CAN recovery independently of both
-slots; connect actual MCUboot inner verification and last-write trailer commit
-to the updater; provision reviewed transport IDs and keys; then produce and
+slots; bind the tested updater-to-MCUboot path to real board storage;
+provision reviewed transport IDs and keys; then produce and
 validate the complete board release. Do not change option bytes automatically.
 Only after those gates should USB programming and physical A/B/recovery tests
 replace the preserved original application.

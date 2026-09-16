@@ -37,12 +37,17 @@ sequence. Fault-clearing does not replay an interrupted introduction.
 | Green, two short pulses every four seconds | Confirmed slot B selected |
 | Blue, one/two short pulses every four seconds | Unconfirmed trial in A/B |
 | Green/blue, three short pulses | Corresponding state but slot unknown; not normal production operation |
-| Alternating blue/green, 500 ms each | Update state (reserved for recovery/updater integration) |
+| Alternating blue/green, 500 ms each | Update receiving: a new chunk was accepted within 1.5 seconds |
+| Short blue pulse every two seconds | Update waiting for new data; duplicates do not count as progress |
+| Amber blinking, 500 ms on/off | Erasing the candidate slot |
+| Blue, 800 ms on / 200 ms off | Verifying the received image |
+| Steady magenta | Committing the trial-boot marker |
+| Green, four short pulses every four seconds | Update committed; **not** yet booted/confirmed |
 | Red, one long second every four seconds | Recovery waiting (reserved for the actual recovery service) |
 | Red, numbered short pulses every four seconds | Fault category below |
 
 Short pulses are 150 ms on/150 ms off. Fault codes have a long dark gap between
-groups, even at eight pulses. Count *within one group*, not across cycles.
+groups, even at nine pulses. Count *within one group*, not across cycles.
 Green means verified/confirmed image metadata, **not** a complete health check,
 CAN-transmission permission or proof that the gateway is safe to use on a car.
 
@@ -56,6 +61,7 @@ CAN-transmission permission or proof that the gateway is safe to use on a car.
 | 6 | Watchdog reset | Reserved; hardware reset-cause integration pending |
 | 7 | Crypto/key/entropy failure | Public-key initialization now; RNG integration pending |
 | 8 | Internal invariant or invalid indication | Panic/status validation |
+| 9 | Update aborted | Update validation, timeout or storage failure; consult host detail |
 
 An assertion following a storage failure preserves code 3 rather than hiding it
 behind code 8. A CPU halt, reset loop, absent power or dead red LED can prevent
@@ -90,9 +96,20 @@ integrity check independent of LED presence. The LED renderer consumes its
 result, not the other way around. Update/recovery/runtime fault ownership and
 priority still require integration with the actual board main loop.
 
+`update.c` now exposes an observational phase snapshot through
+`vgw_update_led`. Receiving means accepted new image bytes, not arbitrary CAN
+activity, duplicate retransmissions or unauthenticated requests. After 1.5
+seconds without new bytes the indication changes to waiting. The snapshot
+cannot grant permission, feed the watchdog or change update state. Verification
+and commit are separate phases; four green pulses appear only after the commit
+callback and final safety check succeed. Normal A/B trial/confirmed patterns
+resume on the subsequent boot. A short phase need not be visible: do not delay
+verification or flash work just to display it. Flash-busy execution may leave
+the last color steady until the RAM-resident scheduler integration is complete.
+
 ## Tests and limits
 
-Final offline validation passed **1,046 tests, zero failures/skips**, including
+The earlier startup-LED validation passed **1,046 tests, zero failures/skips**, including
 282 LED cases and eight ARM boot cases, plus lint/build/static-analysis checks.
 See [artifact evidence](evidence/volt-gateway/boot-led-20260916.json).
 

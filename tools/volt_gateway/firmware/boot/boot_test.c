@@ -69,3 +69,27 @@ int vgw_test_copy(uint8_t *out, uint32_t size) {
   memcpy(out, flash, size); return 0;
 }
 unsigned vgw_test_mutations(void) { return mutations; }
+/* Own setjmp scope: never longjmp into an already-returned boot call. */
+int vgw_test_commit(unsigned slot, uint32_t size, uint32_t version) {
+  if (setjmp(escape)) return 0;
+  return vgw_boot_commit_candidate(slot,size,version);
+}
+/* Test-only updater storage adapter; addresses never come from a CAN request. */
+int vgw_test_storage(unsigned slot, unsigned operation, uint32_t offset, void *data, uint32_t size) {
+  if (setjmp(escape)) return 0;
+  if (slot>1 || offset>VGW_BOOT_SLOT_SIZE || size>VGW_BOOT_SLOT_SIZE-offset) return 0;
+  uint32_t base=slot ? VGW_BOOT_SLOT1 : VGW_BOOT_SLOT0;
+  if (operation==0) return read_mem(NULL,base+offset,data,size);
+  if (operation==1) return write_mem(NULL,base+offset,data,size);
+  if (operation==2 && !(offset%VGW_BOOT_SECTOR_SIZE) && size==VGW_BOOT_SECTOR_SIZE)
+    return erase_mem(NULL,base+offset,size);
+  return 0;
+}
+/* Simulated transport writes only. This helper is never part of board firmware. */
+int vgw_test_stage(unsigned slot, const uint8_t *data, uint32_t size) {
+  if (slot>1 || !data || !size || size>VGW_BOOT_SLOT_SIZE-64) return -1;
+  uint32_t off=slot ? VGW_BOOT_SLOT1 : VGW_BOOT_SLOT0;
+  memset(flash+off,255,VGW_BOOT_SLOT_SIZE);
+  memcpy(flash+off,data,size);
+  return 0;
+}

@@ -37,6 +37,14 @@ int vgw_boot_select(vgw_boot_choice *);
 /* No caller-supplied slot: only the selection from this boot can be confirmed.
  * Board integration must gate this call on actual application self-tests. */
 bool vgw_boot_confirm(void);
+/* Trusted updater adapter only, NOT an unauthenticated command API.
+ * Before calling: valid PROGRAM authorization, safe fresh power/offroad state,
+ * complete outer-image hash/readback checks and trusted inactive-slot selection.
+ * Candidate validation performs no writes. Commit validates again, requires an
+ * erased trailer, then writes/readbacks magic LAST. Never commits selected slot.
+ * Both-invalid recovery requires a completed boot_select returning no image. */
+bool vgw_boot_validate_candidate(unsigned slot, uint32_t image_size, uint32_t version);
+bool vgw_boot_commit_candidate(unsigned slot, uint32_t image_size, uint32_t version);
 bool vgw_boot_faulted(void);
 /* Observational local status; board may render it or ignore it entirely. */
 void vgw_boot_get_status(uint8_t out_state_slot_error[3]);

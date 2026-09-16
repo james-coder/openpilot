@@ -21,6 +21,9 @@ typedef struct {
   bool (*mark_trial)(void *, const uint8_t manifest[VGW_MANIFEST_SIZE]);
 } vgw_update_io;
 
+typedef enum { VGW_PROGRESS_IDLE, VGW_PROGRESS_ERASE, VGW_PROGRESS_RECEIVE, VGW_PROGRESS_VERIFY,
+  VGW_PROGRESS_COMMIT, VGW_PROGRESS_READY, VGW_PROGRESS_ABORT } vgw_update_phase;
+
 typedef enum { VGW_UPDATE_IDLE, VGW_UPDATE_RECEIVING, VGW_UPDATE_TRIAL, VGW_UPDATE_ABORTED } vgw_update_state;
 typedef struct {
   vgw_authority *authority;
@@ -29,6 +32,8 @@ typedef struct {
   uint16_t last_size;
   uint8_t last[256], expected[32];
   vgw_update_state state;
+  vgw_update_phase phase;
+  uint64_t checked_ms, progress_ms;
 } vgw_update;
 
 size_t vgw_update_size(void);
@@ -39,4 +44,8 @@ void vgw_update_abort(vgw_update *);
 bool vgw_update_begin(vgw_update *);
 bool vgw_update_chunk(vgw_update *, uint32_t offset, const uint8_t *, size_t);
 bool vgw_update_finish(vgw_update *);
+/* Observational snapshot only. No state changes, callbacks, CAN TX, crypto,
+ * flash work or watchdog feed. Stale progress displays WAIT, never success.
+ * IDLE returns false so the normal boot/application indication keeps ownership. */
+bool vgw_update_led(const vgw_update *, uint64_t now_ms, uint8_t out_state_slot_error[3]);
 #endif

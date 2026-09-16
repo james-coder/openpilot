@@ -21,10 +21,11 @@ RAM _Noreturn void vgw_white_physical_reset(void) {
   __asm__ volatile("cpsid i" ::: "memory");
   /* Startup already enabled GPIO clocks/configured active-low disable pins.
    * Reinstate clocks defensively, then disable the three differential PHYs.
-   * Holding controllers reset stops SWCAN as well, independent of CAN queues. */
-  write32(0,0x40023830U,read32(0,0x40023830U)|5U);
+   * Put SWCAN to sleep as well, independent of CAN queues. */
+  write32(0,0x40023830U,read32(0,0x40023830U)|7U);
   write32(0,0x40020818U,(1U<<1)|(1U<<13));
   write32(0,0x40020018U,1);
+  write32(0,0x40020418U,0xc0000000U);
   write32(0,0x40023820U,read32(0,0x40023820U)|(7U<<25));
   write32(0,0xe000ed0cU,0x05fa0004U);
   __asm__ volatile("dsb\nisb" ::: "memory");

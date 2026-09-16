@@ -1,0 +1,11 @@
+{
+  "scope": "F413 CAN driver, SWCAN sleep fix, bidirectional ISO-TP and reset-to-runtime composition",
+  "report": "/home/james/diagnostics/volt-gateway/builds/validation-can-runtime-20260916-01/report.json",
+  "report_sha256": "f1bc01e39f35614189521aacd5d9da9dbde19d6ff868cbafc8f340406054aced",
+  "tests": {"passed": 1425, "failed": 0, "skipped": 0},
+  "checks": "lint, ARM core/crypto/loader builds, native crypto/loader builds and selected static analysis passed",
+  "hardware_changed": false,
+  "production_ready": false,
+  "device_inspection": "USB IN-only; labeled White serial 370022000651363038363036, original firmware, reported silent mode, controls disallowed",
+  "remaining": "Authenticated production command/recovery dispatcher, protected provisioning, flash-busy-safe recovery service, complete signed boot/application image and physical bench validation"
+}

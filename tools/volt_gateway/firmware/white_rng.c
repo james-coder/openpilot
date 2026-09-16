@@ -25,6 +25,14 @@ static bool word(vgw_white_rng *r,uint32_t *out) {
   }
   return fail(r);
 }
+bool vgw_white_rng_health(vgw_white_rng *r) {
+  if (!r || !r->ready || r->failed) return false;
+  if (!vgw_white_clock_valid(r->clock)) return fail(r);
+  const vgw_white_mmio *io=&r->clock->startup->watchdog.io;
+  if (io->read32(io->ctx,RNG)!=4U || !(io->read32(io->ctx,0x40023834U)&64U) ||
+      (io->read32(io->ctx,RNG+4)&0x66U)) return fail(r);
+  return true;
+}
 bool vgw_white_rng_init(vgw_white_rng *r,const vgw_white_clock *clock) {
   if (!r) return false;
   *r=(vgw_white_rng){.clock=clock,.failed=true};

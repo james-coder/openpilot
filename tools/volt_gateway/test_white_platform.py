@@ -53,7 +53,7 @@ def test_physical_binding_instructions(binary, mode, masked):
 
   def write(machine,access,address,size,value,data):
     writes.append((address,value))
-    if address in (0x40020018,0x40020818):
+    if address in (0x40020018,0x40020418,0x40020818):
       odr = address-4
       old = struct.unpack('<I',machine.mem_read(odr,4))[0]
       machine.mem_write(odr,struct.pack('<I',(old | (value&0xffff)) & ~(value>>16)))

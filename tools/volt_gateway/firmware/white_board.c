@@ -62,16 +62,22 @@ bool vgw_white_quiesce(const vgw_white_mmio *io) {
    * enable glitch. LED pins default OFF; ESP/GPS power controls default low. */
   io->write32(io->ctx, GPIOC+BSRR, c_high | (c_low << 16));
   io->write32(io->ctx, GPIOA+BSRR, 1);
+  /* SWCAN M0/M1 PB15/PB14: 00 sleep, 11 normal. Never wakeup mode. */
+  io->write32(io->ctx, GPIOB+BSRR, 0xc0000000U);
+  outputs(io, GPIOB, 0xc000U);
   outputs(io, GPIOC, c_high | c_low);
   outputs(io, GPIOA, 1);
   change(io, RCC_APB1RSTR, 0, CAN_RESET);
   inputs(io, GPIOB, (1U<<3)|(1U<<4)|(1U<<5)|(1U<<6)|(1U<<12)|(1U<<13));
+  inputs(io, GPIOB, (1U<<8)|(1U<<9));
   inputs(io, GPIOA, (1U<<8)|(1U<<15));
   return (io->read32(io->ctx, GPIOC+ODR) & (c_high | c_low)) == c_high &&
          (io->read32(io->ctx, GPIOA+ODR) & 1) == 1 &&
+         (io->read32(io->ctx, GPIOB+ODR) & 0xc000U) == 0 &&
+         verify_pins(io, GPIOB, 0xc000U, true) &&
          (io->read32(io->ctx, RCC_APB1RSTR) & CAN_RESET) == CAN_RESET &&
          verify_pins(io, GPIOC, c_high | c_low, true) && verify_pins(io, GPIOA, 1, true) &&
-         verify_pins(io, GPIOB, (1U<<3)|(1U<<4)|(1U<<5)|(1U<<6)|(1U<<12)|(1U<<13), false) &&
+         verify_pins(io, GPIOB, (1U<<3)|(1U<<4)|(1U<<5)|(1U<<6)|(1U<<8)|(1U<<9)|(1U<<12)|(1U<<13), false) &&
          verify_pins(io, GPIOA, (1U<<8)|(1U<<15), false);
 }
 void vgw_white_led(const vgw_white_mmio *io, uint8_t rgb) {

@@ -1,5 +1,13 @@
 # Volt gateway implementation status and gates
 
+## CAN/runtime integration and SWCAN shutdown fix — 2026-09-16
+
+Added bounded physical bxCAN driver, SWCAN mux/PHY setup, bidirectional ISO-TP
+recovery transport and startup-to-runtime integration with CPU-emulated reset.
+Fixed missing explicit SWCAN sleep in quiescence/reset paths. This is code
+integration, **not completed authenticated firmware recovery**. Original Panda
+firmware remains unchanged. See [exact status](volt-gateway-can-runtime.md).
+
 ## Clock, entropy and reset mechanics — 2026-09-16
 
 Added the historical White 96-MHz clock profile, bounded hardware RNG access,

@@ -59,7 +59,7 @@ vgw_early_fault:
   cpsid i
   ldr r0, =0x40023830
   ldr r1, [r0]
-  orr r1, r1, #5
+  orr r1, r1, #7
   str r1, [r0]
   ldr r1, [r0]
   ldr r0, =0x40020818
@@ -67,6 +67,9 @@ vgw_early_fault:
   str r1, [r0]
   ldr r0, =0x40020018
   movs r1, #1
+  str r1, [r0]
+  ldr r0, =0x40020418
+  ldr r1, =0xc0000000
   str r1, [r0]
   ldr r0, =0x40023820
   ldr r1, [r0]

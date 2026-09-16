@@ -22,7 +22,8 @@ def build(output: Path):
             'limitations':['platform crypto/RNG and board integration absent', 'not full-image RAM/stack measurement',
                            'no CAN-driver or flash-driver validation']}
   for name in ('authority', 'observe', 'update', 'metrics', 'status_led', 'white_board', 'white_flash',
-               'white_watchdog', 'white_startup', 'white_clock', 'white_rng', 'white_platform', 'recovery_transport'):
+               'white_watchdog', 'white_startup', 'white_clock', 'white_rng', 'white_platform', 'white_can',
+               'white_runtime', 'recovery_transport', 'recovery_link'):
     destination = output / (name + '.o')
     command = [str(compiler), *flags, '-c', str(source / (name + '.c')), '-o', str(destination)]
     subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)

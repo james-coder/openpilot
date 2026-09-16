@@ -43,7 +43,7 @@ class Registers:
     self.writes.append((addr, value))
     if addr == self.ignore:
       return
-    if addr in (0x40020018, 0x40020818):
+    if addr in (0x40020018, 0x40020418, 0x40020818):
       odr = addr - 4
       self.values[odr] = ((self.values.get(odr, self.initial) | (value & 0xffff)) & ~(value >> 16))
     else:
@@ -54,13 +54,15 @@ class Registers:
 def test_safe_order_and_no_can_flash_usb_access(lib, initial):
   regs = Registers(initial)
   assert lib.vgw_white_quiesce(C.byref(regs.io))
-  allowed = {0x40023830, 0x40023820, 0x40020018, 0x40020818}
-  allowed |= {base + offset for base in (0x40020000, 0x40020800) for offset in (0, 4, 8, 12)}
+  allowed = {0x40023830, 0x40023820, 0x40020018, 0x40020418, 0x40020818}
+  allowed |= {base + offset for base in (0x40020000, 0x40020400, 0x40020800) for offset in (0, 4, 8, 12)}
   allowed |= {0x40020400, 0x4002040c}
   assert {addr for addr, _ in regs.writes} <= allowed
   addresses = [addr for addr, _ in regs.writes]
   assert addresses.index(0x40020818) < addresses.index(0x40020800) < addresses.index(0x40023820)
   assert addresses.index(0x40020018) < addresses.index(0x40020000)
+  assert addresses.index(0x40020418) < addresses.index(0x40020400)
+  assert regs.values[0x40020414] & 0xc000 == 0
   # USB PA11/12 and debug PA13/14 fields stay untouched.
   for pin in (11, 12, 13, 14):
     mask = 3 << (pin*2)
@@ -79,7 +81,7 @@ def test_rejected_mmio_write_fails(lib, ignore):
   assert not lib.vgw_white_quiesce(C.byref(regs.io))
 
 
-@pytest.mark.parametrize('port', [0x40020000, 0x40020800])
+@pytest.mark.parametrize('port', [0x40020000, 0x40020400, 0x40020800])
 @pytest.mark.parametrize('offset', [0, 4, 8, 12])
 def test_pin_configuration_readback(lib, port, offset):
   regs = Registers(initial=0xffffffff, ignore=port+offset)

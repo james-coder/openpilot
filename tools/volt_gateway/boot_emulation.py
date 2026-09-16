@@ -55,7 +55,7 @@ def run(elf: Path, flash: bytes, public_der: bytes, target: bytes, *, confirm=Fa
   cpu.hook_add(UC_HOOK_CODE, done, begin=end, end=end)
   if physical_handoff:
     def register_write(machine,access,address,size,value,data):
-      if address in (0x40020018,0x40020818):
+      if address in (0x40020018,0x40020418,0x40020818):
         old = struct.unpack('<I',machine.mem_read(address-4,4))[0]
         machine.mem_write(address-4,struct.pack('<I',(old | (value&0xffff)) & ~(value>>16)))
       if address==0xe000ed0c:

@@ -1,5 +1,12 @@
 # Volt gateway off-device work
 
+`white_can.c`, `recovery_link.c` and `white_runtime.c` now connect the board
+startup, clock/RNG, polling CAN driver, observer, ISO-TP request/reply and
+watchdog. `test_runtime_emulation.py` executes reset into this composition
+with modeled peripherals. The authenticated dispatcher, protected provisioning
+and flash-busy recovery loop are still missing; this is not deployable firmware.
+See [integration status](../../docs/volt-gateway-can-runtime.md).
+
 `chip_inspect.py` performs fixed read-only ROM DFU chip/option-byte queries on
 the exact labeled Panda; it does not enter DFU or program anything.
 `firmware/white_board.c` adds off-device-tested early quiescence/identity
@@ -53,7 +60,8 @@ invoked USB inspection helper reads Panda identity/version only.
 - `release.py`: public-artifact-only packaging and explicit staged-secret checks.
 - `update_engine.py`: inactive-slot transaction reference, NOT a hardware updater.
 - `firmware/authority.*`, `firmware/observe.*`: portable bounded C cores, not a
-  complete bootloader/board firmware; no CAN/flash write driver is included.
+  complete bootloader/board firmware. Separate candidate CAN/flash drivers are
+  present, but a complete authenticated recovery image is not.
 - `native_harness.py`, `test_system.py`: native-C/integrated transport fault tests.
 - `build_core.py`: Cortex-M4 object/stack size reports, not a bootable image.
 - `m4_emulation.py`: Cortex-M4 instruction tests using explicit host crypto hooks;

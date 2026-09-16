@@ -17,6 +17,7 @@ from openpilot.common.gpio import gpio_init, gpio_set
 from openpilot.common.utils import retry
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.system.hardware.tici.pins import GPIO
+from openpilot.system.hardware.tici.modem_input import read_at_response
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.qcomgpsd.modemdiag import ModemDiag, DIAG_LOG_F, setup_logs, send_recv
 from openpilot.system.qcomgpsd.structs import (dict_unpacker, position_report, relist,
@@ -92,19 +93,12 @@ AT_LOCK = "/dev/shm/modem.lock"  # shared with modem.py and LPA
 def at_cmd(cmd: str) -> str:
   with os.fdopen(os.open(AT_LOCK, os.O_CREAT | os.O_RDWR, 0o666), "r+") as lock:
     fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-    with Serial(AT_PORT, baudrate=115200, timeout=5) as ser:
+    with Serial(AT_PORT, baudrate=115200, timeout=5, write_timeout=5) as ser:
       ser.reset_input_buffer()
       ser.write(f"{cmd}\r".encode())
-      lines = []
-      while True:
-        line = ser.readline()
-        if not line:
-          raise RuntimeError(f"AT command timeout: {cmd}")
-        line = line.decode('utf-8', errors='replace').strip()
-        if line in ("OK", "ERROR") or line.startswith("+CME ERROR"):
-          break
-        if line and line != cmd:
-          lines.append(line)
+      # Preserve legacy GPS startup handling of unsupported/optional commands;
+      # resource bounds must not make previously tolerated errors fatal.
+      lines = [line for line in read_at_response(ser, reject_errors=False) if line != cmd]
     return '\n'.join(lines)
 
 def gps_enabled() -> bool:

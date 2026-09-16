@@ -12,6 +12,8 @@ import time
 from ipaddress import IPv4Address, AddressValueError
 
 from enum import Enum
+from openpilot.system.hardware.tici.modem_input import read_at_response
+from openpilot.system.hardware.tici.modem_recovery import PPPProgress, RetryPolicy
 
 logging.basicConfig(
   level=logging.INFO,
@@ -43,7 +45,7 @@ DIAL_CID = 1
 WEBBING_ICCID_PREFIX = "8985235"
 
 PPPD_CMD = [
-  "sudo", "pppd", PPP_PORT, "460800", "noauth", "nodetach", "noipdefault", "usepeerdns",
+  "sudo", "-n", "pppd", PPP_PORT, "460800", "noauth", "nodetach", "noipdefault", "usepeerdns",
   "nodefaultroute", "connect",
   "/usr/sbin/chat -v ABORT 'NO CARRIER' ABORT 'NO DIALTONE' ABORT 'BUSY' " +
   f"ABORT 'NO ANSWER' ABORT 'ERROR' TIMEOUT 5 '' AT OK ATD*99***{DIAL_CID}# CONNECT ''",
@@ -60,6 +62,8 @@ INITIAL_STATE = {
   "network_type": "unknown", "operator": "", "band": "", "channel": 0,
   "registration": "unknown", "temperatures": [], "extra": "",
   "tx_bytes": 0, "rx_bytes": 0,
+  "retry_count": 0, "retry_reason": "none", "ppp_exit_status": None,
+  "recovery_status": "idle",
 }
 
 
@@ -76,21 +80,36 @@ STATE_WAIT = 1.0  # seconds to wait after each state handler returns
 
 class PPPSession:
   """Owns pppd lifecycle, fail tracking, and PPP routing."""
-  MAX_FAILS = 3
 
   def __init__(self):
     self._proc: subprocess.Popen | None = None
-    self._fails = 0
     self._peer = ""
+    self.dns_ready = False
+    self.started_at = 0.0
+    self.progress = PPPProgress()
 
   def start(self):
-    self._proc = subprocess.Popen(PPPD_CMD, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if self._proc is not None and self._proc.poll() is None:
+      raise RuntimeError("PPP already running")
+    if self._proc is not None and self._proc.stdout is not None:
+      self._proc.stdout.close()
+    self.progress = PPPProgress()
+    self._proc = subprocess.Popen([*PPPD_CMD, 'logfd', '1'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    os.set_blocking(self._proc.stdout.fileno(), False)
+    self.started_at = time.monotonic()
     self._peer = ""
+    self.dns_ready = False
     logging.info(f"PPP dialing CID {DIAL_CID}")
 
   def kill(self):
-    subprocess.run(["sudo", "killall", "-9", "pppd"], capture_output=True)
+    subprocess.run(["sudo", "-n", "killall", "-9", "pppd"], capture_output=True, timeout=5)
+    if self._proc is not None:
+      self._proc.wait(timeout=5)
+      if self._proc.stdout is not None:
+        self._proc.stdout.close()
+      self._proc = None
     self._peer = ""
+    self.dns_ready = False
 
   @staticmethod
   def reset_data_port():
@@ -106,43 +125,46 @@ class PPPSession:
   def has_exited(self) -> bool:
     return self._proc is not None and self._proc.poll() is not None
 
-  def reset_fail_counter(self):
-    self._fails = 0
-
-  def record_fail(self) -> bool:
-    """Bump fail counter; return True if at the give-up limit."""
-    self._fails += 1
-    return self._fails >= self.MAX_FAILS
-
-  @property
-  def fails(self) -> int:
-    return self._fails
+  def drain_progress(self):
+    if self._proc is None or self._proc.stdout is None:
+      return
+    # Bound CPU/memory per modem iteration; never store or forward raw logs.
+    for _ in range(16):
+      try:
+        data = os.read(self._proc.stdout.fileno(), 4096)
+      except BlockingIOError:
+        break
+      if not data:
+        break
+      self.progress.feed(data)
 
   def maybe_install_routes(self, ip: str, peer: str) -> bool:
     """Install routes if peer changed; kill the session on failure so the state machine reconnects."""
-    if not peer or peer == self._peer:
+    if not peer:
       return False
+    if peer == self._peer:
+      return True
     try:
       IPv4Address(ip)
       IPv4Address(peer)
     except AddressValueError:
-      logging.warning(f"refusing route install with non-IPv4 ip={ip!r} peer={peer!r}")
+      logging.warning("refusing route install with invalid IPv4 address")
       self.kill()
       return False
     self.cleanup_routes()
     cmds = [
-      ["sudo", "ip", "route", "add", "default", "via", peer, "dev", "ppp0", "metric", "1000"],
-      ["sudo", "ip", "route", "add", "default", "via", peer, "dev", "ppp0", "table", "1000"],
-      ["sudo", "ip", "rule", "add", "from", ip, "table", "1000"],
+      ["sudo", "-n", "ip", "route", "add", "default", "via", peer, "dev", "ppp0", "metric", "1000"],
+      ["sudo", "-n", "ip", "route", "add", "default", "via", peer, "dev", "ppp0", "table", "1000"],
+      ["sudo", "-n", "ip", "rule", "add", "from", ip, "table", "1000"],
     ]
     for cmd in cmds:
-      r = subprocess.run(cmd, capture_output=True, text=True)
+      r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
       if r.returncode != 0:
-        logging.warning(f"route install failed ({' '.join(cmd[1:])}): {r.stderr.strip()}")
+        logging.warning("route install failed: exit=%d", r.returncode)
         self.cleanup_routes()
         self.kill()
         return False
-    logging.info(f"route set up for {ip} via {peer}")
+    logging.info("PPP routes installed")
     self._peer = peer
     return True
 
@@ -150,24 +172,34 @@ class PPPSession:
     """Register DNS servers with systemd-resolved; kill the session on failure to force a retry."""
     if not dns_servers:
       return False
-    for cmd in (["sudo", "resolvectl", "dns", "ppp0", *dns_servers],
-                ["sudo", "resolvectl", "default-route", "ppp0", "yes"]):
-      r = subprocess.run(cmd, capture_output=True, text=True)
+    try:
+      dns_servers = [str(IPv4Address(d)) for d in dns_servers]
+    except AddressValueError:
+      return False
+    if len(dns_servers) > 2:
+      return False
+    for cmd in (["sudo", "-n", "resolvectl", "dns", "ppp0", *dns_servers],
+                ["sudo", "-n", "resolvectl", "default-route", "ppp0", "yes"]):
+      r = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
       if r.returncode != 0:
-        logging.warning(f"resolvectl failed ({' '.join(cmd[1:])}): {r.stderr.strip()}")
+        logging.warning("PPP DNS configuration failed: exit=%d", r.returncode)
         self.kill()
         return False
-    logging.info(f"resolvectl: ppp0 DNS = {dns_servers}")
+    self.dns_ready = True
+    logging.info("PPP DNS configured")
     return True
 
   @staticmethod
   def cleanup_routes():
-    subprocess.run(["sudo", "ip", "route", "del", "default", "dev", "ppp0"], capture_output=True)
-    subprocess.run(["sudo", "ip", "route", "flush", "table", "1000"], capture_output=True)
+    subprocess.run(["sudo", "-n", "ip", "route", "del", "default", "dev", "ppp0"], capture_output=True, timeout=5)
+    subprocess.run(["sudo", "-n", "ip", "route", "flush", "table", "1000"], capture_output=True, timeout=5)
     # rules don't have a flush; delete until none remain
-    while subprocess.run(["sudo", "ip", "rule", "del", "table", "1000"], capture_output=True).returncode == 0:
-      pass
-    subprocess.run(["sudo", "resolvectl", "revert", "ppp0"], capture_output=True)
+    for _ in range(16):
+      if subprocess.run(["sudo", "-n", "ip", "rule", "del", "table", "1000"], capture_output=True, timeout=1).returncode != 0:
+        break
+    else:
+      raise RuntimeError("PPP policy-rule cleanup limit exceeded")
+    subprocess.run(["sudo", "-n", "resolvectl", "revert", "ppp0"], capture_output=True, timeout=5)
 
 
 class Modem:
@@ -176,6 +208,10 @@ class Modem:
     self._sim_change = False
     self._apn = ""  # blank = network-provided via PCO
     self._roaming_allowed = True
+    self._retry = RetryPolicy()
+    self._next_recovery_check = 0.0
+    self._next_initialization = 0.0
+    self._owns_ports = False
     self.running = True
     self.S = INITIAL_STATE.copy()
 
@@ -220,23 +256,10 @@ class Modem:
       os.close(fd)
       return []
     try:
-      with serial.Serial(AT_PORT, 9600, timeout=5) as ser:
+      with serial.Serial(AT_PORT, 9600, timeout=5, write_timeout=5) as ser:
         ser.reset_input_buffer()
         ser.write((cmd + "\r").encode())
-        lines = []
-        while True:
-          raw = ser.readline()
-          if not raw:
-            raise TimeoutError("AT timeout")
-          line = raw.decode(errors="ignore").strip()
-          if not line:
-            continue
-          if line == "OK":
-            break
-          if line == "ERROR" or line.startswith("+CME ERROR"):
-            raise RuntimeError(line)
-          lines.append(line)
-        return lines
+        return read_at_response(ser)
     except (RuntimeError, TimeoutError, OSError) as e:
       logging.info(f"AT {cmd} failed: {e}")
       return []
@@ -246,7 +269,7 @@ class Modem:
 
   def _atv(self, cmd, pfx):
     for line in self._at(cmd):
-      if pfx in line and ":" in line:
+      if line.startswith(pfx) and ":" in line:
         return line.split(":", 1)[1].strip()
     return None
 
@@ -277,8 +300,22 @@ class Modem:
       self._at(c)
 
   def _do_initializing(self):
+    now = time.monotonic()
+    if now < self._next_initialization or not self._lte_initialized():
+      return State.INITIALIZING
     if not os.path.exists(AT_PORT):
       return State.INITIALIZING
+    self._next_initialization = now + 15
+    if not self._owns_ports:
+      if self._has_modem_manager():
+        for action in ('mask', 'stop'):
+          command = ['sudo', '-n', 'systemctl', action]
+          if action == 'mask':
+            command.append('--runtime')
+          result = subprocess.run([*command, 'ModemManager'], capture_output=True, timeout=10)
+          if result.returncode:
+            return State.INITIALIZING
+      self._owns_ports = True
     logging.info("port found, initializing")
     self._ppp.kill()
     self._ppp.cleanup_routes()
@@ -289,7 +326,7 @@ class Modem:
 
     identity = self._read_identity()
     if not identity["iccid"] or not identity["imei"]:
-      logging.warning(f"identity read incomplete: {identity}, retrying")
+      logging.warning("identity read incomplete, retrying")
       return State.INITIALIZING
 
     self._configure_modem(identity["modem_version"])
@@ -323,7 +360,7 @@ class Modem:
 
     modem_version = first_line("AT+GMR")
 
-    logging.info(f"imei={imei} iccid={iccid} mcc_mnc={mcc_mnc} ver={modem_version}")
+    logging.info("modem identity read completed")
     return {"imei": imei, "iccid": iccid, "mcc_mnc": mcc_mnc, "modem_version": modem_version}
 
   def _do_searching(self):
@@ -359,25 +396,80 @@ class Modem:
     return State.SEARCHING
 
   def _do_connecting(self):
-    logging.info("starting pppd")
-    self._ppp.reset_fail_counter()
-    self._sim_change = False
-    self._ppp.start()
-    return State.CONNECTED
+    if self._sim_change or not os.path.exists(AT_PORT) or self._params_changed():
+      return State.DISCONNECTING
+    now = time.monotonic()
+    if self._ppp._proc is None:
+      if not self._retry.ready(now):
+        return State.CONNECTING
+      if self._try_recovery(now):
+        return State.DISCONNECTING
+      self._ppp.start()
+    self._ppp.drain_progress()
+    if self._ppp.has_exited():
+      return self._handle_pppd_exit()
+    self._publish_state(**self._poll_iface())
+    if self.S['connected']:
+      self._record_connected(now)
+      return State.CONNECTED
+    if now - self._ppp.started_at >= 120:
+      self._retry.failed(now, "negotiation_timeout")
+      self._publish_retry()
+      return State.DISCONNECTING
+    return State.CONNECTING
 
   def _handle_pppd_exit(self):
     if self._sim_change or not os.path.exists(AT_PORT):
       return State.DISCONNECTING
-    give_up = self._ppp.record_fail()
-    if give_up:
-      logging.warning(f"PPP fail {self._ppp.fails}/{self._ppp.MAX_FAILS}, reconnecting")
-      return State.DISCONNECTING
-    logging.warning(f"PPP fail {self._ppp.fails}/{self._ppp.MAX_FAILS}, retrying")
-    self._ppp.reset_data_port()
-    if not os.path.exists(AT_PORT):
-      return State.DISCONNECTING
-    self._ppp.start()
-    return State.CONNECTED
+    self._ppp.drain_progress()
+    code = self._ppp._proc.poll()
+    registered = all(self._parse_reg(self._atv(cmd, prefix) or '') in ('home', 'roaming')
+                     for cmd, prefix in [('AT+CREG?', '+CREG:'), ('AT+CGREG?', '+CGREG:')])
+    early = (code == 16 and self._ppp.progress.authenticated and not self._ppp.progress.address_assigned
+             and time.monotonic() - self._ppp.started_at < 60 and registered)
+    self._retry.failed(time.monotonic(), "registered_early_hangup" if early else "ppp_exit")
+    self._publish_retry(code)
+    return State.DISCONNECTING
+
+  def _publish_retry(self, code=None):
+    logging.warning("PPP failed: reason=%s count=%d exit=%s", self._retry.reason, self._retry.failures, code)
+    self._publish_state(connected=False, ip_address='', retry_count=self._retry.failures,
+                        retry_reason=self._retry.reason, ppp_exit_status=code)
+
+  @staticmethod
+  def _lte_initialized():
+    # Wait inside the modem worker, never gate the driving manager on LTE.
+    result = subprocess.run(['systemctl', 'show', 'lte.service', '--property=ActiveState,SubState,Result'],
+                            capture_output=True, text=True, timeout=3)
+    fields = dict(line.split('=', 1) for line in result.stdout.splitlines() if '=' in line)
+    # LTE is Type=simple + RemainAfterExit: active/running occurs BEFORE its
+    # reset/power-on script finishes. Only active/exited is the handoff point.
+    return result.returncode == 0 and all(fields.get(k) == v for k, v in
+                                         [('ActiveState', 'active'), ('SubState', 'exited'), ('Result', 'success')])
+
+  def _try_recovery(self, now):
+    if not self._retry.recovery_due(now) or now < self._next_recovery_check:
+      return False
+    self._next_recovery_check = now + 60
+    registered = all(self._parse_reg(self._atv(cmd, prefix) or '') in ('home', 'roaming')
+                     for cmd, prefix in [('AT+CREG?', '+CREG:'), ('AT+CGREG?', '+CGREG:')])
+    if not registered or self._sim_change or not self._roaming_allowed and self.S['registration'] == 'roaming':
+      self._retry.clear_hangups()
+      return False
+    helper = '/usr/local/lib/comma-modem/recover.py'
+    if not os.path.isfile(helper):
+      self._publish_state(recovery_status='unavailable')
+      return False
+    try:
+      result = subprocess.run(['sudo', '-n', '/usr/bin/python3', '-I', helper],
+                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, timeout=110)
+      status = {0: 'reset_requested', 2: 'deferred', 3: 'budget_exhausted'}.get(result.returncode, 'failed')
+    except (OSError, subprocess.TimeoutExpired):
+      status = 'failed'
+    self._publish_state(recovery_status=status)
+    if status in ('reset_requested', 'budget_exhausted', 'failed'):
+      self._retry.clear_hangups()
+    return status == 'reset_requested'
 
   def _params_changed(self) -> bool:
     new_apn = self._read_param("GsmApn")
@@ -395,10 +487,11 @@ class Modem:
       return
     iccid = (self._atv("AT+QCCID", "+QCCID:") or "").rstrip("F")
     if iccid and iccid != self.S["iccid"]:
-      logging.warning(f"iccid changed: {self.S['iccid']} -> {iccid}")
+      logging.warning("SIM identity changed")
       self._sim_change = True
 
   def _do_connected(self):
+    self._ppp.drain_progress()
     if self._ppp.has_exited():
       return self._handle_pppd_exit()
 
@@ -406,11 +499,23 @@ class Modem:
       return State.DISCONNECTING
 
     self._poll()
+    if not self.S['connected']:
+      self._retry.failed(time.monotonic(), 'link_configuration_lost')
+      self._publish_retry()
+      return State.DISCONNECTING
+    self._record_connected(time.monotonic())
     return State.CONNECTED
+
+  def _record_connected(self, now):
+    self._retry.stable(now)
+    values = dict(retry_count=self._retry.failures, retry_reason=self._retry.reason)
+    if self.S['recovery_status'] == 'reset_requested':
+      values['recovery_status'] = 'reconnected'
+    self._publish_state(**values)
 
   def _do_disconnecting(self):
     logging.warning("reconnecting")
-    self._publish_state(**INITIAL_STATE)
+    self._publish_state(connected=False, ip_address='')
     self._ppp.kill()
     self._ppp.cleanup_routes()
     self._ppp.reset_data_port()
@@ -483,14 +588,12 @@ class Modem:
             peer = parts[parts.index("peer") + 1].split("/")[0]
           break
       if ip:
-        if self._ppp.maybe_install_routes(ip, peer):
-          self._ppp.maybe_install_dns(self._read_cellular_dns())
-        return {"ip_address": ip, "connected": True}
-      if self.S["connected"]:
-        return {"connected": False, "ip_address": ""}
+        routes = self._ppp.maybe_install_routes(ip, peer)
+        dns = routes and (self._ppp.dns_ready or self._ppp.maybe_install_dns(self._read_cellular_dns()))
+        return {"ip_address": ip if dns else '', "connected": bool(routes and dns)}
     except Exception:
       pass
-    return {}
+    return {"connected": False, "ip_address": ""}
 
   def _read_cellular_dns(self) -> list[str]:
     v = self._atv(f"AT+CGCONTRDP={DIAL_CID}", "+CGCONTRDP:")
@@ -505,7 +608,7 @@ class Modem:
       except (AddressValueError, ValueError):
         pass
     if not dns_servers:
-      logging.warning(f"no cellular DNS servers reported by modem: {v!r}")
+      logging.warning("no valid cellular DNS servers reported")
     return dns_servers
 
   def _poll_byte_counters(self) -> dict:
@@ -530,10 +633,6 @@ class Modem:
   def run(self):
     logging.info("starting")
     self._publish_state(state=State.INITIALIZING.value)
-    if self._has_modem_manager():
-      subprocess.run(["sudo", "systemctl", "mask", "--runtime", "ModemManager"], capture_output=True)
-      subprocess.run(["sudo", "systemctl", "stop", "ModemManager"], capture_output=True)
-    self._ppp.kill()
 
     state = State.INITIALIZING
 
@@ -567,8 +666,8 @@ class Modem:
     except FileNotFoundError:
       pass
     if self._has_modem_manager():
-      subprocess.run(["sudo", "systemctl", "unmask", "--runtime", "ModemManager"], capture_output=True)
-      subprocess.run(["sudo", "systemctl", "start", "ModemManager"], capture_output=True)
+      subprocess.run(["sudo", "-n", "systemctl", "unmask", "--runtime", "ModemManager"], capture_output=True, timeout=10)
+      subprocess.run(["sudo", "-n", "systemctl", "start", "ModemManager"], capture_output=True, timeout=10)
 
 
 def main():

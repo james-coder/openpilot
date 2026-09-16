@@ -5,6 +5,7 @@ import base64
 import fcntl
 import hashlib
 import os
+import re
 import requests
 import serial
 import subprocess
@@ -20,6 +21,7 @@ from pathlib import Path
 
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.system.hardware.base import LPABase, LPAError, LPAProfileNotFoundError, Profile
+from openpilot.system.hardware.tici.modem_input import logical_channel, read_at_response
 
 GSMA_CI_BUNDLE = str(Path(__file__).parent / "gsma_ci_bundle.pem")
 
@@ -159,21 +161,7 @@ class AtClient:
     self._serial.write((cmd + "\r").encode("ascii"))
 
   def _expect(self) -> list[str]:
-    lines: list[str] = []
-    while True:
-      raw = self._serial.readline()
-      if not raw:
-        raise TimeoutError("AT command timed out")
-      line = raw.decode(errors="ignore").strip()
-      if not line:
-        continue
-      if DEBUG:
-        print(f"SER << {line}", file=sys.stderr)
-      if line == "OK":
-        return lines
-      if line == "ERROR" or line.startswith("+CME ERROR"):
-        raise RuntimeError(f"AT command failed: {line}")
-      lines.append(line)
+    return read_at_response(self._serial, self._timeout)
 
   def _ensure_serial(self, reconnect: bool = False) -> None:
     if reconnect:
@@ -185,7 +173,7 @@ class AtClient:
         pass
       self._serial = None
     if self._serial is None:
-      self._serial = serial.Serial(self._device, baudrate=self._baud, timeout=self._timeout)
+      self._serial = serial.Serial(self._device, baudrate=self._baud, timeout=self._timeout, write_timeout=self._timeout)
 
   def query(self, cmd: str) -> list[str]:
     self._ensure_serial()
@@ -212,7 +200,7 @@ class AtClient:
         self._ensure_serial(reconnect=True)
     for line in self.query(f'AT+CCHO="{ISDR_AID}"'):
       if line.startswith("+CCHO:") and (ch := line.split(":", 1)[1].strip()):
-        self.channel = ch
+        self.channel = logical_channel(ch)
         return
     raise RuntimeError("Failed to open ISD-R application")
 
@@ -260,40 +248,56 @@ class AtClient:
 # --- TLV utilities ---
 
 def iter_tlv(data: bytes, with_positions: bool = False) -> Generator:
+  # Bound integer construction and work; never silently accept a truncated SIM
+  # response. This limit also permits profile-package parsing, not just AT reads.
+  if len(data) > 4 * 1024 * 1024:
+    raise ValueError('TLV response too large')
   idx, length = 0, len(data)
+  count = 0
   while idx < length:
+    count += 1
+    if count > 65536:
+      raise ValueError('Too many TLV elements')
     start_pos = idx
     tag = data[idx]
     idx += 1
     if tag & 0x1F == 0x1F:  # Multi-byte tag
       tag_value = tag
       while idx < length:
+        if idx - start_pos >= 4:
+          raise ValueError('TLV tag too long')
         next_byte = data[idx]
         idx += 1
         tag_value = (tag_value << 8) | next_byte
         if not (next_byte & 0x80):
           break
+      else:
+        raise ValueError('Truncated TLV tag')
     else:
       tag_value = tag
     if idx >= length:
-      break
+      raise ValueError('Missing TLV length')
     size = data[idx]
     idx += 1
     if size & 0x80:  # Multi-byte length
       num_bytes = size & 0x7F
-      if idx + num_bytes > length:
-        break
+      if not 1 <= num_bytes <= 4 or idx + num_bytes > length:
+        raise ValueError('Invalid TLV length encoding')
       size = int.from_bytes(data[idx : idx + num_bytes], "big")
       idx += num_bytes
     if idx + size > length:
-      break
+      raise ValueError('Truncated TLV value')
     value = data[idx : idx + size]
     idx += size
     yield (tag_value, value, start_pos, idx) if with_positions else (tag_value, value)
 
 
 def find_tag(data: bytes, target: int) -> bytes | None:
-  return next((v for t, v in iter_tlv(data) if t == target), None)
+  result = None
+  for tag, value in iter_tlv(data):
+    if tag == target and result is None:
+      result = value
+  return result
 
 
 def require_tag(data: bytes, target: int, label: str = "") -> bytes:
@@ -411,11 +415,24 @@ def set_profile_nickname(client: AtClient, iccid: str, nickname: str) -> None:
 
 # --- ES9P HTTP ---
 
+def es9p_url(address: str, endpoint: str) -> str:
+  # Authority, not a free-form URL. DNS rebinding/private resolution still
+  # requires network-layer isolation; syntax validation is not an SSRF cure.
+  label = r'[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?'
+  if len(address) > 253 or not re.fullmatch(rf'(?:{label}\.)+[A-Za-z]{{2,63}}', address):
+    raise ValueError('Invalid SM-DP+ hostname')
+  if endpoint not in {'handleNotification', 'cancelSession', 'initiateAuthentication', 'authenticateClient', 'getBoundProfilePackage'}:
+    raise ValueError('Invalid ES9P operation')
+  return f'https://{address}/gsma/rsp2/es9plus/{endpoint}'
+
+
 def es9p_request(smdp_address: str, endpoint: str, payload: dict, error_prefix: str = "Request", session: requests.Session | None = None) -> dict:
-  url = f"https://{smdp_address}/gsma/rsp2/es9plus/{endpoint}"
+  url = es9p_url(smdp_address, endpoint)
   headers = {"User-Agent": "gsma-rsp-lpad", "X-Admin-Protocol": "gsma/rsp/v2.3.0", "Content-Type": "application/json"}
   http = session or requests
-  resp = http.post(url, json=payload, headers=headers, timeout=HTTP_TIMEOUT, verify=GSMA_CI_BUNDLE)
+  resp = http.post(url, json=payload, headers=headers, timeout=HTTP_TIMEOUT, verify=GSMA_CI_BUNDLE, allow_redirects=False)
+  if 300 <= resp.status_code < 400:
+    raise RuntimeError('ES9P redirect refused')
   resp.raise_for_status()
   if not resp.content:
     return {}
@@ -783,7 +800,7 @@ class TiciLPA(LPABase):
       for line in lines:
         if line.startswith("+CCHO:") and (ch := line.split(":", 1)[1].strip()):
           try:
-            self._client.query(f"AT+CCHC={ch}")
+            self._client.query(f"AT+CCHC={logical_channel(ch)}")
           except (RuntimeError, TimeoutError):
             pass
           self._client.channel = None

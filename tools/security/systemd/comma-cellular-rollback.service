@@ -1,0 +1,12 @@
+[Unit]
+Description=Restore cellular firewall trial baseline unless explicitly confirmed
+After=local-fs.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=oneshot
+UMask=0077
+TimeoutStartSec=150
+Restart=on-failure
+RestartSec=30s
+ExecStart=/usr/bin/python3 -I /usr/local/lib/comma-cellular/tools/security/firewall_boot.py restore

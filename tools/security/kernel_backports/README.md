@@ -46,5 +46,8 @@ production guarantees. Root hubs and the external controller are excluded.
 Cross-compiled USB core, xHCI object and tizi DT; native C policy logic and
 Python sysfs fixtures passed. This does not test USB enumeration, probe,
 reset, suspend/resume or hostile traffic on a running candidate kernel.
-The full image, modern disposable gadget/VM tests and hardware compatibility
-remain deployment gates. No candidate was flashed.
+The full Image.gz subsequently compiled and linked successfully; exact
+configuration is saved in candidate.config and build hashes in
+docs/MODEM_LTE_AND_KERNEL_FOLLOWUP.md. Modern disposable gadget/VM tests,
+boot and hardware compatibility remain deployment gates. No candidate was
+flashed. Compile success is not evidence that hostile USB is contained.

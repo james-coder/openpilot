@@ -1,0 +1,10 @@
+[Unit]
+Description=Independent reboot-surviving cellular firewall trial rollback
+
+[Timer]
+OnActiveSec=5min
+AccuracySec=1s
+Unit=comma-cellular-rollback.service
+
+[Install]
+WantedBy=timers.target

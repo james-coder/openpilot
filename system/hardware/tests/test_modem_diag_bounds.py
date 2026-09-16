@@ -12,7 +12,8 @@ def test_hdlc_roundtrip():
   assert diag.hdlc_decapsulate(diag.hdlc_encapsulate(payload)) == payload
 
 
-@pytest.mark.parametrize('payload', [b'', b'\x00\x00\x7e', b'abc\x7e', b'x' * 131073])
+@pytest.mark.parametrize('payload', [b'', b'\x00\x00\x7e', b'abc\x7e', b'x' * 131073],
+                         ids=['empty', 'short', 'bad_crc', 'oversized'])
 def test_invalid_frame(payload):
   with pytest.raises(ValueError):
     ModemDiag.__new__(ModemDiag).hdlc_decapsulate(payload)
@@ -53,3 +54,22 @@ def test_receive_deadline():
   diag.pend = b''
   with pytest.raises(TimeoutError):
     diag.recv(deadline=0)
+
+
+@pytest.mark.parametrize('failures', [1, 10])
+def test_existing_gps_setup_retry_handles_bounded_parser_rejection(monkeypatch, failures):
+  from openpilot.system.qcomgpsd import qcomgpsd
+  calls = []
+  def setup(*args):
+    calls.append(1)
+    if len(calls) <= failures:
+      raise ValueError('Unexpected DIAG response')
+  monkeypatch.setattr(qcomgpsd, 'setup_logs', setup)
+  monkeypatch.setattr('openpilot.common.utils.time.sleep', lambda _: None)
+  if failures == 10:
+    with pytest.raises(Exception, match='failed after retry'):
+      qcomgpsd.try_setup_logs(object(), [])
+    assert len(calls) == 10
+  else:
+    qcomgpsd.try_setup_logs(object(), [])
+    assert len(calls) == 2

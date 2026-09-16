@@ -1,0 +1,15 @@
+[Unit]
+Description=Scoped cellular ingress firewall
+Wants=comma-cellular-rollback.timer
+After=local-fs.target netfilter-persistent.service comma-cellular-rollback.timer
+Before=comma.service lte.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+UMask=0077
+TimeoutStartSec=150
+ExecStart=/usr/bin/python3 -I /usr/local/lib/comma-cellular/tools/security/firewall_boot.py boot
+
+[Install]
+WantedBy=multi-user.target

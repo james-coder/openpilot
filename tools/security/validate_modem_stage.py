@@ -94,7 +94,7 @@ def validate(stage, mode):
     diag = module.ModemDiag()
     try:
       opcode, data = module.send_recv(diag, module.DIAG_LOG_CONFIG_F, pack('<3xI', module.LOG_CONFIG_RETRIEVE_ID_RANGES_OP))
-      assert opcode == module.DIAG_LOG_CONFIG_F and len(data) == 75
+      assert opcode == module.DIAG_LOG_CONFIG_F and len(data) == 75, (opcode, len(data))
       assert unpack_from('<3xII', data) == (1, 0)
       masks = unpack_from('<16I', data, 11)
       assert max(masks) <= 4096

@@ -1,6 +1,8 @@
 /* CPU TEST ONLY: mapped writable memory is NOT an STM32 flash driver.
- * No vector table, GPIO, CAN, real watchdog or deployable startup. NEVER FLASH. */
+ * Optional handoff executes register bindings against modeled GPIO/NVIC only.
+ * No vector table, physical CAN/watchdog or deployable startup. NEVER FLASH. */
 #include "boot_port.h"
+#include "white_platform.h"
 #include <string.h>
 volatile int32_t vgw_boot_emu_result;
 volatile uint32_t vgw_boot_emu_services;
@@ -60,6 +62,11 @@ void vgw_boot_emu_entry(void) {
   if (vgw_boot_init(&io, fixture, fixture+91)) {
     vgw_boot_emu_result=vgw_boot_select(&choice);
     if (vgw_boot_emu_result>=0) {
+      if (fixture[137]) {
+        vgw_boot_get_status(vgw_boot_emu_status);
+        if (!vgw_white_physical_handoff(&choice)) vgw_boot_emu_result=-8;
+        vgw_boot_emu_done();
+      }
       /* Execute a signed leaf-function probe, NOT a hardware reset handoff:
        * MSP/VTOR/interrupt ownership must be integrated separately. */
       ((void (*)(void))choice.reset_handler)();

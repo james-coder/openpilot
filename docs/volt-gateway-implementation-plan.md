@@ -1,5 +1,13 @@
 # Volt gateway implementation status and gates
 
+## ARM physical binding and verified handoff — 2026-09-16
+
+Added real ARM MMIO/flash critical-section/reset bindings and connected verified
+MCUboot selection to MSP/VTOR application handoff in CPU emulation. The original
+Panda was inspected with USB IN-only requests and remains unchanged.
+See [explicit four-step status](volt-gateway-physical-binding.md); a complete
+flashable recovery/application image is still unfinished.
+
 ## Startup/watchdog/recovery receiver — 2026-09-16
 
 Added bounded silent-startup composition, independent F413 watchdog with

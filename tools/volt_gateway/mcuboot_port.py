@@ -39,7 +39,7 @@ def build(checkout: Path, archive: Path, output: Path, *, arm=False):
     sources = [upstream / 'src' / (name + '.c') for name in SOURCES]
     sources += [own / 'boot' / (name + '.c') for name in ('boot_port', 'boot_emu' if arm else 'boot_test')]
     if arm:
-      sources += [own / 'status_led.c']
+      sources += [own / (name + '.c') for name in ('status_led','white_platform','white_board','white_startup','white_watchdog')]
     hashes = {}
     for path in sources:
       obj = output / (path.stem + '.o')

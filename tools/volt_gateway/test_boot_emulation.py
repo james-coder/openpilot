@@ -81,3 +81,21 @@ def test_led_absent_does_not_change_boot(elf, key):
   for field in ('selected', 'confirmed', 'probe', 'status', 'flash'):
     assert on[field] == off[field]
   assert off['led_rgb'] == off['led_bsrr'] == 0
+
+
+@pytest.mark.parametrize('slot',[0,1])
+def test_verified_loader_uses_real_msp_vtor_handoff(elf,key,slot):
+  flash = b'\xff'*SLOTS[0] + b''.join(image(key,i,2 if i==slot else 1,confirmed=i!=slot) for i in range(2))
+  result = boot_emulation.run(elf,flash,key.public_key().export_key(format='DER'),TARGET,physical_handoff=True)
+  start = 0x08000000+SLOTS[slot]+512
+  assert result['handoff']=={'pc':start+8,'sp':0x20020000,'primask':1,'vtor':start}
+  assert result['selected']==slot and result['confirmed']==0
+  # Stopping at reset entry is NOT proof of successful app startup. Reboot
+  # without confirmation must take the old slot, using the same real handoff.
+  reboot = boot_emulation.run(elf,result['flash'],key.public_key().export_key(format='DER'),TARGET,physical_handoff=True)
+  assert reboot['selected']==1-slot
+
+
+def test_both_invalid_never_handoff(elf,key):
+  result = boot_emulation.run(elf,b'\xff'*0x180000,key.public_key().export_key(format='DER'),TARGET,physical_handoff=True)
+  assert result['selected']==-1 and result['handoff'] is None

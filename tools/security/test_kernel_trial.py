@@ -8,6 +8,18 @@ import pytest
 SPEC = importlib.util.spec_from_file_location('kernel_trial', Path(__file__).with_name('kernel_trial.py'))
 trial = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(trial)
+legacy = trial
+PARSER_SPEC = importlib.util.spec_from_file_location('parser_trial', Path(__file__).with_name('kernel_parser_trial.py'))
+parser_trial = importlib.util.module_from_spec(PARSER_SPEC)
+PARSER_SPEC.loader.exec_module(parser_trial)
+
+
+@pytest.fixture(params=[legacy, parser_trial], autouse=True)
+def selected_trial(request, monkeypatch, tmp_path):
+  monkeypatch.setitem(globals(), 'trial', request.param)
+  if request.param is parser_trial:
+    monkeypatch.setattr(parser_trial, 'ROOT', tmp_path)
+    monkeypatch.setattr(parser_trial, 'boot_id', lambda: 'boot-test')
 
 
 @pytest.fixture

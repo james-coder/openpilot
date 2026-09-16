@@ -1,0 +1,18 @@
+diff --git a/drivers/usb/core/message.c b/drivers/usb/core/message.c
+--- a/drivers/usb/core/message.c
++++ b/drivers/usb/core/message.c
+@@ -2026,7 +2026,13 @@ int usb_set_configuration(struct usb_device *dev, int configuration)
+ 		intfc = cp->intf_cache[i];
+ 		intf->altsetting = intfc->altsetting;
+ 		intf->num_altsetting = intfc->num_altsetting;
+-		intf->authorized = !!HCD_INTF_AUTHORIZED(hcd);
++		/* The host-created root hub must bind before downstream devices
++		 * can enumerate. Exempt only that root on the protected host:
++		 * parent topology is host-owned, unlike peripheral descriptors.
++		 * Preserve interface defaults on every other controller/device.
++		 */
++		intf->authorized = (!dev->parent && usb_modem_host(hcd->self.controller)) ||
++				   !!HCD_INTF_AUTHORIZED(hcd);
+ 		kref_get(&intfc->ref);
+ 
+ 		alt = usb_altnum_to_altsetting(intf, 0);

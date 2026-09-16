@@ -41,7 +41,8 @@ before enumeration, pins permitted driver names, checks the exact captured
 descriptor profile and direct physical port, suppresses interface driver
 autoload aliases, blocks usbfs ioctls on this host, and forces changed/reset
 devices through re-enumeration. These are proposed defenses, not tested
-production guarantees. Root hubs and the external controller are excluded.
+production guarantees. The external controller is excluded. The original
+root-hub exclusion was incomplete; see the correction below.
 
 Cross-compiled USB core, xHCI object and tizi DT; native C policy logic and
 Python sysfs fixtures passed. This does not test USB enumeration, probe,
@@ -50,4 +51,20 @@ The full Image.gz subsequently compiled and linked successfully; exact
 configuration is saved in candidate.config and build hashes in
 docs/MODEM_LTE_AND_KERNEL_FOLLOWUP.md. Modern disposable gadget/VM tests,
 boot and hardware compatibility remain deployment gates. No candidate was
-flashed. Compile success is not evidence that hostile USB is contained.
+flashed at that stage. Compile success is not evidence that hostile USB is contained.
+
+## Root-hub correction after failed parked trial
+
+The first candidate was subsequently flashed, failed modem compatibility,
+and was rolled back to the verified Bluetooth baseline. See
+`docs/MODEM_KERNEL_TRIAL_20260916.md`. The host-created root-hub interface
+inherited interface-default-deny, so its hub driver could not enumerate the
+modem. Testing the separate profile predicate had missed this initialization.
+
+Apply `0101-protected-root-hub-interface.patch` AFTER the complete 0100 patch.
+It exempts only the parentless host-created root on the protected controller
+from interface default-deny, preserving policy on downstream devices and all
+other controllers. It does not exempt peripheral-supplied hub class IDs.
+The regression compiles the actual assignment from `usb_set_configuration`
+and checks root/direct-child/behind-hub topology with both controller policy
+and default authorization states. This is not live USB enumeration testing.

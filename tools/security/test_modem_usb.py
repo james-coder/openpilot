@@ -1,5 +1,6 @@
 import importlib.util
 from pathlib import Path
+import re
 import subprocess
 
 import pytest
@@ -7,6 +8,51 @@ import pytest
 SPEC = importlib.util.spec_from_file_location('authorize', Path(__file__).with_name('modem_usb') / 'authorize.py')
 policy = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(policy)
+
+
+def test_actual_usb_core_interface_initialization(tmp_path):
+  # Compile the actual assignment in usb_set_configuration, not a rewritten
+  # policy predicate. This still does NOT execute USB enumeration or probe.
+  source = Path('/home/james/git/volt-modem-kernel-candidate/drivers/usb/core/message.c')
+  if not source.exists():
+    pytest.skip('Off-device kernel candidate not available')
+  assignments = re.findall(r'intf->authorized\s*=\s*[^;]+;', source.read_text())
+  assignments = [a for a in assignments if 'HCD_INTF_AUTHORIZED' in a]
+  assert len(assignments) == 1
+  c = tmp_path / 'initialization.c'
+  c.write_text('''
+#include <assert.h>
+#include <stdbool.h>
+struct device { bool protected; };
+struct usb_device { struct usb_device *parent; };
+struct usb_interface { bool authorized; };
+struct usb_hcd { struct { struct device *controller; } self; bool intf_default; };
+#define HCD_INTF_AUTHORIZED(hcd) ((hcd)->intf_default)
+static bool usb_modem_host(struct device *controller) { return controller->protected; }
+static bool initialize(struct usb_device *dev, struct usb_hcd *hcd) {
+  struct usb_interface storage, *intf = &storage;
+''' + assignments[0] + '''
+  return intf->authorized;
+}
+int main(void) {
+  struct device controller;
+  struct usb_hcd hcd = { .self = { .controller = &controller } };
+  struct usb_device root = {0}, child = { .parent = &root }, behind_hub = { .parent = &child };
+  for (int marked=0; marked<2; marked++) {
+    controller.protected = marked;
+    for (int allowed=0; allowed<2; allowed++) {
+      hcd.intf_default = allowed;
+      assert(initialize(&root, &hcd) == (marked || allowed));
+      assert(initialize(&child, &hcd) == allowed);
+      assert(initialize(&behind_hub, &hcd) == allowed);
+    }
+  }
+  return 0;
+}
+''')
+  exe = tmp_path / 'initialization'
+  subprocess.run(['cc', '-std=c99', '-Wall', '-Wextra', '-Werror', str(c), '-o', str(exe)], check=True)
+  subprocess.run([str(exe)], check=True)
 
 
 def test_exact_descriptor_and_all_single_byte_changes():

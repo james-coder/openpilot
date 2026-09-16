@@ -90,7 +90,7 @@ def run(output: Path):
                                  '--output', str(output / 'mcuboot-arm'), '--arm']))
   else:
     report['checks']['mcuboot_direct_xip'] = {'status': 'incomplete', 'reason': 'pinned boot/crypto dependency absent'}
-  for name in ('authority', 'observe', 'update', 'status_led'):
+  for name in ('authority', 'observe', 'update', 'status_led', 'white_board'):
     steps.append(('analyze_' + name, ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-fanalyzer', '-c',
                                     str(source / 'firmware' / (name + '.c')), '-o', str(output / (name + '-analyzed.o'))]))
   for name, argv in steps:

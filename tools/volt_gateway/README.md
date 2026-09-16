@@ -1,5 +1,12 @@
 # Volt gateway off-device work
 
+`chip_inspect.py` performs fixed read-only ROM DFU chip/option-byte queries on
+the exact labeled Panda; it does not enter DFU or program anything.
+`firmware/white_board.c` adds off-device-tested early quiescence/identity
+primitives. `boot_image.py` and interactive `operator boot-sign` produce the
+MCUboot inner signature plus outer release signature; they do not certify a
+payload as flashable board firmware. See [remaining board/recovery work](../../docs/volt-gateway-board-release.md).
+
 `mcuboot_port.py --arm` and `boot_emulation.py` execute the real loader and
 crypto on Cortex-M4 emulation and run signed slot-local Thumb probes. They do
 not implement hardware startup, a flash peripheral or independent CAN recovery.

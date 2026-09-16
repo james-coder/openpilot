@@ -115,14 +115,16 @@ def hex_field(value, size):
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   sub = parser.add_subparsers(dest='command', required=True)
-  for cmd in ('keygen', 'sign', 'authorize'):
+  for cmd in ('keygen', 'sign', 'boot-sign', 'authorize'):
     p = sub.add_parser(cmd)
     p.add_argument('--device', required=True, type=lambda v: hex_field(v, 12))
-    if cmd == 'sign':
+    if cmd in ('sign', 'boot-sign'):
       p.add_argument('--image', type=Path, required=True)
       p.add_argument('--layout', type=lambda v: hex_field(v, 32), required=True)
       p.add_argument('--build', type=lambda v: hex_field(v, 32), required=True)
       p.add_argument('--version', type=int, required=True)
+      if cmd == 'boot-sign':
+        p.add_argument('--slot', choices=('A', 'B'), required=True)
     if cmd == 'authorize':
       p.add_argument('--manifest', type=Path, required=True)
       p.add_argument('--challenge', type=Path, required=True)
@@ -146,12 +148,14 @@ def main():
     write_new(device_dir / 'firmware-public.der', public)
     print('Created encrypted local key. Back it up encrypted off-device before provisioning.')
     return
-  if args.command == 'sign':
+  if args.command in ('sign', 'boot-sign'):
     image_bytes = bounded_read(args.image, MAX_IMAGE)
     manifest = ImageManifest(args.device, 1, args.layout, len(image_bytes), hashlib.sha256(image_bytes).digest(), args.build, args.version)
     manifest.pack()
     print(json.dumps({'device':args.device.hex(), 'image_bytes':len(image_bytes), 'sha256':manifest.digest.hex(),
-                      'layout':args.layout.hex(), 'version':args.version}))
+                      'layout':args.layout.hex(), 'version':args.version,
+                      'input_kind': 'linked_payload_before_wrapping' if args.command == 'boot-sign' else 'image',
+                      'slot': getattr(args, 'slot', None)}))
   else:
     image = SignedImage.unpack(bounded_read(args.manifest, 512))
     challenge = Challenge.unpack(bounded_read(args.challenge, 512))
@@ -160,8 +164,13 @@ def main():
     print(json.dumps({'device':args.device.hex(), 'phase':challenge.phase.name, 'sha256':image.manifest.digest.hex(),
                       'layout':image.manifest.layout.hex(), 'version':image.manifest.version, 'lease_seconds':args.lease_seconds}))
   key = load_key(key_path, getpass.getpass('Unlock local signing key for this operation: '))
-  result = sign_image(key, manifest) if args.command == 'sign' else authorize_image(key, image, challenge, args.lease_seconds * 1000)
-  write_new(args.output, result.pack())
+  if args.command == 'boot-sign':
+    from openpilot.tools.volt_gateway.boot_image import release
+    result = release(key, image_bytes, args.device, args.layout, 0 if args.slot == 'A' else 1, args.version, args.build)
+  else:
+    result = (sign_image(key, manifest) if args.command == 'sign' else
+              authorize_image(key, image, challenge, args.lease_seconds * 1000)).pack()
+  write_new(args.output, result)
   print('Wrote public signed artifact; no private key was transmitted.')
 
 

@@ -1,5 +1,23 @@
 # White Panda inventory
 
+## Follow-up chip/protection inspection — 2026-09-16
+
+Owner reconfirmed the labeled unit is USB-only, disconnected from any vehicle.
+ROM DFU option-byte reads succeeded; matching copies/complements give RDP byte
+`0xAA` (level 0). Raw option bytes were preserved without writing them. The ROM
+rejected the flash-size-register and DBGMCU_IDCODE addresses; no bypass was
+attempted. The main-flash descriptor still reports 1.5 MiB. Original application
+was restored by a non-programming jump and its serial/version/silent mode checked.
+See [evidence](evidence/volt-gateway/chip-inspection-20260916.json).
+
+The owner cannot open the glued enclosure and explicitly approved using the
+historical chip assumption. The recovered forwarding branch's `board/Makefile`
+at `4e85803018ba8cfe20d7e1eb47bc7171ee38faf4` specifies `STM32F413xx` and the
+F413 startup file. Proceed with that **candidate**, retaining an on-target
+family/flash-size check and recording the unknown silicon revision. Do not
+represent the build target as a physical chip-ID measurement. Earlier unknown
+numeric RDP statements below are superseded by this read.
+
 ## Labeled unit — do not conflate with the second Panda
 
 Label (owner confirmed): `VOLT CAN FORWARDING`; USB-only during discovery.

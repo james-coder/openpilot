@@ -1,5 +1,15 @@
 # Volt gateway implementation status and gates
 
+## Five-step board/release implementation follow-up — 2026-09-16
+
+See [explicit step-by-step status](volt-gateway-board-release.md). Live ROM
+inspection now establishes RDP level 0; exact chip-ID reads were refused.
+The owner approved the recovered `STM32F413xx` assumption without opening the
+glued enclosure. Added tested White early-quiescence/runtime-identity code and
+real MCUboot inner-image signing/outer-release packaging. Full startup/flash
+drivers, standalone CAN recovery and complete-image flashing remain unfinished.
+Do not treat those portable integration pieces as completion of steps 1–5.
+
 ## ARM loader execution and LED indication — 2026-09-16
 
 The [boot harness](volt-gateway-boot-port.md) now executes actual MCUboot and

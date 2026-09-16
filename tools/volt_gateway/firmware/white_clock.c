@@ -4,7 +4,8 @@
 #define CFGR 0x40023808U
 #define PLL_VALUE 0x24401808U
 #define PROFILE 0x9400U
-static uint32_t rd(const vgw_white_mmio *io,uint32_t a) { return io->read32(io->ctx,a); }
+#define RAM __attribute__((section(".ramfunc.vgw_clock"), noinline))
+static RAM uint32_t rd(const vgw_white_mmio *io,uint32_t a) { return io->read32(io->ctx,a); }
 static void wr(const vgw_white_mmio *io,uint32_t a,uint32_t v) { io->write32(io->ctx,a,v); }
 static void change(const vgw_white_mmio *io,uint32_t a,uint32_t mask,uint32_t v) { wr(io,a,(rd(io,a)&~mask)|v); }
 static bool wait(const vgw_white_mmio *io,uint32_t a,uint32_t mask,uint32_t v) {
@@ -15,7 +16,7 @@ static bool wait(const vgw_white_mmio *io,uint32_t a,uint32_t mask,uint32_t v) {
   }
   return false;
 }
-bool vgw_white_clock_valid(const vgw_white_clock *c) {
+RAM bool vgw_white_clock_valid(const vgw_white_clock *c) {
   if (!c || !c->ready || !c->startup || !c->startup->ready || c->startup->watchdog.failed) return false;
   const vgw_white_mmio *io=&c->startup->watchdog.io;
   return (rd(io,CR)&0x03070000U)==0x03030000U && rd(io,PLL)==PLL_VALUE &&
@@ -24,10 +25,10 @@ bool vgw_white_clock_valid(const vgw_white_clock *c) {
     (rd(io,0x40007000U)&0xc000U)==0xc000U && (rd(io,0x40007004U)&0x4000U) &&
     rd(io,0x40000028U)==47999U && rd(io,0x40000000U)==1U;
 }
-bool vgw_white_clock_init(vgw_white_clock *c,vgw_white_startup *s) {
+static bool configure(vgw_white_clock *c,vgw_white_startup *s,bool usb_only) {
   if (!c) return false;
   *c=(vgw_white_clock){.startup=s};
-  if (!s || !s->ready || !s->watchdog.started || s->watchdog.failed) return false;
+  if (!s || !s->ready || s->watchdog.started==usb_only || s->watchdog.failed) return false;
   const vgw_white_mmio *io=&s->watchdog.io;
   /* Require the initial HSI profile with all three CAN controllers reset. */
   if ((rd(io,CFGR)&15U) || (rd(io,CR)&(1U<<18)) ||
@@ -68,3 +69,5 @@ fail:
   (void)vgw_white_quiesce(io);
   return false;
 }
+bool vgw_white_clock_init(vgw_white_clock *c,vgw_white_startup *s) { return configure(c,s,false); }
+bool vgw_white_clock_usb_only(vgw_white_clock *c,vgw_white_startup *s) { return configure(c,s,true); }

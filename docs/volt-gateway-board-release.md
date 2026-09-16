@@ -1,5 +1,10 @@
 # Board/release integration progress — not a flashable release
 
+**Historical milestone:** current integrated firmware and silicon findings are
+in [board integration](volt-gateway-board-integration.md). In particular the
+ROM descriptor below overstates this chip's flash: its actual size register
+reports **1024 KiB**, not 1536. Current firmware rejects the old assumption.
+
 Previous offline regression: **1,097 passed, zero failed/skipped**, with lint, ARM
 builds and selected GCC analysis passing. This includes 27 image-packaging,
 five chip-inspection and 19 MMIO tests. See

@@ -19,11 +19,11 @@ def build(output: Path):
   report = {'compiler':subprocess.check_output([str(compiler), '--version'], text=True).splitlines()[0],
             'compiler_sha256':hashlib.sha256(compiler.read_bytes()).hexdigest(), 'flags':flags, 'objects':{},
             'bootable':False, 'flashed':False,
-            'limitations':['platform crypto/RNG and board integration absent', 'not full-image RAM/stack measurement',
-                           'no CAN-driver or flash-driver validation']}
+            'limitations':['complete provisioned board image and physical safety inputs absent', 'not full-image RAM/stack measurement',
+                           'CAN/flash driver tests are off-device, not hardware validation']}
   for name in ('authority', 'observe', 'update', 'metrics', 'status_led', 'white_board', 'white_flash',
                'white_watchdog', 'white_startup', 'white_clock', 'white_rng', 'white_platform', 'white_can',
-               'white_runtime', 'recovery_transport', 'recovery_link'):
+               'white_runtime', 'white_safety', 'application', 'recovery_transport', 'recovery_link', 'recovery_service', 'recovery_runtime', 'recovery_flash'):
     destination = output / (name + '.o')
     command = [str(compiler), *flags, '-c', str(source / (name + '.c')), '-o', str(destination)]
     subprocess.run(command, check=True, capture_output=True, text=True, timeout=120)

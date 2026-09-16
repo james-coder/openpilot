@@ -15,6 +15,9 @@ typedef struct vgw_white_runtime {
   vgw_recovery_link recovery;
   uint8_t boot_nonce[32];
   bool ready;
+  vgw_can_receive listener;
+  void *listener_context;
+  bool local_control;
 } vgw_white_runtime;
 typedef bool (*vgw_runtime_protocol)(void *,vgw_white_runtime *);
 size_t vgw_white_runtime_size(void);

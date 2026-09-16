@@ -51,19 +51,25 @@ def command(argv, cwd, log, timeout=600):
           'log_sha256': hashlib.sha256(log.read_bytes()).hexdigest()}
 
 
+def source_hashes(source: Path, repo: Path):
+  return {str(p.relative_to(repo)): hashlib.sha256(p.read_bytes()).hexdigest()
+          for p in sorted(source.rglob('*')) if p.is_file() and p.suffix in ('.py', '.c', '.h', '.S', '.ld', '.rs', '.json', '.txt')
+          and '__pycache__' not in p.parts}
+
+
 def run(output: Path):
   repo = Path(__file__).resolve().parents[2]
   output = output.resolve()
   output.mkdir(parents=True, exist_ok=False, mode=0o700)
   source = Path(__file__).parent
-  hashes = {str(p.relative_to(repo)): hashlib.sha256(p.read_bytes()).hexdigest()
-            for p in sorted(source.rglob('*')) if p.is_file() and p.suffix in ('.py', '.c', '.h', '.S', '.ld', '.rs', '.json', '.txt')
-            and '__pycache__' not in p.parts}
+  hashes = source_hashes(source, repo)
   report = {'source_sha256': hashes, 'python': sys.version, 'checks': {}, 'production_ready': False,
             'hardware': {'status': 'hardware-unverified', 'changed': False},
-            'open_gates': ['simultaneous SWCAN/Object RX', 'complete target firmware/crypto/RNG/loader',
-                           'chosen flash layout and direct-XIP revert', 'provisioned transport IDs and keys',
-                           'hardware TX limits and host independence', 'parked validation'],
+            'open_gates': ['physical simultaneous SWCAN/HSCAN RX and verified harness',
+                           'whole-image silicon timing and power-loss/recovery validation',
+                           'owner-controlled provisioning/signing and loader write protection',
+                           'evidence-selected transport IDs and primary-Tres compatibility',
+                           'physical TX limits and host independence', 'parked validation'],
             'scope': 'offline tests/lint/Cortex-M4 object build; no certification or hardware claim'}
   destination = output / 'report.json'
   destination.write_text(json.dumps(report, indent=2) + '\n')
@@ -88,11 +94,18 @@ def run(output: Path):
     steps.append(('mcuboot_arm', [sys.executable, '-m', 'tools.volt_gateway.mcuboot_port',
                                  '--checkout', boot_checkout, '--archive', str(crypto_archive),
                                  '--output', str(output / 'mcuboot-arm'), '--arm']))
+    history = os.environ.get('VOLTGW_PANDA_HISTORY')
+    if history:
+      steps.append(('board_images', [sys.executable, '-m', 'tools.volt_gateway.board_build',
+                                    '--checkout', boot_checkout, '--archive', str(crypto_archive),
+                                    '--usb-repository', history, '--output', str(output / 'board')]))
+    else:
+      report['checks']['board_images'] = {'status': 'incomplete', 'reason': 'historical White USB source absent'}
   else:
     report['checks']['mcuboot_direct_xip'] = {'status': 'incomplete', 'reason': 'pinned boot/crypto dependency absent'}
   for name in ('authority', 'observe', 'update', 'status_led', 'white_board', 'white_flash',
                'white_watchdog', 'white_startup', 'white_clock', 'white_rng', 'white_can', 'white_runtime',
-               'recovery_transport', 'recovery_link'):
+               'white_safety', 'application', 'recovery_transport', 'recovery_link', 'recovery_service', 'recovery_runtime', 'recovery_flash'):
     steps.append(('analyze_' + name, ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-fanalyzer', '-c',
                                     str(source / 'firmware' / (name + '.c')), '-o', str(output / (name + '-analyzed.o'))]))
   for name, argv in steps:
@@ -105,8 +118,7 @@ def run(output: Path):
     report['checks'][name] = result
     destination.write_text(json.dumps(report, indent=2) + '\n')
   statuses = [r['status'] for r in report['checks'].values()]
-  if any(not (repo / name).is_file() or hashlib.sha256((repo / name).read_bytes()).hexdigest() != digest
-         for name, digest in hashes.items()):
+  if source_hashes(source, repo) != hashes:
     report['checks']['source_consistency'] = {'status': 'failed', 'reason': 'source changed during validation'}
     statuses.append('failed')
   report['status'] = 'failed' if 'failed' in statuses else 'incomplete' if 'incomplete' in statuses else 'passed'

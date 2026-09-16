@@ -1,5 +1,23 @@
 # Volt gateway implementation status and gates
 
+## Current integrated board status — 2026-09-16
+
+See [board integration](volt-gateway-board-integration.md): complete loader/A/B
+composition, USB CLI, safety sampling and signed update host now exist and have
+integrated off-device tests. This supersedes component-only entries below.
+Physical validation and owner-controlled key gates remain distinct. Original
+Panda firmware and production comma/Tres remain unchanged.
+
+## Authenticated recovery integration — 2026-09-16
+
+Connected bounded CAN/ISO-TP transport to paired sessions, independently signed
+update authorization, the inactive-slot updater and real MCUboot validation.
+Added RAM-only flash-busy service and ARM peripheral-model tests that reject
+flash instruction/data access while programming or erasing. These are off-device
+tests, not a complete provisioned board image or physical recovery validation.
+See [current evidence and remaining gates](volt-gateway-recovery-integration.md).
+The original labeled Panda and production Tres remain unchanged.
+
 ## CAN/runtime integration and SWCAN shutdown fix — 2026-09-16
 
 Added bounded physical bxCAN driver, SWCAN mux/PHY setup, bidirectional ISO-TP

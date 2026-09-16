@@ -18,7 +18,8 @@ from openpilot.tools.volt_gateway.authority import MAX_IMAGE, AuthorityError, Si
 
 
 PEM_PRIVATE = re.compile(rb'^-----BEGIN (?:ENCRYPTED |RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----\r?$', re.MULTILINE)
-FORBIDDEN_NAMES = {'.voltgw-private', 'firmware-key.pem', 'routine-key.bin', 'pairing-secret.bin'}
+FORBIDDEN_NAMES = {'.voltgw-private', 'firmware-key.pem', 'routine-key.bin', 'pairing-secret.bin',
+                   'pairing.json', 'provisioning.bin', 'factory-flash.bin'}
 
 
 def reject_secret(name: str, content: bytes):

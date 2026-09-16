@@ -8,11 +8,12 @@
 /* OFF-DEVICE CANDIDATE. STM32F413/423 RM0430 Table 5 geometry, conditional on
  * identifying the actual chip. First 256 KiB are excluded from these APIs;
  * no final loader/config/provisioning allocation is approved by this layout. */
-#define VGW_BOOT_FLASH_SIZE 0x180000U
+#include "../geometry.h"
+#define VGW_BOOT_FLASH_SIZE VGW_FLASH_BYTES
 #define VGW_BOOT_FLASH_BASE 0x08000000U
 #define VGW_BOOT_SLOT0 0x40000U
-#define VGW_BOOT_SLOT1 0xe0000U
-#define VGW_BOOT_SLOT_SIZE 0xa0000U
+#define VGW_BOOT_SLOT1 VGW_SLOT_B
+#define VGW_BOOT_SLOT_SIZE VGW_SLOT_BYTES
 #define VGW_BOOT_SECTOR_SIZE 0x20000U
 #define VGW_BOOT_HEADER_SIZE 512U
 
@@ -34,6 +35,10 @@ bool vgw_boot_init(const vgw_boot_io *, const uint8_t public_der[91], const uint
 /* 0/1 = verified selection; -1 = no bootable image; -2 = latched IO error;
  * -3 = invalid configuration/vector/header. No application is jumped to here. */
 int vgw_boot_select(vgw_boot_choice *);
+/* Application-side attachment after verified loader handoff. Validates the
+ * exact executing slot again without running boot_go/revert a second time.
+ * Board must supply its fixed VTOR, never a protocol-selected slot/address. */
+bool vgw_boot_resume(unsigned slot,uint32_t vector_address);
 /* No caller-supplied slot: only the selection from this boot can be confirmed.
  * Board integration must gate this call on actual application self-tests. */
 bool vgw_boot_confirm(void);

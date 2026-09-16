@@ -31,7 +31,8 @@ def built(tmp_path_factory):
 
   class Runtime(C.Structure):
     _fields_=[('startup',Startup),('clock',Clock),('rng',Random),('can',Can),('observer',Observer),
-              ('recovery',Link),('nonce',C.c_uint8*32),('ready',C.c_bool)]
+              ('recovery',Link),('nonce',C.c_uint8*32),('ready',C.c_bool),
+              ('listener',C.c_void_p),('listener_context',C.c_void_p),('local_control',C.c_bool)]
 
   assert C.sizeof(Runtime)==dll.vgw_white_runtime_size()
   dll.vgw_white_runtime_init.argtypes=[C.c_void_p,C.POINTER(IO),C.POINTER(Config),C.c_uint16]
@@ -46,7 +47,7 @@ def built(tmp_path_factory):
 def start(built,backhaul=0,hw=None):
   lib,Runtime=built
   hw=hw or CanHardware()
-  hw.values.update({0xe0042000:0x10000463,0x1fff7a22:1536,0x40023874:3})
+  hw.values.update({0xe0042000:0x10000463,0x1fff7a22:1024,0x40023874:3})
   state=Runtime()
   ok=lib.vgw_white_runtime_init(C.byref(state),C.byref(hw.io),C.byref(Config(3,3,backhaul,0x601)),0x600)
   return lib,hw,state,ok

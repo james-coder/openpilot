@@ -5,12 +5,15 @@
 #include "white_platform.h"
 vgw_white_runtime vgw_runtime_test_state;
 volatile uint32_t vgw_runtime_test_result;
+#ifdef VGW_FLASH_GUARD_TEST
+bool vgw_guard_test(vgw_white_runtime *);
+#endif
 /* Freestanding byte routines for the harness. Real linker map/call-graph
  * review is still required before flash-busy use. */
-void *memset(void *p,int c,size_t n) {
+__attribute__((section(".ramfunc.memory"))) void *memset(void *p,int c,size_t n) {
   uint8_t *d=p; for (size_t i=0;i<n;i++) d[i]=(uint8_t)c; return p;
 }
-void *memcpy(void *p,const void *q,size_t n) {
+__attribute__((section(".ramfunc.memory"))) void *memcpy(void *p,const void *q,size_t n) {
   uint8_t *d=p; const uint8_t *s=q; for (size_t i=0;i<n;i++) d[i]=s[i]; return p;
 }
 static bool no_commands(void *ctx,vgw_white_runtime *s) { (void)ctx; (void)s; return true; }
@@ -22,5 +25,8 @@ void vgw_loader_main(void) {
   if (!vgw_white_runtime_init(s,vgw_white_physical_mmio(),&config,0x600)) vgw_runtime_test_result=1;
   else if (!vgw_white_runtime_step(s,no_commands,0)) vgw_runtime_test_result=2;
   else vgw_runtime_test_result=3;
+#ifdef VGW_FLASH_GUARD_TEST
+  if (vgw_runtime_test_result==3 && !vgw_guard_test(s)) vgw_runtime_test_result=4;
+#endif
   vgw_runtime_test_done();
 }

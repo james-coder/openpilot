@@ -14,12 +14,12 @@ def run(elf: Path, flash: bytes, public_der: bytes, target: bytes, *, confirm=Fa
   from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_CODE, UC_HOOK_MEM_WRITE, UC_PROT_READ, UC_PROT_EXEC, UC_PROT_WRITE
   from unicorn.arm_const import UC_ARM_REG_SP, UC_ARM_REG_PRIMASK, UC_ARM_REG_PC, UC_ARM_REG_LR, UC_CPU_ARM_CORTEX_M4
 
-  if len(flash) != 0x180000 or len(public_der) != 91 or len(target) != 44:
+  if len(flash) != 0x100000 or len(public_der) != 91 or len(target) != 44:
     raise ValueError('boot emulator fixture bounds')
   cpu = Uc(UC_ARCH_ARM, UC_MODE_THUMB | UC_MODE_MCLASS)
   cpu.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_M4)
   cpu.mem_map(0x08000000, 0x40000, UC_PROT_READ | UC_PROT_EXEC)
-  cpu.mem_map(0x08040000, 0x140000, UC_PROT_READ | UC_PROT_WRITE | UC_PROT_EXEC)
+  cpu.mem_map(0x08040000, 0xc0000, UC_PROT_READ | UC_PROT_WRITE | UC_PROT_EXEC)
   cpu.mem_map(0x20000000, 0x20000, UC_PROT_READ | UC_PROT_WRITE | UC_PROT_EXEC)
   if physical_handoff:
     if confirm:
@@ -74,7 +74,7 @@ def run(elf: Path, flash: bytes, public_der: bytes, target: bytes, *, confirm=Fa
     # verification; do not instrument unrelated crypto/stack writes here.
     cpu.hook_add(UC_HOOK_MEM_WRITE,register_write,begin=0x40000000,end=0x400fffff)
     cpu.hook_add(UC_HOOK_MEM_WRITE,register_write,begin=0xe000ed0c,end=0xe000ed0c)
-    cpu.hook_add(UC_HOOK_CODE,application,begin=0x08040000,end=0x0817ffff)
+    cpu.hook_add(UC_HOOK_CODE,application,begin=0x08040000,end=0x080fffff)
   try:
     cpu.emu_start(entry | 1, 0, timeout=20_000_000, count=300_000_000)
   except Exception as error:
@@ -91,5 +91,5 @@ def run(elf: Path, flash: bytes, public_der: bytes, target: bytes, *, confirm=Fa
           'status': list(cpu.mem_read(symbols['vgw_boot_emu_status'], 3)),
           'led_rgb': word('vgw_boot_emu_rgb'), 'led_bsrr': word('vgw_boot_emu_bsrr'),
           'probe': struct.unpack('<I', cpu.mem_read(0x20017000, 4))[0],
-          'flash': flash[:0x40000] + bytes(cpu.mem_read(0x08040000, 0x140000)),
+          'flash': flash[:0x40000] + bytes(cpu.mem_read(0x08040000, 0xc0000)),
           'handoff': handoff, 'host_crypto_hooks': 0, 'hardware_validated': False}

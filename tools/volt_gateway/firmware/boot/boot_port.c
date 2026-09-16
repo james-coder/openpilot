@@ -104,9 +104,9 @@ int flash_area_erase(const struct flash_area *area, uint32_t off, uint32_t size)
   return 0;
 }
 int flash_area_get_sectors(int id, uint32_t *count, struct flash_sector *out) {
-  if (!ready || failed || id < 1 || id > 2 || !count || !out || *count < 5) return error();
-  *count = 5;
-  for (unsigned i = 0; i < 5; i++) out[i] = (struct flash_sector){i * VGW_BOOT_SECTOR_SIZE, VGW_BOOT_SECTOR_SIZE};
+  if (!ready || failed || id < 1 || id > 2 || !count || !out || *count < VGW_SLOT_SECTORS) return error();
+  *count = VGW_SLOT_SECTORS;
+  for (unsigned i = 0; i < VGW_SLOT_SECTORS; i++) out[i] = (struct flash_sector){i * VGW_BOOT_SECTOR_SIZE, VGW_BOOT_SECTOR_SIZE};
   return 0;
 }
 int flash_area_get_sector(const struct flash_area *area, uint32_t off, struct flash_sector *out) {
@@ -188,6 +188,23 @@ bool vgw_boot_validate_candidate(unsigned slot, uint32_t size, uint32_t version)
   FIH_DECLARE(result, FIH_FAILURE);
   FIH_CALL(bootutil_img_validate,result,NULL,&header,&slots[slot],tmp,sizeof(tmp),NULL,0,NULL);
   return !failed && FIH_EQ(result,FIH_SUCCESS);
+}
+
+bool vgw_boot_resume(unsigned slot,uint32_t vector_address) {
+  if (!ready || failed || selected>=0 || no_bootable_image || slot>1 ||
+      vector_address!=VGW_BOOT_FLASH_BASE+slots[slot].fa_off+VGW_BOOT_HEADER_SIZE) return false;
+  struct image_header header; vgw_boot_choice choice;
+  if (flash_area_read(&slots[slot],0,&header,sizeof(header)) || policy(slot,&header,&choice)) return false;
+  uint8_t buffer[256];
+  FIH_DECLARE(result,FIH_FAILURE);
+  FIH_CALL(bootutil_img_validate,result,NULL,&header,&slots[slot],buffer,sizeof(buffer),NULL,0,NULL);
+  if (failed || FIH_NOT_EQ(result,FIH_SUCCESS)) return false;
+  struct boot_swap_state state;
+  if (boot_read_swap_state(&slots[slot],&state) || failed || state.magic!=BOOT_MAGIC_GOOD ||
+      state.copy_done!=BOOT_FLAG_SET || (state.image_ok!=BOOT_FLAG_SET && state.image_ok!=BOOT_FLAG_UNSET)) return false;
+  selected=(int)slot;
+  indicate(state.image_ok==BOOT_FLAG_SET ? VGW_LED_RUNNING : VGW_LED_TRIAL,(uint8_t)slot,0);
+  return true;
 }
 
 bool vgw_boot_commit_candidate(unsigned slot, uint32_t size, uint32_t version) {

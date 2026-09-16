@@ -12,5 +12,9 @@ typedef struct {
  * enabling communications and reconfigure TIM2 consistently at that point.
  * Does not jump to an app, initialize entropy or enable recovery transport. */
 bool vgw_white_startup_init(vgw_white_startup *, const vgw_white_mmio *);
+/* Protected USB-only recovery entry: CAN stays reset, no watchdog started yet.
+ * A bounded recovery window must end in normal startup or ROM recovery; this
+ * state must never authorize CAN initialization. */
+bool vgw_white_startup_usb_only(vgw_white_startup *,const vgw_white_mmio *);
 uint32_t vgw_white_startup_now(const vgw_white_startup *);
 #endif

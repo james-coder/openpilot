@@ -10,7 +10,8 @@
 #define ERRORS 0xf2U
 #define CACHES 0x700U
 #define RESETS 0x1800U
-#define SLOT_SIZE 0xa0000U
+#include "geometry.h"
+#define SLOT_SIZE VGW_SLOT_BYTES
 #define SECTOR_SIZE 0x20000U
 
 size_t vgw_white_flash_size(void) { return sizeof(vgw_white_flash); }
@@ -92,7 +93,7 @@ bool vgw_white_flash_init(vgw_white_flash *f, const vgw_flash_io *io, unsigned s
   for (unsigned i=0;i<sizeof(callbacks)/sizeof(callbacks[0]);i++)
     if (!(callbacks[i]&1) || callbacks[i]<0x20000001U || callbacks[i]>=0x20020000U) return false;
 #endif
-  f->io=*io; f->base=slot ? 0x080e0000U : 0x08040000U;
+  f->io=*io; f->base=0x08000000U+(slot ? VGW_SLOT_B : VGW_SLOT_A);
   f->image_mutation=image_mutation; f->failed=false; f->ready=true;
   return true;
 }
@@ -104,7 +105,7 @@ RAM bool vgw_white_flash_read(vgw_white_flash *f, uint32_t off, uint8_t *out, ui
 RAM bool vgw_white_flash_erase(vgw_white_flash *f, uint32_t off) {
   if (!bounds(f, off, SECTOR_SIZE) || !f->image_mutation || off%SECTOR_SIZE) return fail(f);
   if (!begin(f)) return false;
-  /* F413 large sectors 5..15 begin at 0x08020000. Slot A starts sector 6. */
+  /* This 1-MiB F413 has large sectors 5..11. Slot A starts sector 6. */
   uint32_t sector=5U+(f->base+off-0x08020000U)/SECTOR_SIZE;
   bool ok=reg(f, CR, 2U | (sector<<3)); /* SER, PSIZE=x8 */
   if (ok && f->io.reg_read(f->io.ctx, CR) != (2U | (sector<<3))) ok=false;

@@ -25,7 +25,8 @@ bool vgw_white_runtime_init(vgw_white_runtime *s,const vgw_white_mmio *io,const 
 static void receive(void *ctx,const vgw_frame *f) {
   vgw_white_runtime *s=ctx;
   (void)vgw_observer_feed(&s->observer,f);
-  if (s->can.config.backhaul_controller && f->bus==s->can.config.backhaul_controller-1U)
+  if (s->listener) s->listener(s->listener_context,f);
+  if (!s->local_control && s->can.config.backhaul_controller && f->bus==s->can.config.backhaul_controller-1U)
     (void)vgw_recovery_link_feed(&s->recovery,f->address,(f->flags&VGW_EXTENDED)!=0,
       (f->flags&VGW_RTR)!=0,f->data,f->dlc,(uint32_t)s->can.elapsed_ms);
 }
@@ -45,7 +46,7 @@ bool vgw_white_runtime_step(vgw_white_runtime *s,vgw_runtime_protocol protocol,v
   vgw_white_watchdog_progress(w,VGW_PROGRESS_HEALTH);
   if (!vgw_white_watchdog_service(w,vgw_white_startup_now(&s->startup))) goto fail;
   /* No transmit if protocol work blocked long enough to stale CAN health. */
-  (void)vgw_recovery_link_poll(&s->recovery,(uint32_t)s->can.elapsed_ms,send,s);
+  if (!s->local_control) (void)vgw_recovery_link_poll(&s->recovery,(uint32_t)s->can.elapsed_ms,send,s);
   return true;
 fail:
   vgw_white_runtime_stop(s); return false;

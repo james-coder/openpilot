@@ -44,6 +44,13 @@ bool vgw_white_startup_init(vgw_white_startup *s, const vgw_white_mmio *io) {
   s->ready=true;
   return true;
 }
+bool vgw_white_startup_usb_only(vgw_white_startup *s,const vgw_white_mmio *io) {
+  if (!s || !io) return false;
+  *s=(vgw_white_startup){0};
+  if (!vgw_white_quiesce(io) || !vgw_white_identify(io,&s->identity) || !clock_timer(io)) return false;
+  s->watchdog.io=*io; s->ready=true;
+  return true;
+}
 __attribute__((section(".ramfunc.vgw_startup"), noinline))
 uint32_t vgw_white_startup_now(const vgw_white_startup *s) {
   return s && s->ready ? s->watchdog.io.read32(s->watchdog.io.ctx,TIM2+36) : 0;

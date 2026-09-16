@@ -1,0 +1,50 @@
+{
+  "scope": "actual USB-only labeled White Panda; volatile SRAM probe, no flash/option writes",
+  "serial": "370022000651363038363036",
+  "dfu_serial": "365236793036",
+  "probe_sha256": "cac28f25fb138a2c19abb6920d6626a0cc43f9495827c8ef5a43f935288cf908",
+  "probe_load_address": "0x20004000",
+  "probe_size": 9692,
+  "probe_version": "voltgw-RAM-PROBE-v1",
+  "report": {
+    "magic": 1448104497,
+    "chip_id": 268461155,
+    "flash_kib": 1024,
+    "rev_c": 1,
+    "voltage_mv": 4767,
+    "adc_valid": 1,
+    "adc_raw": 538,
+    "pll": 608180232,
+    "cfgr": 37898,
+    "apb1_reset": 234881024,
+    "gpiob_odr": 0,
+    "uptime_ms": 45907
+  },
+  "observed_usb_failure_before_fix": "Windows repeatedly requested device/configuration/BOS descriptors, then FAILED_POST_START",
+  "observed_usb_after_fix": "Windows enumeration and WSL attachment succeeded; serial/version and 48-byte probe report read successfully",
+  "automatic_return": {
+    "version": "v1.7.3-EON-unknown-RELEASE",
+    "hardware_type": 1,
+    "voltage_mv": 4776,
+    "safety_mode": 0,
+    "ignition_line": 0,
+    "ignition_can": 0,
+    "controls_allowed": 0,
+    "faults": 0,
+    "can_rx_errs": 0,
+    "can_send_errs": 0,
+    "can_fwd_errs": 0,
+    "gmlan_send_errs": 0
+  },
+  "flash_written": false,
+  "option_bytes_written": false,
+  "can_driver_linked": false,
+  "production_comma_changed": false,
+  "limitations": [
+    "Not a complete gateway image execution",
+    "No physical CAN RX/TX or peer testing",
+    "No physical flash programming, power-cut or A/B recovery test",
+    "Software register readback is not electrical silence measurement",
+    "ROM generic flash descriptor is not physical capacity; actual register reports 1024 KiB"
+  ]
+}

@@ -5,6 +5,7 @@
  * our adapter. Mbed TLS's private-key routines are removed by section GC. */
 #define MBEDTLS_BIGNUM_C
 #define MBEDTLS_ECP_C
+#define MBEDTLS_ECP_RESTARTABLE
 #define MBEDTLS_ECP_DP_SECP256R1_ENABLED
 #define MBEDTLS_ECP_NIST_OPTIM
 #define MBEDTLS_ECDSA_C

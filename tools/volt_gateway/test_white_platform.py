@@ -29,7 +29,7 @@ def binary(tmp_path_factory):
 def test_physical_binding_instructions(binary, mode, masked):
   cpu = Uc(UC_ARCH_ARM,UC_MODE_THUMB|UC_MODE_MCLASS)
   cpu.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_M4)
-  cpu.mem_map(0x08000000,0x180000)
+  cpu.mem_map(0x08000000,0x100000)
   cpu.mem_map(0x20000000,0x20000)
   cpu.mem_map(0x40000000,0x100000)
   cpu.mem_map(0xe000e000,0x2000)

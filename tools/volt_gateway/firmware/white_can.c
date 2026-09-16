@@ -9,16 +9,17 @@
 #define ESR 24U
 #define BTR 28U
 #define NART_RFLM 24U
-static uint32_t base(unsigned controller) {
+#define RAM __attribute__((section(".ramfunc.vgw_can"), noinline))
+static RAM uint32_t base(unsigned controller) {
   return controller==1 ? 0x40006400U : controller==2 ? 0x40006800U : 0x40006c00U;
 }
-static const vgw_white_mmio *io_of(const vgw_white_can *s) { return &s->clock->startup->watchdog.io; }
-static uint32_t rd(const vgw_white_can *s,uint32_t a) { const vgw_white_mmio *io=io_of(s); return io->read32(io->ctx,a); }
-static void wr(const vgw_white_can *s,uint32_t a,uint32_t v) { const vgw_white_mmio *io=io_of(s); io->write32(io->ctx,a,v); }
+static RAM const vgw_white_mmio *io_of(const vgw_white_can *s) { return &s->clock->startup->watchdog.io; }
+static RAM uint32_t rd(const vgw_white_can *s,uint32_t a) { const vgw_white_mmio *io=io_of(s); return io->read32(io->ctx,a); }
+static RAM void wr(const vgw_white_can *s,uint32_t a,uint32_t v) { const vgw_white_mmio *io=io_of(s); io->write32(io->ctx,a,v); }
 static void change(const vgw_white_can *s,uint32_t a,uint32_t mask,uint32_t v) { wr(s,a,(rd(s,a)&~mask)|v); }
-static uint32_t inc(uint32_t n) { return n==UINT32_MAX ? n : n+1; }
+static RAM uint32_t inc(uint32_t n) { return n==UINT32_MAX ? n : n+1; }
 /* Accidental configuration-corruption check, not an authentication mechanism. */
-static uint32_t config_check(const vgw_white_can_config *c) {
+static RAM uint32_t config_check(const vgw_white_can_config *c) {
   uint8_t bytes[5]={c->swcan_controller,c->hscan_mask,c->backhaul_controller,
     (uint8_t)c->response_id,(uint8_t)(c->response_id>>8)};
   uint32_t crc=0xffffffffU;
@@ -28,8 +29,8 @@ static uint32_t config_check(const vgw_white_can_config *c) {
   }
   return ~crc;
 }
-static bool active(const vgw_white_can *s,unsigned c) { return c==s->config.swcan_controller || (s->config.hscan_mask&(1U<<(c-1))); }
-static uint32_t timing(const vgw_white_can *s,unsigned c) {
+static RAM bool active(const vgw_white_can *s,unsigned c) { return c==s->config.swcan_controller || (s->config.hscan_mask&(1U<<(c-1))); }
+static RAM uint32_t timing(const vgw_white_can *s,unsigned c) {
   /* 24MHz / (8 quanta *6)=500k; /90=33.333k. 87.5% sample point. */
   return (5U<<16) | (c==s->config.swcan_controller ? 89U : 5U) |
     (c==s->config.backhaul_controller ? 0U : 0x80000000U);
@@ -42,7 +43,7 @@ static bool wait(const vgw_white_can *s,uint32_t a,uint32_t mask,uint32_t expect
   }
   return false;
 }
-void vgw_white_can_stop(vgw_white_can *s) {
+RAM void vgw_white_can_stop(vgw_white_can *s) {
   if (!s) return;
   s->ready=false; s->failed=true; s->pending=false; s->tokens=0;
   if (s->clock && s->clock->startup) (void)vgw_white_quiesce(io_of(s));
@@ -73,7 +74,7 @@ static bool filters(const vgw_white_can *s,unsigned controller,uint32_t enabled)
 bool vgw_white_can_init(vgw_white_can *s,const vgw_white_clock *clock,const vgw_white_can_config *config) {
   if (!s) return false;
   *s=(vgw_white_can){.clock=clock,.failed=true};
-  if (!vgw_white_clock_valid(clock) || !config || config->swcan_controller<2 || config->swcan_controller>3 ||
+  if (!vgw_white_clock_valid(clock) || !clock->startup->watchdog.started || !config || config->swcan_controller<2 || config->swcan_controller>3 ||
       !config->hscan_mask || config->hscan_mask>7 || (config->hscan_mask&(1U<<(config->swcan_controller-1))) ||
       config->backhaul_controller>3 || config->response_id>0x7ffU ||
       (config->backhaul_controller && !(config->hscan_mask&(1U<<(config->backhaul_controller-1))))) return false;
@@ -96,7 +97,9 @@ bool vgw_white_can_init(vgw_white_can *s,const vgw_white_clock *clock,const vgw_
       !filters(s,3,active(s,3) ? 1U : 0U)) goto fail;
   for (unsigned c=1;c<=3;c++) {
     if (!active(s,c)) continue;
-    uint32_t port=0x40020400U; unsigned rx,tx,af=c==3 ? 11 : 9;
+    /* F413 CAN1 PB8/PB9 is AF8, unlike F205/F405's AF9. Verified against
+     * DS11581 table 11 and the historical White gpio_init STM32F4 branch. */
+    uint32_t port=0x40020400U; unsigned rx,tx,af=c==1 ? 8 : c==3 ? 11 : 9;
     if (c==1) { rx=8; tx=9; }
     else if (c==2) { rx=c==config->swcan_controller ? 12 : 5; tx=rx+1; }
     else if (c==config->swcan_controller) { rx=3; tx=4; }
@@ -121,7 +124,7 @@ bool vgw_white_can_init(vgw_white_can *s,const vgw_white_clock *clock,const vgw_
 fail:
   vgw_white_can_stop(s); return false;
 }
-static void account(vgw_white_can *s,unsigned c,uint32_t now,uint32_t bits) {
+static RAM void account(vgw_white_can *s,unsigned c,uint32_t now,uint32_t bits) {
   vgw_white_can_stats *st=&s->stats[c-1];
   for (unsigned w=0;w<3;w++) {
     uint32_t span=w==0 ? 10 : w==1 ? 100 : 1000;
@@ -136,7 +139,7 @@ static void account(vgw_white_can *s,unsigned c,uint32_t now,uint32_t bits) {
     if (load>st->peak_permille) st->peak_permille=load;
   }
 }
-bool vgw_white_can_poll(vgw_white_can *s,vgw_can_receive receive,void *context) {
+RAM bool vgw_white_can_poll(vgw_white_can *s,vgw_can_receive receive,void *context) {
   if (!s || !s->ready || s->failed) return false;
   if (s->config_check!=config_check(&s->config) || !vgw_white_clock_valid(s->clock)) goto fail;
   uint32_t now=rd(s,0x40000024U), delta=now-s->previous_ms;

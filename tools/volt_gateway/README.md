@@ -1,11 +1,46 @@
 # Volt gateway off-device work
 
+Current status: the complete loader and A/B applications now link and execute
+through signed boot and application confirmation in Cortex-M4 emulation.
+`board_build.py` builds these images; `device_cli.py` supplies paired USB
+observation commands; `update_device.py` supplies the interactive workstation
+update path. SWCAN is logical bus 3 regardless of mux. Outputs remain
+`NOT_RELEASED` pending physical/key gates. See the authoritative
+[board integration report](../../docs/volt-gateway-board-integration.md).
+The attached labeled Panda has now executed the RAM-only USB/ADC/identity probe:
+**revision C, DEV_ID 0x463, 1024 KiB flash**. The old ROM descriptor's 1536 KiB
+must not be used for layout. Current A/B slots are 384 KiB each. Original flash
+and production comma/Tres are unchanged.
+
+## Current entrypoints
+
+- `board_build`: complete loader and separately linked A/B ELF files.
+- `operator keygen`: owner-controlled encrypted workstation signing key.
+- `provisioning`: private USB-commanded, CAN-listen-only device credentials.
+- `bench_image`: private initial 1-MiB image with signed/confirmed A and B.
+  **Contains secrets; never Git, public release or comma storage.** No flashing.
+- `device_cli`: authenticated USB discovery, capture, subscriptions and status.
+- `update_device`: independently authorized update using a public signed package;
+  private signing material stays on the workstation.
+- `ram_probe` / `ram_probe_load`: explicitly volatile board probe, no CAN driver
+  or flash programming. ROM must already be entered; automatic return after 120 s.
+- `validate`: all offline tests, actual Cortex-M4 image builds and static checks.
+
+No tool here is registered as an openpilot driving process. Shared-bus CAN IDs,
+primary-Tres changes, physical CAN verification and production provisioning are
+not implicitly approved by a passing offline test report.
+
+## Historical module inventory
+
+The component-only descriptions below are historical, not current release claims.
+
 `white_can.c`, `recovery_link.c` and `white_runtime.c` now connect the board
 startup, clock/RNG, polling CAN driver, observer, ISO-TP request/reply and
 watchdog. `test_runtime_emulation.py` executes reset into this composition
-with modeled peripherals. The authenticated dispatcher, protected provisioning
-and flash-busy recovery loop are still missing; this is not deployable firmware.
-See [integration status](../../docs/volt-gateway-can-runtime.md).
+with modeled peripherals. The authenticated recovery dispatcher and RAM-only
+flash-busy service are now integrated and tested off-device. Protected provisioning,
+physical safety inputs and a complete deployable image remain unfinished.
+See [integration status](../../docs/volt-gateway-recovery-integration.md).
 
 `chip_inspect.py` performs fixed read-only ROM DFU chip/option-byte queries on
 the exact labeled Panda; it does not enter DFU or program anything.

@@ -1,5 +1,29 @@
 # White Panda inventory
 
+## Actual flash-size correction — later 2026-09-16 RAM probe
+
+The labeled device executed a volatile SRAM-only probe that read DBGMCU DEV_ID
+`0x463` and the actual flash-size register **1024 KiB**. Its preserved diagnostic
+marker was `0x14630400` (tag `0x10000000`, DEV_ID shifted 16, size in KiB).
+The earlier ROM DFU descriptor advertised 1536 KiB: that describes the ROM's
+family-wide address map, **not this chip's installed flash capacity**.
+
+This supersedes the earlier 1.5-MiB assumption below. Do not program beyond
+`0x080fffff`. Both original 1.5-MiB readback files remain preserved unchanged;
+their extra 512 KiB must not be used as evidence of physical flash. The first
+1 MiB of the first backup has SHA-256
+`b34e88c141a128ad6505fb88260c158da9df59fdfec4b7a75c3a155638ff6279`.
+No flash or option bytes were written during the probe. Power/reset returns to
+the original firmware. The gateway is being linked for two 384-KiB A/B slots,
+with the existing 128-KiB loader and 128-KiB provisioning regions retained.
+
+The subsequent successful USB probe read raw DBGMCU_IDCODE `0x10006463`
+(DEV_ID `0x463`, REV_ID `0x1000`) and the historical PA13 revision-C strap.
+It enumerated through Windows/WSL and reported valid 4767-mV supply sampling.
+See [hardware evidence](evidence/volt-gateway/ram-probe-20260916.json).
+Earlier unknown-revision/geometry statements below are retained as history,
+not current findings. The package marking/suffix remains unobserved.
+
 ## Follow-up chip/protection inspection — 2026-09-16
 
 Owner reconfirmed the labeled unit is USB-only, disconnected from any vehicle.

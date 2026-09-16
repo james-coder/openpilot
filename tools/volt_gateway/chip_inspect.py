@@ -6,10 +6,14 @@ ROM may reject peripheral/system reads; report that rather than bypassing it.
 """
 from contextlib import closing
 import json
+import struct
 import time
 
 SERIAL = '365236793036'
 FIELDS = {'flash_kib': (0, 0x1fff7a22, 2), 'debug_idcode': (0, 0xe0042000, 4),
+          'legacy_rom_vectors': (0, 0x1fff0000, 8), 'f413_rom_vectors': (0, 0x1ff00000, 8),
+          'probe_stage': (0, 0x2001c000, 16),
+          'probe_usb_trace': (0, 0x2001c000, 288),
           'option_bytes': (1, 0x1fffc000, 16)}
 
 
@@ -84,6 +88,18 @@ def inspect():
         for name in FIELDS:
           try:
             raw = read_field(h, name)
+            if name in ('probe_stage', 'probe_usb_trace'):
+              magic, stage, inverse, end = struct.unpack_from('<4I', raw)
+              if magic != 0x56505231 or end != 0x31475052 or inverse != stage ^ 0xffffffff:
+                raise ValueError('no valid probe marker; unrelated SRAM contents withheld')
+              report['fields'][name] = {'stage': stage}
+              if name == 'probe_usb_trace':
+                count, revision, chip_id = struct.unpack_from('<3I', raw, 16)
+                if count > 32 or revision > 1:
+                  raise ValueError('invalid probe trace metadata; contents withheld')
+                report['fields'][name].update(rev_c=revision, chip_id=chip_id,
+                  setup_packets=[raw[32+8*i:40+8*i].hex() for i in range(count)])
+              continue
             report['fields'][name] = {'raw_hex': raw.hex(), 'value': decode_options(raw) if name == 'option_bytes' else int.from_bytes(raw, 'little')}
           except (ValueError, usb1.USBError) as e:
             report['fields'][name] = {'unavailable': type(e).__name__, 'reason': str(e)}

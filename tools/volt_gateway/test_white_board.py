@@ -88,7 +88,7 @@ def test_pin_configuration_readback(lib, port, offset):
   assert not lib.vgw_white_quiesce(C.byref(regs.io))
 
 
-@pytest.mark.parametrize('device,size,ok', [(0x463,1536,True), (0x463,1024,False), (0x413,1536,False), (0,0,False)])
+@pytest.mark.parametrize('device,size,ok', [(0x463,1024,True), (0x463,1536,False), (0x413,1024,False), (0,0,False)])
 def test_read_only_identity_gate(lib, device, size, ok):
   regs = Registers()
   regs.values.update({0xe0042000: 0x10000000 | device, 0x1fff7a22: size})

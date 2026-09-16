@@ -6,8 +6,8 @@ The White Panda must enforce this independently of Linux and the primary Panda.
 
 Candidate pairing: per-device random 256-bit secret, healthy fresh boot/session
 challenges, HKDF-SHA256 directional keys and HMAC-SHA256 truncated to 128 bits.
-Prototype envelope checks exist; MCU RNG health, pairing and session negotiation
-are NOT implemented. Fail closed without freshness/entropy; no fixed session
+MCU RNG health, pairing and session negotiation are implemented in the board
+composition and tested off-device. Fail closed without freshness/entropy; no fixed session
 fallback. Expiry/reboot invalidates runtime permissions and pending fragments.
 
 ## Lifecycle
@@ -43,8 +43,9 @@ encrypted off-device; a Git clone must not recover signing authority.
 Image authenticity is not installation permission. Require a fresh single-use
 operator authorization binding device, phase, random boot session/challenge,
 manifest digest (including image hash, layout, size, version and build), and a
-bounded lease. Application ENTER and loader PROGRAM are distinct phases. The
-loader obtains fresh authorization after reset and independently checks it.
+bounded lease. The authority codec distinguishes ENTER and PROGRAM. The current
+board uses PROGRAM directly in the application or standalone recovery loader,
+without an intermediate reset. A reset requires fresh independent authorization.
 An old signed image plus the compromised routine key cannot start an update.
 Expired/rebooted sessions need new operator authorization; identical transport
 retries return cached replies instead of repeating erase/program effects.
@@ -53,8 +54,8 @@ Automatic revert to the previously confirmed image needs no operator secret.
 Implemented off-device: fixed-size signed records, public-only Python verifier,
 portable C authority gate, interactive encrypted-key tooling and allowlisted
 public-release packaging. No real signing/pairing secrets have been generated or
-provisioned. C signature/RNG callbacks still need a vetted board implementation.
-Do not treat a compiled gate with host crypto as a secure bootloader deployment.
+provisioned. C signature/RNG callbacks now have real board implementations and
+instruction-level tests. Do not treat emulation as a secure deployment.
 Corrupt provisioning must fail closed even when both application slots are invalid.
 
 `operator.py` prompts on a terminal, disables core dumps and rejects unencrypted

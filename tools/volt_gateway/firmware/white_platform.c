@@ -66,14 +66,14 @@ static RAM bool reg_write(void *ctx, uint32_t address, uint32_t value) {
 }
 static RAM bool read_flash(void *ctx, uint32_t address, uint8_t *out, uint32_t size) {
   (void)ctx;
-  if (!out || address<0x08000000U || address>0x08180000U || size>0x08180000U-address) return false;
+  if (!out || address<0x08000000U || address>0x08100000U || size>0x08100000U-address) return false;
   const volatile uint8_t *src=(const volatile uint8_t *)(uintptr_t)address;
   for (uint32_t i=0;i<size;i++) out[i]=src[i];
   return true;
 }
 static RAM bool program8(void *ctx, uint32_t address, uint8_t value) {
   (void)ctx;
-  if (address<0x08040000U || address>=0x08180000U) return false;
+  if (address<0x08040000U || address>=0x08100000U) return false;
   *(volatile uint8_t *)(uintptr_t)address=value;
   __asm__ volatile("dsb" ::: "memory");
   return true;

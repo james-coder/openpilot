@@ -28,4 +28,7 @@ bool vgw_crypto_hash_start(void *);
 bool vgw_crypto_hash_add(void *, const uint8_t *, size_t);
 bool vgw_crypto_hash_finish(void *, uint8_t out[32]);
 bool vgw_crypto_hmac(const uint8_t key[32], const uint8_t *, size_t, uint8_t out[32]);
+/* Board-only cooperative verifier binding. The callback must not enter any
+ * cryptography or dispatch requests; service bounded RX/watchdog work only. */
+bool vgw_crypto_cooperative_init(bool (*service)(void *),void *);
 #endif

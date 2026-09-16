@@ -1,5 +1,11 @@
 # MCUboot direct-XIP/revert C integration — off-device only
 
+**Current integration/layout:** see [board integration](volt-gateway-board-integration.md).
+The historical 640-KiB slot proposal below is superseded by the hardware-verified
+1-MiB chip: two 384-KiB slots at offsets `0x40000` and `0xa0000`, three erase
+sectors each. Historical test counts and component limitations below describe
+their dated milestones, not the current integrated code.
+
 ## Cortex-M4 execution and LED status follow-up
 
 `mcuboot_port.py --arm` now links the actual loader and crypto into a

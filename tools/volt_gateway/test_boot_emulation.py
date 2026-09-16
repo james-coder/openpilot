@@ -97,5 +97,5 @@ def test_verified_loader_uses_real_msp_vtor_handoff(elf,key,slot):
 
 
 def test_both_invalid_never_handoff(elf,key):
-  result = boot_emulation.run(elf,b'\xff'*0x180000,key.public_key().export_key(format='DER'),TARGET,physical_handoff=True)
+  result = boot_emulation.run(elf,b'\xff'*0x100000,key.public_key().export_key(format='DER'),TARGET,physical_handoff=True)
   assert result['selected']==-1 and result['handoff'] is None

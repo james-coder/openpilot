@@ -3,6 +3,7 @@ venv/
 .ci_cache
 .env
 .voltgw-private/
+factory-flash.bin
 .clang-format
 .DS_Store
 .tags

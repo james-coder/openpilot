@@ -27,7 +27,7 @@ void vgw_platform_entry(void) {
     uint8_t value=0;
     bool ok=flash.reg_write(flash.ctx,0x40023c00U,5) && !flash.reg_write(flash.ctx,0x40023c08U,1) &&
       !flash.program8(flash.ctx,0x08000000U,0) && flash.program8(flash.ctx,0x08040000U,0xa5) &&
-      flash.read(flash.ctx,0x08040000U,&value,1) && value==0xa5 && !flash.read(flash.ctx,0x08180000U,&value,1);
+      flash.read(flash.ctx,0x08040000U,&value,1) && value==0xa5 && !flash.read(flash.ctx,0x08100000U,&value,1);
     vgw_platform_result=ok;
   } else if (vgw_platform_mode==1) {
     uint32_t before, during, after;

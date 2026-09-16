@@ -1,5 +1,21 @@
-from openpilot.tools.volt_gateway.validate import command, junit_summary
+from openpilot.tools.volt_gateway.validate import command, junit_summary, source_hashes
 import sys
+
+
+def test_source_snapshot_detects_additions_edits_and_removals(tmp_path):
+  original = tmp_path / 'first.c'
+  original.write_text('one')
+  snapshot = source_hashes(tmp_path, tmp_path)
+  original.write_text('two')
+  assert source_hashes(tmp_path, tmp_path) != snapshot
+  original.write_text('one')
+  added = tmp_path / 'new.c'
+  added.write_text('three')
+  assert source_hashes(tmp_path, tmp_path) != snapshot
+  added.unlink()
+  assert source_hashes(tmp_path, tmp_path) == snapshot
+  original.unlink()
+  assert source_hashes(tmp_path, tmp_path) != snapshot
 
 
 def test_skip_is_not_pass(tmp_path):

@@ -12,8 +12,8 @@ import pytest
 
 from openpilot.tools.volt_gateway import mcuboot_port, target_crypto
 
-SIZE, SLOT_SIZE = 0x180000, 0xa0000
-SLOTS = (0x40000, 0xe0000)
+SIZE, SLOT_SIZE = 0x100000, 0x60000
+SLOTS = (0x40000, 0xa0000)
 TARGET = b'test-device!' + hashlib.sha256(b'candidate-layout-only').digest()
 MAGIC = bytes.fromhex('77c295f360d2ef7f3552500f2cb67980')
 
@@ -128,7 +128,7 @@ def test_trial_write_fault_never_selects(library, key, kind):
 
 
 @pytest.mark.parametrize('kind', [1, 2, 3, 4, 5])
-@pytest.mark.parametrize('sector', range(1, 6))
+@pytest.mark.parametrize('sector', range(1, 4))  # three 128-KiB sectors per measured 384-KiB slot
 def test_revert_erase_fault(library, key, kind, sector):
   a = image(key, 0, 1, confirmed=True)
   # Populate entire invalid slot so false-success erases cannot pass vacuously.

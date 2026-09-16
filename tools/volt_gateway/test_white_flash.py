@@ -15,8 +15,8 @@ BOOL = C.CFUNCTYPE(B, P)
 VOID = C.CFUNCTYPE(None, P)
 ACR, KEYR, SR, CR = 0x40023c00, 0x40023c04, 0x40023c0c, 0x40023c10
 LOCK, BUSY = 1 << 31, 1 << 16
-SLOT_SIZE, SECTOR = 0xa0000, 0x20000
-BASES = (0x08040000, 0x080e0000)
+SLOT_SIZE, SECTOR = 0x60000, 0x20000
+BASES = (0x08040000, 0x080a0000)
 MAGIC = bytes.fromhex('77c295f360d2ef7f3552500f2cb67980')
 
 
@@ -153,7 +153,7 @@ class Model:
 
 
 @pytest.mark.parametrize('slot', [0,1])
-@pytest.mark.parametrize('sector', range(5))
+@pytest.mark.parametrize('sector', range(3))
 def test_exact_sector_erase(lib, slot, sector):
   m = Model(lib,slot)
   m.memory[:] = b'\x66'*SLOT_SIZE

@@ -14,8 +14,9 @@ from openpilot.tools.volt_gateway.authority import AuthorityError, ImageManifest
 from openpilot.tools.volt_gateway.operator import sign_image
 from openpilot.tools.volt_gateway.release import package
 
-SLOTS = (0x40000, 0xe0000)
-SLOT_SIZE = 0xa0000
+FLASH_SIZE = 0x100000
+SLOTS = (0x40000, 0xa0000)
+SLOT_SIZE = 0x60000
 HEADER_SIZE = 512
 HEADER = struct.Struct('<IIHHIIBBHII')
 MAGIC = bytes.fromhex('77c295f360d2ef7f3552500f2cb67980')

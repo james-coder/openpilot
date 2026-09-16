@@ -29,7 +29,7 @@ def lib(tmp_path_factory):
 
 def registers(ignore=None):
   r = Registers(ignore=ignore)
-  r.values.update({0xe0042000:0x10000463,0x1fff7a22:1536,CSR:3,0x40023800:3})
+  r.values.update({0xe0042000:0x10000463,0x1fff7a22:1024,CSR:3,0x40023800:3})
   return r
 
 

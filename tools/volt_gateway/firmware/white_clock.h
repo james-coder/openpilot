@@ -10,5 +10,7 @@ typedef struct { vgw_white_startup *startup; bool ready; } vgw_white_clock;
  * rolling its counter back; transition time is not a calibrated time source.
  * Failure latches watchdog failure and leaves CAN disabled. */
 bool vgw_white_clock_init(vgw_white_clock *, vgw_white_startup *);
+/* USB-only protected entry, cannot satisfy CAN's watchdog requirement. */
+bool vgw_white_clock_usb_only(vgw_white_clock *,vgw_white_startup *);
 bool vgw_white_clock_valid(const vgw_white_clock *);
 #endif

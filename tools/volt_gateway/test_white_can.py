@@ -132,6 +132,14 @@ def test_mux_filters_silent_and_bounded_receive(lib,swcan,hscan):
   assert not any(BASES[1]+0x200<=a<BASES[1]+0x300 for a,_ in h.writes)
   for ctrl,b in enumerate(BASES,1):
     if ctrl==swcan or hscan&(1<<(ctrl-1)):
+      # Independent F413 pin table, not inferred from the driver's choices.
+      pins=([(0x40020400,8,8),(0x40020400,9,8)] if ctrl==1 else
+            [(0x40020400,12,9),(0x40020400,13,9)] if ctrl==2 and ctrl==swcan else
+            [(0x40020400,5,9),(0x40020400,6,9)] if ctrl==2 else
+            [(0x40020400,3,11),(0x40020400,4,11)] if ctrl==swcan else
+            [(0x40020000,8,11),(0x40020000,15,11)])
+      for port,pin,af in pins:
+        assert h.values[port+32+4*(pin//8)]>>(4*(pin%8))&15==af
       assert h.values[b+28]&0x80000000
       h.inject(ctrl,0x10734099,b'abcdefgh',1)
       h.inject(ctrl,0x123,b'\x01\x02')

@@ -1,0 +1,26 @@
+Booting from ROM..c[?7l[2JLAB_KERNEL
+6.8.0-90-generic
+dummy_udc.0
+/dev/raw-gadget
+CASE=0 authorized=0 driver_bindings=0 descriptor_bytes=227
+PROFILE_MATCH
+CASE=1 authorized=0 driver_bindings=0 descriptor_bytes=236
+PROFILE_REJECT
+CASE=2 authorized=0 driver_bindings=0 descriptor_bytes=236
+PROFILE_REJECT
+CASE=3 authorized=0 driver_bindings=0 descriptor_bytes=236
+PROFILE_REJECT
+CASE=4 authorized=0 driver_bindings=0 descriptor_bytes=236
+PROFILE_REJECT
+CASE=5 authorized=0 driver_bindings=0 descriptor_bytes=236
+PROFILE_REJECT
+CASE=6 authorized=0 driver_bindings=0 descriptor_bytes=236
+PROFILE_REJECT
+CASE=7 authorized=0 driver_bindings=0 descriptor_bytes=227
+PROFILE_REJECT
+CASE=1 authorized=0 driver_bindings=0 descriptor_bytes=236
+PROFILE_REJECT
+CASE=0 authorized=0 driver_bindings=0 descriptor_bytes=227
+PROFILE_MATCH
+LAB_DONE
+[   44.165196] reboot: Power down

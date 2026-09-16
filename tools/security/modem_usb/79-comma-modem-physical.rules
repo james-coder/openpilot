@@ -1,0 +1,5 @@
+# Candidate only. Physical controller + interface, not ttyUSB enumeration order.
+# Kernel policy validates the profile and driver binding before these exist.
+SUBSYSTEM=="tty", KERNELS=="a800000.dwc3", ENV{ID_USB_INTERFACE_NUM}=="00", SYMLINK+="modem_diag", GROUP="gpio", MODE="0660"
+SUBSYSTEM=="tty", KERNELS=="a800000.dwc3", ENV{ID_USB_INTERFACE_NUM}=="02", SYMLINK+="modem_at0", GROUP="gpio", MODE="0660", ENV{ID_MM_PORT_IGNORE}="1"
+SUBSYSTEM=="tty", KERNELS=="a800000.dwc3", ENV{ID_USB_INTERFACE_NUM}=="03", SYMLINK+="modem_at1", GROUP="gpio", MODE="0660", ENV{ID_MM_PORT_IGNORE}="1"

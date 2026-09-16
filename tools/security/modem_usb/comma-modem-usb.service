@@ -1,0 +1,19 @@
+[Unit]
+Description=Physical-port modem USB authorization (candidate kernel only)
+After=systemd-udevd.service
+Before=lte.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -I /usr/local/lib/comma-modem-usb/authorize.py
+Restart=on-failure
+RestartSec=30
+UMask=0077
+Nice=10
+NoNewPrivileges=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/sys /run
+
+[Install]
+WantedBy=multi-user.target

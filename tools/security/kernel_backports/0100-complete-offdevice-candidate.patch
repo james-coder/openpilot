@@ -1,0 +1,428 @@
+diff --git a/arch/arm64/boot/dts/qcom/comma_common.dtsi b/arch/arm64/boot/dts/qcom/comma_common.dtsi
+index 8d1f23c0..4f762c90 100644
+--- a/arch/arm64/boot/dts/qcom/comma_common.dtsi
++++ b/arch/arm64/boot/dts/qcom/comma_common.dtsi
+@@ -98,6 +98,11 @@
+   status = "ok";
+ };
+ 
++/* Bluetooth UART; GPS retains hsuart0. Based on commaai kernel PR #106. */
++&qupv3_se6_4uart {
++  status = "ok";
++};
++
+ /* regulators */
+ 
+ // IMU regulators
+diff --git a/arch/arm64/boot/dts/qcom/comma_tizi.dts b/arch/arm64/boot/dts/qcom/comma_tizi.dts
+index a7a6678e..35cf96af 100644
+--- a/arch/arm64/boot/dts/qcom/comma_tizi.dts
++++ b/arch/arm64/boot/dts/qcom/comma_tizi.dts
+@@ -24,6 +24,11 @@
+ #include "comma_common.dtsi"
+ #include "dsi-panel-mate10-lite-video.dtsi"
+ 
++/* Candidate-only policy: external USB0/gadget recovery remains unchanged. */
++&usb1 {
++  comma,untrusted-modem-host;
++};
++
+ /* touch panel I2C, /dev/i2c-2 */
+ &qupv3_se5_i2c {
+   status = "ok";
+diff --git a/arch/arm64/boot/dts/qcom/sdm845.dtsi b/arch/arm64/boot/dts/qcom/sdm845.dtsi
+index afc4b75f..229a8489 100644
+--- a/arch/arm64/boot/dts/qcom/sdm845.dtsi
++++ b/arch/arm64/boot/dts/qcom/sdm845.dtsi
+@@ -48,7 +48,8 @@
+ 		i2c0 = &qupv3_se10_i2c;
+ 		i2c1 = &qupv3_se4_i2c;
+ 		i2c2 = &qupv3_se5_i2c;
+-		hsuart0 = &qupv3_se6_4uart;
++		hsuart0 = &qupv3_gps_uart;
++		hsuart1 = &qupv3_se6_4uart;
+ 	};
+ 
+ 	cpus {
+diff --git a/arch/arm64/configs/tici_defconfig b/arch/arm64/configs/tici_defconfig
+index 564f7ac8..aaf0c132 100644
+--- a/arch/arm64/configs/tici_defconfig
++++ b/arch/arm64/configs/tici_defconfig
+@@ -1147,13 +1147,13 @@ CONFIG_CAN_MCP25XXFD=n
+ # CONFIG_CAN_8DEV_USB is not set
+ # CONFIG_CAN_DEBUG_DEVICES is not set
+ # CONFIG_IRDA is not set
+-CONFIG_BT=n
+-CONFIG_BT_BREDR=n
+-# CONFIG_BT_RFCOMM is not set
++CONFIG_BT=y
++CONFIG_BT_BREDR=y
++CONFIG_BT_RFCOMM=y
+ # CONFIG_BT_BNEP is not set
+ # CONFIG_BT_HIDP is not set
+ CONFIG_BT_HS=n
+-CONFIG_BT_LE=n
++CONFIG_BT_LE=y
+ # CONFIG_BT_LEDS is not set
+ # CONFIG_BT_SELFTEST is not set
+ CONFIG_BT_DEBUGFS=n
+@@ -1163,14 +1163,16 @@ CONFIG_BT_DEBUGFS=n
+ #
+ # CONFIG_BT_HCIBTUSB is not set
+ # CONFIG_BT_HCIBTSDIO is not set
+-# CONFIG_BT_HCIUART is not set
++CONFIG_BT_HCIUART=y
++CONFIG_BT_HCIUART_H4=y
++CONFIG_BT_HCIUART_QCA=y
+ # CONFIG_BT_HCIBCM203X is not set
+ # CONFIG_BT_HCIBFUSB is not set
+ # CONFIG_BT_HCIVHCI is not set
+ # CONFIG_BT_MRVL is not set
+-CONFIG_MSM_BT_POWER=n
+-CONFIG_BTFM_SLIM=n
+-CONFIG_BTFM_SLIM_WCN3990=n
++CONFIG_MSM_BT_POWER=y
++CONFIG_BTFM_SLIM=y
++CONFIG_BTFM_SLIM_WCN3990=y
+ # CONFIG_AF_RXRPC is not set
+ # CONFIG_AF_KCM is not set
+ # CONFIG_STREAM_PARSER is not set
+diff --git a/drivers/usb/core/Makefile b/drivers/usb/core/Makefile
+index b99b871c..8ed59d7b 100644
+--- a/drivers/usb/core/Makefile
++++ b/drivers/usb/core/Makefile
+@@ -5,7 +5,7 @@
+ usbcore-y := usb.o hub.o hcd.o urb.o message.o driver.o
+ usbcore-y += config.o file.o buffer.o sysfs.o endpoint.o
+ usbcore-y += devio.o notify.o generic.o quirks.o devices.o
+-usbcore-y += port.o
++usbcore-y += port.o modem-policy.o
+ 
+ usbcore-$(CONFIG_OF)		+= of.o
+ usbcore-$(CONFIG_PCI)		+= hcd-pci.o
+diff --git a/drivers/usb/core/config.c b/drivers/usb/core/config.c
+index f794741b..666316ce 100644
+--- a/drivers/usb/core/config.c
++++ b/drivers/usb/core/config.c
+@@ -923,7 +923,7 @@ int usb_get_bos_descriptor(struct usb_device *dev)
+ 	struct usb_bos_descriptor *bos;
+ 	struct usb_dev_cap_header *cap;
+ 	struct usb_ssp_cap_descriptor *ssp_cap;
+-	unsigned char *buffer;
++	unsigned char *buffer, *buffer0;
+ 	int length, total_len, num, i, ssac;
+ 	__u8 cap_type;
+ 	int ret;
+@@ -934,8 +934,8 @@ int usb_get_bos_descriptor(struct usb_device *dev)
+ 
+ 	/* Get BOS descriptor */
+ 	ret = usb_get_descriptor(dev, USB_DT_BOS, 0, bos, USB_DT_BOS_SIZE);
+-	if (ret < USB_DT_BOS_SIZE) {
+-		dev_err(ddev, "unable to get BOS descriptor\n");
++	if (ret < USB_DT_BOS_SIZE || bos->bLength < USB_DT_BOS_SIZE) {
++		dev_err(ddev, "unable to get BOS descriptor or descriptor too short\n");
+ 		if (ret >= 0)
+ 			ret = -ENOMSG;
+ 		kfree(bos);
+@@ -968,10 +968,12 @@ int usb_get_bos_descriptor(struct usb_device *dev)
+ 			ret = -ENOMSG;
+ 		goto err;
+ 	}
++
++	buffer0 = buffer;
+ 	total_len -= length;
++	buffer += length;
+ 
+ 	for (i = 0; i < num; i++) {
+-		buffer += length;
+ 		cap = (struct usb_dev_cap_header *)buffer;
+ 
+ 		if (total_len < sizeof(*cap) || total_len < cap->bLength) {
+@@ -985,8 +987,6 @@ int usb_get_bos_descriptor(struct usb_device *dev)
+ 			break;
+ 		}
+ 
+-		total_len -= length;
+-
+ 		if (cap->bDescriptorType != USB_DT_DEVICE_CAPABILITY) {
+ 			dev_warn(ddev, "descriptor type invalid, skip\n");
+ 			continue;
+@@ -1030,7 +1030,11 @@ int usb_get_bos_descriptor(struct usb_device *dev)
+ 		default:
+ 			break;
+ 		}
++
++		total_len -= length;
++		buffer += length;
+ 	}
++	dev->bos->desc->wTotalLength = cpu_to_le16(buffer - buffer0);
+ 
+ 	return 0;
+ 
+diff --git a/drivers/usb/core/devio.c b/drivers/usb/core/devio.c
+index 893ebae5..89ca9d3d 100644
+--- a/drivers/usb/core/devio.c
++++ b/drivers/usb/core/devio.c
+@@ -2381,6 +2381,12 @@ static long usbdev_do_ioctl(struct file *file, unsigned int cmd,
+ 	struct usb_device *dev = ps->dev;
+ 	int ret = -ENOTTY;
+ 
++	/* No production modem transport uses raw usbfs. Block control/config,
++	 * reset and claim ioctls, including compat, on this physical host.
++	 */
++	if (usb_modem_device(dev))
++		return -EPERM;
++
+ 	if (!(file->f_mode & FMODE_WRITE))
+ 		return -EPERM;
+ 
+diff --git a/drivers/usb/core/driver.c b/drivers/usb/core/driver.c
+index 55322469..6d7c3769 100644
+--- a/drivers/usb/core/driver.c
++++ b/drivers/usb/core/driver.c
+@@ -292,6 +292,8 @@ static int usb_probe_interface(struct device *dev)
+ 
+ 	if (usb_device_is_owned(udev))
+ 		return error;
++	if (!usb_modem_driver_allowed(udev, intf, driver))
++		return -EPERM;
+ 
+ 	if (udev->authorized == 0) {
+ 		dev_err(&intf->dev, "Device is not authorized for usage\n");
+@@ -523,6 +525,8 @@ int usb_driver_claim_interface(struct usb_driver *driver,
+ 		return -ENODEV;
+ 
+ 	udev = interface_to_usbdev(iface);
++	if (!usb_modem_driver_allowed(udev, iface, driver))
++		return -EPERM;
+ 
+ 	dev->driver = &driver->drvwrap.driver;
+ 	usb_set_intfdata(iface, priv);
+diff --git a/drivers/usb/core/hcd.c b/drivers/usb/core/hcd.c
+index 6a4ea986..974213a4 100644
+--- a/drivers/usb/core/hcd.c
++++ b/drivers/usb/core/hcd.c
+@@ -2857,6 +2857,14 @@ int usb_add_hcd(struct usb_hcd *hcd,
+ 	/* per default all interfaces are authorized */
+ 	set_bit(HCD_FLAG_INTF_AUTHORIZED, &hcd->flags);
+ 
++	/* Both companion HCDs inherit the physical controller's DT policy.
++	 * This precedes root-hub registration and downstream enumeration.
++	 */
++	if (usb_modem_host(hcd->self.controller)) {
++		clear_bit(HCD_FLAG_DEV_AUTHORIZED, &hcd->flags);
++		clear_bit(HCD_FLAG_INTF_AUTHORIZED, &hcd->flags);
++	}
++
+ 	/* HC is in reset state, but accessible.  Now do the one-time init,
+ 	 * bottom up so that hcds can customize the root hubs before hub_wq
+ 	 * starts talking to them.  (Note, bus id is assigned early too.)
+diff --git a/drivers/usb/core/hub.c b/drivers/usb/core/hub.c
+index a9b3bbd8..862628f6 100644
+--- a/drivers/usb/core/hub.c
++++ b/drivers/usb/core/hub.c
+@@ -2539,6 +2539,10 @@ int usb_authorize_device(struct usb_device *usb_dev)
+ 	usb_lock_device(usb_dev);
+ 	if (usb_dev->authorized == 1)
+ 		goto out_authorized;
++	if (!usb_modem_profile(usb_dev)) {
++		result = -EPERM;
++		goto out_authorized;
++	}
+ 
+ 	result = usb_autoresume_device(usb_dev);
+ 	if (result < 0) {
+@@ -5490,6 +5494,11 @@ static int usb_reset_and_verify_device(struct usb_device *udev)
+ 		return -EISDIR;
+ 
+ 	parent_hub = usb_hub_to_struct_hub(parent_hdev);
++	/* Never reuse interface approvals across reset on the untrusted port.
++	 * Logical disconnect forces fresh default-deny enumeration/validation.
++	 */
++	if (usb_modem_device(udev))
++		goto re_enumerate_no_bos;
+ 
+ 	/* Disable USB2 hardware LPM.
+ 	 * It will be re-enabled by the enumeration process.
+diff --git a/drivers/usb/core/message.c b/drivers/usb/core/message.c
+index 9016a9b2..5c6fe2aa 100644
+--- a/drivers/usb/core/message.c
++++ b/drivers/usb/core/message.c
+@@ -1296,6 +1296,10 @@ int usb_set_interface(struct usb_device *dev, int interface, int alternate)
+ 	unsigned int epaddr;
+ 	unsigned int pipe;
+ 
++	if (usb_modem_device(dev) &&
++	    (alternate != 0 || !usb_modem_profile(dev)))
++		return -EPERM;
++
+ 	if (dev->state == USB_STATE_SUSPENDED)
+ 		return -EHOSTUNREACH;
+ 
+@@ -1465,6 +1469,10 @@ int usb_set_interface_timeout(struct usb_device *dev, int interface,
+ 	unsigned int epaddr;
+ 	unsigned int pipe;
+ 
++	if (usb_modem_device(dev) &&
++	    (alternate != 0 || !usb_modem_profile(dev)))
++		return -EPERM;
++
+ 	if (dev->state == USB_STATE_SUSPENDED)
+ 		return -EHOSTUNREACH;
+ 
+@@ -1777,6 +1785,10 @@ static int usb_if_uevent(struct device *dev, struct kobj_uevent_env *env)
+ 		   alt->desc.bInterfaceProtocol))
+ 		return -ENOMEM;
+ 
++	/* Built-in pinned modem drivers need no descriptor-driven autoload. */
++	if (usb_modem_device(usb_dev))
++		return 0;
++
+ 	if (add_uevent_var(env,
+ 		   "MODALIAS=usb:"
+ 		   "v%04Xp%04Xd%04Xdc%02Xdsc%02Xdp%02Xic%02Xisc%02Xip%02Xin%02X",
+@@ -1904,6 +1916,10 @@ int usb_set_configuration(struct usb_device *dev, int configuration)
+ 	struct usb_hcd *hcd = bus_to_hcd(dev->bus);
+ 	int n, nintf;
+ 
++	if (usb_modem_device(dev) && configuration > 0 &&
++	    (configuration != 1 || !usb_modem_profile(dev)))
++		return -EPERM;
++
+ 	if (dev->authorized == 0 || configuration == -1)
+ 		configuration = 0;
+ 	else {
+diff --git a/drivers/usb/core/sysfs.c b/drivers/usb/core/sysfs.c
+index c953a0f1..2967cc61 100644
+--- a/drivers/usb/core/sysfs.c
++++ b/drivers/usb/core/sysfs.c
+@@ -845,7 +845,11 @@ read_descriptors(struct file *filp, struct kobject *kobj,
+ 	size_t srclen, n;
+ 	int cfgno;
+ 	void *src;
++	int retval;
+ 
++	retval = usb_lock_device_interruptible(udev);
++	if (retval < 0)
++		return -EINTR;
+ 	/* The binary attribute begins with the device descriptor.
+ 	 * Following that are the raw descriptor entries for all the
+ 	 * configurations (config plus subsidiary descriptors).
+@@ -870,6 +874,7 @@ read_descriptors(struct file *filp, struct kobject *kobj,
+ 			off -= srclen;
+ 		}
+ 	}
++	usb_unlock_device(udev);
+ 	return count - nleft;
+ }
+ 
+diff --git a/drivers/usb/core/usb.h b/drivers/usb/core/usb.h
+index fbff25ff..888e52b1 100644
+--- a/drivers/usb/core/usb.h
++++ b/drivers/usb/core/usb.h
+@@ -4,6 +4,12 @@
+ struct usb_hub_descriptor;
+ struct usb_dev_state;
+ 
++extern bool usb_modem_host(struct device *controller);
++extern bool usb_modem_device(struct usb_device *dev);
++extern bool usb_modem_profile(struct usb_device *dev);
++extern bool usb_modem_driver_allowed(struct usb_device *dev,
++		struct usb_interface *intf, struct usb_driver *driver);
++
+ /* Functions local to drivers/usb/core/ */
+ 
+ extern int usb_create_sysfs_dev_files(struct usb_device *dev);
+diff --git a/drivers/usb/core/modem-policy.c b/drivers/usb/core/modem-policy.c
+new file mode 100644
+index 00000000..429b7dec
+--- /dev/null
++++ b/drivers/usb/core/modem-policy.c
+@@ -0,0 +1,87 @@
++/* SPDX-License-Identifier: GPL-2.0 */
++/* Off-device C3X candidate. Physical-host restriction, NOT authentication.
++ * Legitimate option/QMI traffic and pre-policy USB core remain attackable.
++ */
++#include <linux/of.h>
++#include <linux/usb.h>
++#include "usb.h"
++
++static const u8 modem_device_desc[] = {
++	0x12, 0x01, 0x00, 0x02, 0xef, 0x02, 0x01, 0x40, 0x7c, 0x2c, 0x25, 0x01,
++	0x18, 0x03, 0x01, 0x02, 0x00, 0x01,
++};
++
++static const u8 modem_config_desc[] = {
++	0x09, 0x02, 0xd1, 0x00, 0x05, 0x01, 0x00, 0xa0, 0xfa, 0x09, 0x04, 0x00,
++	0x00, 0x02, 0xff, 0xff, 0xff, 0x00, 0x07, 0x05, 0x81, 0x02, 0x00, 0x02,
++	0x00, 0x07, 0x05, 0x01, 0x02, 0x00, 0x02, 0x00, 0x09, 0x04, 0x01, 0x00,
++	0x03, 0xff, 0x00, 0x00, 0x00, 0x05, 0x24, 0x00, 0x10, 0x01, 0x05, 0x24,
++	0x01, 0x00, 0x00, 0x04, 0x24, 0x02, 0x02, 0x05, 0x24, 0x06, 0x00, 0x00,
++	0x07, 0x05, 0x83, 0x03, 0x0a, 0x00, 0x09, 0x07, 0x05, 0x82, 0x02, 0x00,
++	0x02, 0x00, 0x07, 0x05, 0x02, 0x02, 0x00, 0x02, 0x00, 0x09, 0x04, 0x02,
++	0x00, 0x03, 0xff, 0x00, 0x00, 0x00, 0x05, 0x24, 0x00, 0x10, 0x01, 0x05,
++	0x24, 0x01, 0x00, 0x00, 0x04, 0x24, 0x02, 0x02, 0x05, 0x24, 0x06, 0x00,
++	0x00, 0x07, 0x05, 0x85, 0x03, 0x0a, 0x00, 0x09, 0x07, 0x05, 0x84, 0x02,
++	0x00, 0x02, 0x00, 0x07, 0x05, 0x03, 0x02, 0x00, 0x02, 0x00, 0x09, 0x04,
++	0x03, 0x00, 0x03, 0xff, 0x00, 0x00, 0x00, 0x05, 0x24, 0x00, 0x10, 0x01,
++	0x05, 0x24, 0x01, 0x00, 0x00, 0x04, 0x24, 0x02, 0x02, 0x05, 0x24, 0x06,
++	0x00, 0x00, 0x07, 0x05, 0x87, 0x03, 0x0a, 0x00, 0x09, 0x07, 0x05, 0x86,
++	0x02, 0x00, 0x02, 0x00, 0x07, 0x05, 0x04, 0x02, 0x00, 0x02, 0x00, 0x09,
++	0x04, 0x04, 0x00, 0x03, 0xff, 0xff, 0xff, 0x00, 0x07, 0x05, 0x89, 0x03,
++	0x08, 0x00, 0x09, 0x07, 0x05, 0x88, 0x02, 0x00, 0x02, 0x00, 0x07, 0x05,
++	0x05, 0x02, 0x00, 0x02, 0x00,
++};
++
++bool usb_modem_host(struct device *controller)
++{
++	struct device *dev;
++
++	for (dev = controller; dev; dev = dev->parent)
++		if (of_property_read_bool(dev->of_node,
++					  "comma,untrusted-modem-host"))
++			return true;
++	return false;
++}
++
++bool usb_modem_device(struct usb_device *dev)
++{
++	return dev->parent && usb_modem_host(dev->bus->controller);
++}
++
++bool usb_modem_profile(struct usb_device *dev)
++{
++	/* Root hubs and other controllers retain their original policy. */
++	if (!usb_modem_device(dev))
++		return true;
++	if (dev->parent->parent || dev->portnum != 1 ||
++	    dev->speed != USB_SPEED_HIGH ||
++	    memcmp(&dev->descriptor, modem_device_desc,
++		   sizeof(modem_device_desc)) ||
++	    !dev->config || !dev->rawdescriptors || !dev->rawdescriptors[0] ||
++	    le16_to_cpu(dev->config[0].desc.wTotalLength) !=
++		    sizeof(modem_config_desc))
++		return false;
++	/* Parsed total length is bounded by the actual returned buffer in
++	 * usb_parse_configuration(), not just its claimed wTotalLength.
++	 */
++	return !memcmp(dev->rawdescriptors[0], modem_config_desc,
++		       sizeof(modem_config_desc));
++}
++
++bool usb_modem_driver_allowed(struct usb_device *dev,
++			     struct usb_interface *intf,
++			     struct usb_driver *driver)
++{
++	unsigned int n;
++
++	if (!usb_modem_device(dev))
++		return true;
++	if (!dev->authorized || !usb_modem_profile(dev) ||
++	    !intf->authorized || intf->num_altsetting != 1 ||
++	    intf->cur_altsetting->desc.bAlternateSetting != 0)
++		return false;
++	n = intf->cur_altsetting->desc.bInterfaceNumber;
++	return (n < 4 && !strcmp(driver->name, "option")) ||
++	       (n == 4 && !strcmp(driver->name, "qmi_wwan"));
++}
++

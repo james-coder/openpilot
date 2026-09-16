@@ -1,5 +1,11 @@
 # Secure CAN update design — not deployed
 
+Latest: [actual MCUboot C direct-XIP/revert integration](volt-gateway-boot-port.md)
+now exercises trial/confirm/revert against simulated persistent flash with real
+C signature checks. This is separate from the older Python boot model below.
+It returns verified selections but does not execute applications or implement
+target flash/recovery CAN. No production loader is deployed.
+
 Update: the target-crypto ARM harness and native integration suite now execute
 the [pinned C cryptographic backend](volt-gateway-target-crypto.md), including
 image/authorization verification and streaming received-image/readback hashes.

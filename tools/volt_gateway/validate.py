@@ -80,6 +80,13 @@ def run(output: Path):
                                       *(['--native'] if mode == 'native' else [])]))
   else:
     report['checks']['crypto_build'] = {'status': 'incomplete', 'reason': 'pinned Mbed TLS archive absent'}
+  boot_checkout = os.environ.get('VOLTGW_MCUBOOT_CHECKOUT')
+  if boot_checkout and crypto_archive.is_file():
+    steps.append(('mcuboot_direct_xip', [sys.executable, '-m', 'tools.volt_gateway.mcuboot_port',
+                                       '--checkout', boot_checkout, '--archive', str(crypto_archive),
+                                       '--output', str(output / 'mcuboot')]))
+  else:
+    report['checks']['mcuboot_direct_xip'] = {'status': 'incomplete', 'reason': 'pinned boot/crypto dependency absent'}
   for name in ('authority', 'observe', 'update'):
     steps.append(('analyze_' + name, ['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-fanalyzer', '-c',
                                     str(source / 'firmware' / (name + '.c')), '-o', str(output / (name + '-analyzed.o'))]))

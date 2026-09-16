@@ -1,5 +1,11 @@
 # Volt gateway off-device work
 
+`mcuboot_port.py` now builds the actual pinned MCUboot direct-XIP/revert C loader
+against memory-backed flash and the real crypto backend. Tests cover trial,
+confirmation, revert and storage failures; it is **not flashable firmware**.
+Set `VOLTGW_MCUBOOT_CHECKOUT` as well as the crypto archive for complete offline
+validation. See [boot port](../../docs/volt-gateway-boot-port.md).
+
 `target_crypto.py` builds a pinned Mbed TLS 3.6.7 C backend. The ARM harness can
 execute real verification, SHA256 and HMAC without host crypto hooks; native
 update/lifecycle tests exercise the same backend. This still is **not a flashable

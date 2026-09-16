@@ -1,5 +1,15 @@
 # Volt gateway implementation status and gates
 
+## Actual MCUboot C direct-XIP/revert integration — 2026-09-16
+
+The [new boot port](volt-gateway-boot-port.md) now tests the real MCUboot loader
+with both direct-XIP and revert enabled, real C crypto, and memory-backed flash.
+It adds latched storage errors/readback verification, signed device/layout
+binding, vector checks and confirmation limited to the selected slot. This
+advances beyond the Python boot oracle; it is still not a flashable board port.
+ARM startup/execution, hardware flash/RNG/watchdog, independent CAN recovery,
+release packaging and exact hardware geometry remain open. No devices changed.
+
 ## Target cryptographic backend — 2026-09-16
 
 The ARM harness now has a pinned Mbed TLS 3.6.7 backend executing P-256 verification,

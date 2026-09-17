@@ -153,3 +153,44 @@ On-wire priority/source, applicability, value encoding and update semantics
 remain unverified. Do not fill other fields with guessed zeros or replay the
 0x10814099 status frame as a command. Installed firmware still has no permitted
 vehicle-side TX rule; a narrow tested semantic rule is required before TX.
+
+### 80°F test: corrected owner labels
+
+`hvac-80f-20260917-01.jsonl` has an initial marker saying recirc ON, but the
+owner subsequently corrected that: the baseline was OUTSIDE AIR, followed by
+a switch to RECIRC ON. Treat this correction as authoritative for that marker.
+Baseline `0x10814099` was `a0724e00`; at +17.5 seconds it became `a0722300`.
+Thus observed byte-2 pairs are outside/recirc 0x50/0x24 in the earlier setting
+and 0x4E/0x23 in this test. Byte 1 also changed 0x74 -> 0x72 between tests.
+This supports a repeatable HVAC-dependent response but does not distinguish a
+direct mode field from compressor-load response. The earlier statement that
+0x4E was measured with recirc ON was incorrect, based on the initial label.
+
+### Multiplexed recirculation-selection candidate
+
+`hvac-mux-20260917-01.jsonl` records eight subscribed IDs. Explicit owner
+LED-labelled ON produced extended `0x10B02099`, DLC8,
+`0006070d00000001` at +16.14 s; explicit LED-labelled OFF produced
+`0006070d00000000` at +40.90 s. The only differing bit is byte 7 bit 0.
+DBC family 0x581 (`ODIDynamicData_LS`) suggests DataType=6, FUCID=7,
+DataId=13 and 32-bit DataVal=1/0 for these exact payloads. Any decoder must
+match the multiplexor fields, not apply this final-byte meaning to every
+frame with the same arbitration ID. This is a stronger direct-selection
+candidate than compressor-load correlation, not verified physical flap feedback
+or a command frame. Further independent repetitions remain appropriate.
+
+At both presses `0x10AD6080` changed to `0a0707022b000000`, then returned
+to `0a07070200000000` after approximately 2–3 seconds. Identical press payload
+for ON and OFF suggests a button-event candidate, not an absolute state;
+other-button comparison is needed before attributing a specific button meaning.
+
+Second independently labelled pair after the owner restarted the car, at 70°F:
+recirc ON / LED lit yielded `0006070d00000001` at epoch 1789621364.243;
+outside air / LED off yielded `0006070d00000000` at 1789621386.165.
+This repeats the first pair (1789621242.393 ON, 1789621267.156 OFF).
+The recording remained live across restart. This supports decoding recirculation
+selection for the exact multiplexor `0006070d` on `0x10B02099`, DLC8, with
+big-endian 32-bit data value 1=recirc selected and 0=outside air selected.
+Other selectors/values must remain unknown; receipt age must be preserved and
+state must not be assumed current after restart without a matching observation.
+Physical inlet-door position and any writable command remain unverified.

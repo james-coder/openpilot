@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "serial": "370022000651363038363036",
+  "dfu_serial": "365236793036",
+  "bytes": 1572864,
+  "sha256": "5b51369e41ce51c80129d4089c7499e6d0c671e1914d130856fef1bee586e5e9",
+  "two_reads_identical": true,
+  "boot_vector_plausible": true,
+  "application_length": 35916,
+  "application_signed_sha1": "87e3936657b7121a199d649f37f48867b7b17a22",
+  "application_digest_matches_prior_signature": true,
+  "application_signature_matches_prior_read": true,
+  "original_application_running_verified": true,
+  "application_version_after_return": "v1.7.3-EON-unknown-RELEASE",
+  "hardware_type_after_return": "01",
+  "restoration_tested": false,
+  "option_bytes_included": false,
+  "otp_included": false,
+  "programming_performed": false,
+  "can_transmitted": false
+}

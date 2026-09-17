@@ -7,9 +7,11 @@ from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.selfdrive.ui.onroad.alert_renderer import AlertRenderer
 from openpilot.selfdrive.ui.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.onroad.hud_renderer import HudRenderer
+from openpilot.selfdrive.ui.onroad.co2_overlay import Co2Overlay
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import gui_app
+from openpilot.common.swaglog import cloudlog
 from openpilot.common.transformations.camera import DEVICE_CAMERAS, DeviceCameraConfig, view_frame_from_device_frame
 from openpilot.common.transformations.orientation import rot_from_euler
 
@@ -45,6 +47,11 @@ class AugmentedRoadView(CameraView):
 
     self.model_renderer = ModelRenderer()
     self._hud_renderer = HudRenderer()
+    try:
+      self._co2_overlay = Co2Overlay()
+    except Exception:
+      self._co2_overlay = None
+      cloudlog.exception('Optional CO2 overlay unavailable')
     self.alert_renderer = AlertRenderer()
     self.driver_state_renderer = DriverStateRenderer()
 
@@ -81,6 +88,15 @@ class AugmentedRoadView(CameraView):
     # Draw all UI overlays
     self.model_renderer.render(self._content_rect)
     self._hud_renderer.render(self._content_rect)
+    if self._co2_overlay is not None:
+      if ui_state.sm['selfdriveState'].alertSize == log.SelfdriveState.AlertSize.none:
+        try:
+          self._co2_overlay.render(self._content_rect)
+        except Exception:
+          cloudlog.exception('Optional CO2 overlay disabled after rendering error')
+          self._co2_overlay = None
+      else:
+        self._co2_overlay.hide()
     self.alert_renderer.render(self._content_rect)
     self.driver_state_renderer.render(self._content_rect)
 
@@ -93,7 +109,15 @@ class AugmentedRoadView(CameraView):
     # Draw colored border based on driving state
     self._draw_border(rect)
 
-  def _handle_mouse_press(self, _):
+  def _handle_mouse_press(self, pos):
+    if self._co2_overlay is not None and self._co2_overlay.hit_test(pos):
+      try:
+        from openpilot.selfdrive.ui.layouts.settings.aranet import AranetLayout, graph_allowed
+        if graph_allowed():
+          gui_app.push_widget(AranetLayout(allow_parked_onroad=True))
+      except Exception:
+        cloudlog.exception('Optional cabin graph unavailable')
+      return
     if not self._hud_renderer.user_interacting() and self._click_callback is not None:
       self._click_callback()
 

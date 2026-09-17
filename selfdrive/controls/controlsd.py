@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import math
+import time
 from numbers import Number
 
 from cereal import car, log
@@ -19,6 +20,9 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
+from openpilot.selfdrive.controls.lib.volt_protection import ProtectionMonitor, plan_input, write_request
+from openpilot.selfdrive.car.volt_protection import runtime_bundle as protection_bundle, ACTUATE
+from opendbc.car.gm.volt_longitudinal import supported as volt_supported
 
 State = log.SelfdriveState.OpenpilotState
 LaneChangeState = log.LaneChangeState
@@ -36,9 +40,13 @@ class Controls:
 
     self.CI = interfaces[self.CP.carFingerprint](self.CP)
 
+    self.volt_supported = volt_supported(self.CP)
+    self.protection_bundle = protection_bundle(self.CP, self.params)
+    self.protection = ProtectionMonitor(self.protection_bundle['calibration'] if self.protection_bundle else None)
     self.sm = messaging.SubMaster(['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance'], poll='selfdriveState')
+                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance']
+                                  + (['radarState'] if self.volt_supported else []), poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState'])
 
     self.steer_limited_by_safety = False
@@ -96,6 +104,8 @@ class Controls:
     CC.latActive = self.sm['selfdriveState'].active and not CS.steerFaultTemporary and not CS.steerFaultPermanent and \
                    (not standstill or self.CP.steerAtStandstill)
     CC.longActive = CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and self.CP.openpilotLongitudinalControl
+    if self.volt_supported and (CS.brakePressed or CS.gasPressed or CS.regenBraking):
+      CC.longActive = False
 
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state
@@ -112,7 +122,7 @@ class Controls:
 
     # accel PID loop
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
-    actuators.accel = float(self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits))
+    self.update_longitudinal(CC, CS, long_plan, model_v2, pid_accel_limits, time.monotonic_ns())
 
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
@@ -140,6 +150,37 @@ class Controls:
         setattr(actuators, p, 0.0)
 
     return CC, lac_log
+
+  def update_longitudinal(self, CC, CS, long_plan, model_v2, pid_accel_limits, now_ns):
+    if self.volt_supported and (CS.brakePressed or CS.gasPressed or CS.regenBraking):
+      CC.longActive = False
+    actuators = CC.actuators
+    def age(service):
+      return (now_ns-self.sm.logMonoTime[service])/1e9 if self.sm.valid[service] and self.sm.alive[service] else float('inf')
+    target, stop, trajectory = long_plan.aTarget, long_plan.shouldStop, long_plan.voltStopTrajectoryActive
+    fresh_plan = 0 <= age('longitudinalPlan') <= .15 and math.isfinite(target)
+    if self.volt_supported:
+      target, stop, trajectory, fresh_plan = plan_input(long_plan, fresh_plan, age('longitudinalPlan'), self.LoC.last_output_accel)
+      if self.protection.cal is not None:
+        pitch = self.calibrated_pose.orientation.xyz[1] if self.calibrated_pose is not None and age('livePose') <= .15 else float('nan')
+        decision = self.protection.update(now_ns/1e9, CS, self.sm['radarState'], model_v2, radar_age=age('radarState'),
+                                          model_age=age('modelV2'), ego_age=age('carState'), pitch=pitch, radar_delay=self.CP.radarDelay,
+                                          permitted=CC.longActive)
+        write_request(CC.longitudinalProtection, decision, now_ns, self.protection.cal.authority.profile_id, bool(self.CP.flags & ACTUATE))
+        if CC.longitudinalProtection.active:
+          target, stop, trajectory = min(target, decision.ceiling), True, False
+        elif self.CP.flags & ACTUATE and decision.state == 'degraded':
+          target, stop, trajectory = min(0., target, self.LoC.last_output_accel), True, False
+    actuators.accel = float(self.LoC.update(CC.longActive, CS, target, stop, pid_accel_limits,
+                                           stop_trajectory_active=bool(trajectory and fresh_plan)))
+    # Apply priority AFTER all PID/stopping transitions as well as before them.
+    if self.volt_supported and (not fresh_plan or self.CP.flags & ACTUATE and str(CC.longitudinalProtection.state) == 'degraded'):
+      actuators.accel = min(0., actuators.accel)
+    if CC.longitudinalProtection.active:
+      actuators.accel = min(actuators.accel, CC.longitudinalProtection.accelCeiling)
+      self.LoC.last_output_accel = actuators.accel
+      self.LoC.pid.reset()
+    actuators.longControlState = self.LoC.long_control_state
 
   def publish(self, CC, lac_log):
     CS = self.sm['carState']
@@ -195,6 +236,7 @@ class Controls:
     cs.ufAccelCmd = float(self.LoC.pid.f)
     cs.forceDecel = bool((self.sm['driverMonitoringState'].alertLevel == log.DriverMonitoringState.AlertLevel.three) or
                          (self.sm['selfdriveState'].state == State.softDisabling))
+    cs.longitudinalProtection = CC.longitudinalProtection
 
     lat_tuning = self.CP.lateralTuning.which()
     if self.CP.steerControlType == car.CarParams.SteerControlType.angle:

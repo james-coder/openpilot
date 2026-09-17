@@ -1,0 +1,12 @@
+{
+  "scope": "Offline startup/watchdog register models and bounded recovery reassembly; not physical device validation",
+  "report": "/home/james/diagnostics/volt-gateway/builds/validation-startup-watchdog-20260916-01/report.json",
+  "report_sha256": "ee9a3dad872228d215dbe6c6a57e948e27a16403f81e6707b1f516a387ff62c8",
+  "tests": {"passed": 1291, "failed": 0, "skipped": 0, "new_targeted": 59},
+  "checks": "lint, Cortex-M4 core builds, native/ARM crypto and loader builds, selected GCC analysis passed",
+  "hardware_changed": false,
+  "production_ready": false,
+  "historical_revision": "4e85803018ba8cfe20d7e1eb47bc7171ee38faf4",
+  "local_newer_panda_revision": "7ffc916578af9373a165cf9df5974720d9a258a5",
+  "remaining": "Physical MMIO/clock/CAN driver, rate-limited recovery TX, authenticated dispatcher/provisioning, RNG, reset/handoff/linker integration and physical validation"
+}

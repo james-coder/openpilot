@@ -3,10 +3,12 @@ import pyray as rl
 from collections.abc import Callable
 from enum import IntEnum
 from openpilot.common.params import Params
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.widgets.offroad_alerts import UpdateAlert, OffroadAlert
 from openpilot.selfdrive.ui.widgets.exp_mode_button import ExperimentalModeButton
 from openpilot.selfdrive.ui.widgets.prime import PrimeWidget
 from openpilot.selfdrive.ui.widgets.setup import SetupWidget
+from openpilot.selfdrive.ui.onroad.co2_overlay import Co2Overlay
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
 from openpilot.system.ui.lib.multilang import tr, trn
@@ -57,6 +59,11 @@ class HomeLayout(Widget):
 
     self._prime_widget = PrimeWidget()
     self._setup_widget = SetupWidget()
+    try:
+      self._co2_overlay = Co2Overlay()
+    except Exception:
+      self._co2_overlay = None
+      cloudlog.exception('Optional parked CO2 overlay unavailable')
 
     self._exp_mode_button = ExperimentalModeButton()
     self._setup_callbacks()
@@ -99,6 +106,12 @@ class HomeLayout(Widget):
     # Render content based on current state
     if self.current_state == HomeLayoutState.HOME:
       self._render_home_content()
+      if self._co2_overlay is not None:
+        try:
+          self._co2_overlay.render(self.right_column_rect)
+        except Exception:
+          cloudlog.exception('Optional parked CO2 overlay disabled after rendering error')
+          self._co2_overlay = None
     elif self.current_state == HomeLayoutState.UPDATE:
       self._render_update_view()
     elif self.current_state == HomeLayoutState.ALERTS:
@@ -132,6 +145,13 @@ class HomeLayout(Widget):
     self.alert_notif_rect.y = self.header_rect.y + (self.header_rect.height - 60) // 2
 
   def _handle_mouse_release(self, mouse_pos: MousePos):
+    if self.current_state == HomeLayoutState.HOME and self._co2_overlay is not None and self._co2_overlay.hit_test(mouse_pos):
+      try:
+        from openpilot.selfdrive.ui.layouts.settings.aranet import AranetLayout
+        gui_app.push_widget(AranetLayout())
+      except Exception:
+        cloudlog.exception('Optional cabin graph unavailable')
+      return
     super()._handle_mouse_release(mouse_pos)
 
     if self.update_available and rl.check_collision_point_rec(mouse_pos, self.update_notif_rect):

@@ -75,6 +75,28 @@ def test_radar_memory_without_gc():
   assert result.returncode == 0, result.stdout + result.stderr
 
 
+def test_protection_metadata_distinguishes_vision_match_from_low_speed_override():
+  sm, rd = RadarInputs(), RadarD()
+  sm.logMonoTime['liveTracks'] = 1_000_000_000
+  rd.update(sm, sm.rr.as_reader())
+  lead = rd.radar_state.leadOne
+  assert lead.visionMatched and lead.measured
+  assert lead.visionProbability == pytest.approx(.9)
+  assert lead.observationMonoTime == 1_000_000_000
+  # A falling raw probability must not inherit the filtered probability.
+  sm.model.leadsV3[0].prob = .1
+  rd.update(sm, sm.rr.as_reader())
+  assert rd.radar_state.leadOne.modelProb > .5
+  assert rd.radar_state.leadOne.visionProbability == pytest.approx(.1)
+  sm.cs.vEgo = 0.
+  sm.recv_frame['carState'] += 1
+  sm.rr.points[0].dRel = 5.
+  rd.update(sm, sm.rr.as_reader())
+  lead = rd.radar_state.leadOne
+  assert lead.status and lead.radar and lead.measured
+  assert not lead.visionMatched and lead.visionProbability == 0.
+
+
 if __name__ == '__main__':
   import psutil
   sm, rd = RadarInputs(), RadarD()

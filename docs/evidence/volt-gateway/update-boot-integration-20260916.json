@@ -1,0 +1,12 @@
+{
+  "scope": "Offline C updater/MCUboot integration, LED status and flash-register model; not board validation",
+  "report": "/home/james/diagnostics/volt-gateway/builds/validation-update-boot-20260916-02/report.json",
+  "report_sha256": "bc74a5d1060b7fe0f194cc4c2d89441c72841d2a150e4ca45641b0d3b635486b",
+  "tests": {"passed": 1232, "failed": 0, "skipped": 0},
+  "checks": "pytest, ruff, Cortex-M4 core objects, native/ARM crypto and MCUboot, selected GCC static analysis passed",
+  "production_ready": false,
+  "hardware_changed": false,
+  "keys": "Ephemeral test keys only",
+  "regression_fixed": "MCUboot build-number comparison must be enabled for 0.0.0+uint32 release selection",
+  "remaining": "Complete board bindings, RAM-safe flash service, clocks/watchdog/RNG, self-contained CAN recovery, provisioning, complete-image and physical bench validation"
+}

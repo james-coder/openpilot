@@ -16,7 +16,7 @@ from openpilot.common.gps import get_gps_location_service
 
 from openpilot.selfdrive.car.car_specific import CarSpecificEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
-from openpilot.selfdrive.selfdrived.events import Events, ET
+from openpilot.selfdrive.selfdrived.events import Events, ET, driving_process_failures
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
@@ -106,7 +106,8 @@ class SelfdriveD:
 
     self.CS_prev = car.CarState.new_message()
     self.AM = AlertManager()
-    self.events = Events()
+    recognition_attempts = 0 if REPLAY or car_recognized else (self.params.get("CarRecognitionAttempts") or 0)
+    self.events = Events(car_recognition_attempts=recognition_attempts)
 
     self.initialized = False
     self.enabled = False
@@ -140,7 +141,9 @@ class SelfdriveD:
 
     if not car_recognized:
       self.events.add(EventName.carUnrecognized, static=True)
-      set_offroad_alert("Offroad_CarUnrecognized", True)
+      extra = (f"Vehicle identification failed after {recognition_attempts} attempt{'s' if recognition_attempts != 1 else ''}."
+               if 1 <= recognition_attempts <= 3 else None)
+      set_offroad_alert("Offroad_CarUnrecognized", True, extra_text=extra)
     elif self.CP.passive:
       self.events.add(EventName.dashcamMode, static=True)
 
@@ -318,7 +321,7 @@ class SelfdriveD:
     # events.py) - it falls back to vision-only lead tracking instead of disabling.
     num_events = len(self.events)
 
-    not_running = {p.name for p in self.sm['managerState'].processes if not p.running and p.shouldBeRunning}
+    not_running = driving_process_failures(self.sm['managerState'])
     if self.sm.recv_frame['managerState'] and len(not_running):
       if not_running != self.not_running_prev:
         cloudlog.event("process_not_running", not_running=not_running, error=True)
@@ -409,6 +412,14 @@ class SelfdriveD:
     stock_long_is_braking = self.enabled and not self.CP.openpilotLongitudinalControl and CS.aEgo < -1.25
     model_fcw = self.sm['modelV2'].meta.hardBrakePredicted and not CS.brakePressed and not stock_long_is_braking
     planner_fcw = self.sm['longitudinalPlan'].fcw and self.enabled
+    from openpilot.selfdrive.car.volt_protection import ACTUATE
+    from opendbc.car.gm.volt_longitudinal import supported as volt_supported
+    if (volt_supported(self.CP) and self.CP.flags & ACTUATE and self.sm.valid['controlsState'] and self.sm.alive['controlsState']
+        and 0 <= time.monotonic()-self.sm.logMonoTime['controlsState']/1e9 <= .15):
+      protection = self.sm['controlsState'].longitudinalProtection
+      planner_fcw |= protection.active and str(protection.state) in ('protective', 'emergency')
+      if str(protection.state) == 'degraded':
+        self.events.add(EventName.voltProtectionDegraded)
     if (planner_fcw or model_fcw) and not self.CP.notCar:
       self.events.add(EventName.fcw)
 

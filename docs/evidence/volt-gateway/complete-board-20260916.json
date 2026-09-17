@@ -1,0 +1,28 @@
+{
+  "scope": "offline suite, actual linked Cortex-M4 images, real crypto/MCUboot, modeled peripherals and static analysis",
+  "status": "passed",
+  "tests": {"total": 1590, "passed": 1590, "failed": 0, "skipped": 0},
+  "artifact_directory": "/home/james/diagnostics/volt-gateway/builds/validation-complete-board-20260916-03",
+  "report_sha256": "8545fb373752efe441ee543685cfd8ae55f0b2442327ca43cd5219184498939a",
+  "all_27_checks_passed": true,
+  "checks_include": [
+    "source consistency across validation",
+    "pytest and ruff",
+    "Cortex-M4 core build",
+    "ARM/native Mbed TLS",
+    "ARM/native MCUboot direct-XIP revert",
+    "complete loader and A/B board images",
+    "19 selected GCC static-analysis units"
+  ],
+  "board_elf": {
+    "loader": {"sha256": "2a49ef06ee587257353d0af941e4d215740bf4719904ea4eb77dd9cbeb2f2e9e", "text": 54404, "data": 608, "bss": 66560},
+    "A": {"sha256": "29ddba3c2bbad109d59b20c8b7d60c4023334302fdcc54be9de8e754371fb02b", "text": 52236, "data": 604, "bss": 66144},
+    "B": {"sha256": "43301ba586c073eb71e3e5ce73042274d490566acb1636d2d075a8c108c029d0", "text": 52236, "data": 604, "bss": 66144}
+  },
+  "actual_hardware_evidence": "ram-probe-20260916.json",
+  "production_ready": false,
+  "flashed": false,
+  "production_keys_created": false,
+  "production_comma_changed": false,
+  "limits": "Passing offline checks are not physical CAN, flash power-loss, installed recovery, driving or certification evidence. Owner keys/provisioning and physical validation remain separate."
+}

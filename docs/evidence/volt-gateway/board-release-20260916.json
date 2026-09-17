@@ -1,0 +1,24 @@
+{
+  "date": "2026-09-16",
+  "scope": "White early-quiescence MMIO simulation, runtime identity primitive, MCUboot inner/outer signed release integration, read-only live ROM inspection",
+  "validation_report": "/home/james/diagnostics/volt-gateway/builds/validation-board-release-20260916-01/report.json",
+  "validation_report_sha256": "2f6359afa447fef4e76bf5a000d40fb24aef1e24847f5c23d031baa25a1b10af",
+  "tests": {"passed": 1097, "failed": 0, "skipped": 0, "new_image_cases": 27, "new_inspection_cases": 5, "new_mmio_cases": 19},
+  "checks": ["pytest", "ruff", "cortex_m4_build", "crypto_arm", "crypto_native", "mcuboot_direct_xip", "mcuboot_arm", "analyze_authority", "analyze_observe", "analyze_update", "analyze_status_led", "analyze_white_board"],
+  "production_ready": false,
+  "five_step_request_complete": false,
+  "live_device_mode_switched_for_inspection": true,
+  "live_device_flash_changed": false,
+  "original_application_running_again": true,
+  "chip_assumption_approved_by_owner": "historical STM32F413xx target",
+  "chip_revision_measured": false,
+  "rdp_level_measured": 0,
+  "option_bytes_changed": false,
+  "unimplemented_or_unverified": [
+    "Actual reset/clock/watchdog/RNG/flash/handoff integration",
+    "Standalone authenticated CAN recovery and provisioned recovery IDs",
+    "Production signing/pairing-key provisioning and protected boot region",
+    "Target inner-image validation and final trial-trailer commit in updater",
+    "Complete linked board release and physical flash/recovery validation"
+  ]
+}

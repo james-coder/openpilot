@@ -1,0 +1,24 @@
+{
+  "date": "2026-09-16",
+  "scope": "Actual Cortex-M4 MCUboot/crypto execution, signed slot-local returning Thumb probes, optional LED patterns; no hardware",
+  "validation_report": "/home/james/diagnostics/volt-gateway/builds/validation-boot-led-20260916-02/report.json",
+  "validation_report_sha256": "b6a6fc430339d221e10473b563e829bf1a4d0363934a1b21f5ea52cf07b0e042",
+  "arm_boot_harness_sha256": "7fe02fbfb384056d66b5d5d385fe62f3780d6abab4719925bbf647c700b6de5d",
+  "arm_harness_bytes": {"text": 22014, "data": 24, "bss": 25164, "includes_stack_or_board_drivers": false},
+  "tests": {"passed": 1046, "failed": 0, "skipped": 0, "arm_boot_tests": 8, "led_tests": 282},
+  "startup_cycle": {"slot_A": ["red", "green", "blue"], "slot_B": ["red", "blue", "green"], "color_on_ms": 800, "color_gap_ms": 200, "final_extra_gap_ms": 1000},
+  "checks": ["pytest", "ruff", "cortex_m4_build", "crypto_arm", "crypto_native", "mcuboot_direct_xip", "mcuboot_arm", "analyze_authority", "analyze_observe", "analyze_update", "analyze_status_led"],
+  "host_crypto_hooks_in_boot_emulation": 0,
+  "production_ready": false,
+  "device_changed": false,
+  "flashed": false,
+  "unverified": [
+    "Physical LEDs, actual GPIO timing and board pin initialization",
+    "Real reset/vector/MSP/interrupt handoff and application initialization",
+    "LED state/clock continuity through real loader/application handoff",
+    "Exact MCU geometry and protected trusted provisioning",
+    "STM32 flash peripheral, stalls, physical power cuts, stack and watchdog scheduling",
+    "Independent authenticated CAN recovery and release-packager integration",
+    "Parked/device/engagement validation"
+  ]
+}

@@ -1,0 +1,2 @@
+# Only the identified labeled Panda in application mode; no wildcard DFU access.
+SUBSYSTEM=="usb", ENV{DEVTYPE}=="usb_device", ATTR{idVendor}=="bbaa", ATTR{idProduct}=="ddcc", ATTR{serial}=="370022000651363038363036", GROUP="plugdev", MODE="0660"

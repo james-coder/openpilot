@@ -1,0 +1,11 @@
+{
+  "scope": "ARM physical-binding instructions and verified MCUboot-to-MSP/VTOR handoff in CPU emulation",
+  "report": "/home/james/diagnostics/volt-gateway/builds/validation-physical-handoff-20260916-03/report.json",
+  "report_sha256": "052263061ea95a55585459469fd9819e002eee41d0dd1fbfd94d9723dd32f08d",
+  "tests": {"passed": 1308, "failed": 0, "skipped": 0},
+  "checks": "lint, ARM core/crypto/loader builds, native crypto/loader builds and selected static analysis passed",
+  "hardware_changed": false,
+  "production_ready": false,
+  "device_inspection": "USB IN-only; exact White serial 370022000651363038363036, original firmware, silent mode, controls disallowed",
+  "remaining": "Final clock/RNG, CAN driver/PHY, authenticated recovery dispatcher/TX shaping/provisioning, complete reset startup/image and independent bench validation"
+}

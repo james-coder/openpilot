@@ -1,0 +1,23 @@
+{
+  "date": "2026-09-16",
+  "scope": "Native actual MCUboot direct-XIP/revert with real C crypto and memory-backed flash; existing ARM crypto/core regression checks",
+  "mcuboot_commit": "6d3b3d2c38ab20c242e5b9abb04d050086383eb2",
+  "mbedtls_version": "3.6.7",
+  "validation_report": "/home/james/diagnostics/volt-gateway/builds/validation-boot-port-20260916-01/report.json",
+  "validation_report_sha256": "f096acdb3309d09ea364a4c0e5ce6c945e41656f00440b5181099b7786d0129d",
+  "native_boot_library_sha256": "4263421e7203a5b78345bfe95cdc54c2535346a31d11b120ec1722a05a92f16d",
+  "tests": {"passed": 756, "failed": 0, "skipped": 0, "new_boot_port_tests": 70},
+  "checks": ["pytest", "ruff", "cortex_m4_build", "crypto_arm", "crypto_native", "mcuboot_direct_xip", "analyze_authority", "analyze_observe", "analyze_update"],
+  "production_ready": false,
+  "device_changed": false,
+  "flashed": false,
+  "unverified": [
+    "Exact MCU identification and hardware RAM/flash layout approval",
+    "Actual loader ARM startup and application execution",
+    "Independent authenticated CAN recovery with both slots invalid",
+    "Hardware flash stalls, watchdog, RNG, stack and electrical power-loss behavior",
+    "Boot protection and trusted provisioning",
+    "Inner MCUboot image integration with release packager and update transaction",
+    "Physical restore and parked vehicle validation"
+  ]
+}

@@ -73,6 +73,10 @@ Build: `/home/james/diagnostics/volt-gateway/builds/usb-swcan-tx-fix-20260917-01
 Experimental loader/A/B ARM builds succeed with no undefined symbols. Native
 HVAC, application and CLI regression suites: 82 passed, no skips, using pinned
 crypto/boot dependencies. This is not physical validation of the new firmware.
+The existing whole-image emulator suite also passed all 10 cases, including
+busy-bus cold boots in both slots (241.66s). That suite builds the normal
+non-experimental application: it is a boot/USB regression check, not emulated
+or physical proof of the experimental raw-TX path. Total: 92 passing cases.
 
 ## Physical USB-only deployment, September 17
 

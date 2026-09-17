@@ -20,3 +20,6 @@ if [ -z "$AGNOS_VERSION" ]; then
 fi
 
 export STAGING_ROOT="/data/safe_staging"
+
+# Explicit parked Object gateway trial; no background transmitter.
+export VOLTGW_OBJECT_PARKED_TRIAL=1

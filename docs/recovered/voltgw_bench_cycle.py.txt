@@ -1,0 +1,49 @@
+"""Local exact-target bench helper. Contains no keys; never bypasses readback."""
+import ast, hashlib, json, resource, subprocess, sys
+from pathlib import Path
+from tools.volt_gateway.operator import bounded_read, load_key, private_directory, write_new
+from tools.volt_gateway.bench_image import payload, assemble
+resource.setrlimit(resource.RLIMIT_CORE,(0,0))
+build=Path(sys.argv[1]); old=Path(sys.argv[2]); label=sys.argv[3]
+root=Path('/home/james/git/openpilot-radar-error-to-cruise-control')
+private=root/'.voltgw-private/370022000651363038363036'
+out=private/label
+logs=Path('/home/james/diagnostics/volt-gateway/flashing/370022000651363038363036-20260916')
+assert not out.exists()
+lines=bounded_read(root/'.env',65536,private=True).decode().splitlines()
+matches=[line.split('=',1)[1].strip() for line in lines if line.startswith('SIGNING_KEY_PASSPHRASE=')]
+assert len(matches)==1
+password=ast.literal_eval(matches[0]) if matches[0].startswith(('"',"'")) else matches[0]
+key=load_key(private/'firmware-key.pem',password)
+del password,matches,lines
+report=json.loads((build/'report.json').read_text())
+parts=[]
+for name,start,size in [('loader',0x08000000,0x20000),('A',0x08040200,0x5fa00),('B',0x080a0200,0x5fa00)]:
+ raw=(build/f'NOT_RELEASED-{name}.elf').read_bytes()
+ assert hashlib.sha256(raw).hexdigest()==report['images'][name]['sha256']
+ parts.append(payload(raw,start,size))
+image=assemble(parts[0],tuple(parts[1:]),bounded_read(private/'bench-provision/provisioning.bin',256,private=True),key)
+del key
+private_directory(out);write_new(out/'factory-flash.bin',image)
+before=old.read_bytes();assert len(before)==len(image)==1048576
+regions=[(0,0x10000),(0x40000,0x20000),(0xa0000,0x20000)]
+reconstructed=bytearray(before)
+for off,size in regions: reconstructed[off:off+size]=image[off:off+size]
+assert reconstructed==image,'unexpected changes outside reviewed application/loader sectors'
+# Verify live device equals the expected previous full readback before erasing.
+base=['dfu-util','-d','0483:df11','-S','365236793036','-a','0']
+pre=logs/f'before-{label}.bin'
+with (logs/f'before-{label}.log').open('x') as log:
+ subprocess.run(base+['-s','0x08000000:1048576','-U',str(pre)],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=180)
+pre.chmod(0o600)
+assert pre.read_bytes()==before,'live image mismatch; no programming attempted'
+for off,size in regions:
+ part=out/f'sector-{off:06x}.bin';write_new(part,image[off:off+size])
+ with (logs/f'program-{label}-{off:06x}.log').open('x') as log:
+  subprocess.run(base+['-s',hex(0x08000000+off),'-D',str(part)],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=180)
+after=logs/f'after-{label}.bin'
+with (logs/f'after-{label}.log').open('x') as log:
+ subprocess.run(base+['-s','0x08000000:1048576','-U',str(after)],stdout=log,stderr=subprocess.STDOUT,check=True,timeout=180)
+after.chmod(0o600)
+assert after.read_bytes()==image,'READBACK MISMATCH: DO NOT BOOT'
+print('Full readback verified:',hashlib.sha256(image).hexdigest(),flush=True)

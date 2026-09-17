@@ -46,8 +46,10 @@ def test_fault_pulses(leds, code):
   s = Status()
   leds.vgw_led_init(C.byref(s), 0)
   leds.vgw_led_set(C.byref(s), 5, 255, code, 0)
-  for t in range(4000):
-    assert leds.vgw_led_sample(C.byref(s), t) == (1 if t // 300 < code and t % 300 < 150 else 0)
+  period=code*1000+3000
+  for t in range(period*2):
+    phase=t%period
+    assert leds.vgw_led_sample(C.byref(s), t) == (1 if phase<code*1000 and phase%1000<500 else 0)
 
 
 @pytest.mark.parametrize('rgb', range(256))

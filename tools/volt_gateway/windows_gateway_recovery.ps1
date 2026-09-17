@@ -1,4 +1,4 @@
-param([switch]$RamProbe)
+param([switch]$RamProbe, [ValidateRange(10,600)][int]$TimeoutSeconds=90)
 # Fixed local USB-only recovery command. No erase, program or option writes.
 $ErrorActionPreference = 'Stop'
 $devices = (& 'C:\Program Files\usbipd-win\usbipd.exe' state | ConvertFrom-Json).Devices
@@ -22,11 +22,11 @@ public static class GatewayRecovery {
   [DllImport("winusb.dll",SetLastError=true)] static extern bool WinUsb_Initialize(SafeFileHandle file,out IntPtr handle);
   [DllImport("winusb.dll",SetLastError=true)] static extern bool WinUsb_ControlTransfer(IntPtr h,Setup p,byte[] b,uint length,out uint actual,IntPtr overlap);
   [DllImport("winusb.dll")] static extern bool WinUsb_Free(IntPtr h);
-  public static void Run(bool ram) {
+  public static void Run(bool ram, int timeoutMs) {
     string path=@"\\?\usb#vid_bbaa&pid_ddcc#370022000651363038363036#{cce5291c-a69f-4995-a4c2-2ae57a51ade9}";
     string expected=ram ? "voltgw-RAM-RECOVERY-v1" : "voltgw-recovery-v1";
     var timer=Stopwatch.StartNew(); int opens=0,reads=0,lastError=0; string lastVersion="";
-    while(timer.ElapsedMilliseconds<90000) {
+    while(timer.ElapsedMilliseconds<timeoutMs) {
       using(var f=CreateFile(path,0xc0000000,3,IntPtr.Zero,3,0x40000000,IntPtr.Zero)) {
         IntPtr h;
         if(!f.IsInvalid && WinUsb_Initialize(f,out h)) {
@@ -53,4 +53,5 @@ public static class GatewayRecovery {
 }
 '@
 Add-Type -TypeDefinition $source
-[GatewayRecovery]::Run($RamProbe.IsPresent)
+Write-Output 'Exact-target recovery listener armed; waiting for the cold USB recovery personality.'
+[GatewayRecovery]::Run($RamProbe.IsPresent, $TimeoutSeconds * 1000)

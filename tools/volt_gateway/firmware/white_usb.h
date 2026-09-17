@@ -10,6 +10,7 @@ void vgw_white_usb_stop(void);
 bool vgw_white_usb_poll(void);
 bool vgw_white_usb_owned(void);
 bool vgw_white_usb_recovery_requested(void);
+void vgw_white_usb_indication(const uint8_t[7]);
 bool vgw_white_usb_dispatch(vgw_recovery_service *,uint64_t elapsed_ms);
 bool vgw_white_usb_send(void *,const uint8_t[8]);
 bool vgw_white_usb_telemetry_send(void *,const uint8_t[8]);

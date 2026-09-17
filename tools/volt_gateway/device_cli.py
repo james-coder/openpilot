@@ -16,6 +16,20 @@ from openpilot.tools.volt_gateway.protocol import ProtocolError
 from openpilot.tools.volt_gateway.recovery_client import RecoveryClient, HELLO_REQUEST
 from openpilot.tools.volt_gateway.usb_transport import UsbTransport
 
+LED_STATES=('boot','running','trial','recovery','update','fault','update_wait','update_verify',
+            'update_commit','update_ready','update_erase','probe')
+LED_ERRORS=('none','no_image','image_policy','storage','configuration','can','watchdog','crypto','internal','update_aborted')
+PEER_STATES=('disabled','local_usb_owner','awaiting_authenticated_peer','authenticated','stale')
+
+
+def indicators(data):
+  if (len(data)!=7 or data[0]!=1 or data[1]>=len(LED_STATES) or data[2] not in (0,1,255) or
+      data[3]>=len(LED_ERRORS) or data[4]>7 or data[5]>1 or data[6]>=len(PEER_STATES)):
+    raise ProtocolError('invalid indicator snapshot')
+  return {'supported':True,'state':LED_STATES[data[1]],'slot':{0:'A',1:'B',255:None}[data[2]],
+          'error':LED_ERRORS[data[3]],'error_code':data[3],'rgb_sample':data[4],
+          'boot_color_test_active':bool(data[5]),'can_peer':PEER_STATES[data[6]]}
+
 
 class Device:
   def __init__(self,transport,credentials):
@@ -116,7 +130,7 @@ def main():
   resource.setrlimit(resource.RLIMIT_CORE,(0,0))
   parser=argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--pairing',type=Path,required=True)
-  parser.add_argument('command',choices=['info','status','buses','utilization','clear-ids','observe','ids','capture','rules','subscribe'])
+  parser.add_argument('command',choices=['info','status','indicators','buses','utilization','clear-ids','observe','ids','capture','rules','subscribe'])
   parser.add_argument('--bus',type=int,choices=[0,1,2,3],default=3,help='HSCAN CAN1=0, CAN2=1, CAN3=2; SWCAN=3 regardless of mux')
   parser.add_argument('--seconds',type=int,default=30)
   parser.add_argument('--id',type=lambda x:int(x,0))
@@ -129,6 +143,9 @@ def main():
     parser.error('valid --id required')
   keys=credentials(args.pairing)
   with UsbTransport(keys['device'].hex()) as transport:
+    if args.command=='indicators':
+      print(json.dumps(indicators(bytes(transport.handle.controlRead(0xc0,0xd7,0,0,7,timeout=1000)))))
+      return  # Do not open a session just to inspect its closed/expired state.
     device=Device(transport,keys)
     try:
       if args.command in ('info','buses'):
@@ -144,7 +161,12 @@ def main():
         if len(data)!=32:
           raise ProtocolError('status length')
         names=['uptime_ms','reset_flags','id_drops','capture_drops','invalid','telemetry_drops','telemetry_completed']
-        print(json.dumps(dict(zip(names,struct.unpack('>Q6I',data),strict=True))))
+        result=dict(zip(names,struct.unpack('>Q6I',data),strict=True))
+        info=device.command(1)
+        if len(info)!=46 or info[0]!=1:
+          raise ProtocolError('incompatible gateway information')
+        result['indicators']=indicators(device.command(15)) if int.from_bytes(info[2:6],'big')&16 else {'supported':False}
+        print(json.dumps(result))
       elif args.command=='utilization':
         data=device.command(3,bytes([args.bus]))
         if len(data)!=56:

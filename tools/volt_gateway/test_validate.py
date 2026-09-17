@@ -1,5 +1,7 @@
 from openpilot.tools.volt_gateway.validate import command, junit_summary, source_hashes
 import sys
+from types import SimpleNamespace
+from openpilot.tools.volt_gateway import validate
 
 
 def test_source_snapshot_detects_additions_edits_and_removals(tmp_path):
@@ -45,3 +47,20 @@ def test_child_failure_and_timeout_reported(tmp_path):
   assert failed['status'] == 'failed' and failed['returncode'] == 3
   timed = command([sys.executable, '-c', 'import time; time.sleep(10)'], tmp_path, tmp_path / 'timeout.log', timeout=.1)
   assert timed['status'] == 'failed' and timed['timed_out']
+
+
+def test_low_space_never_starts_child(tmp_path,monkeypatch):
+  monkeypatch.setattr(validate.shutil,'disk_usage',lambda _:SimpleNamespace(free=1024))
+  result=command([sys.executable,'-c','raise SystemExit(42)'],tmp_path,tmp_path/'space.log')
+  assert result['status']=='failed' and result['returncode'] is None and result['resource_limit']
+
+
+def test_scratch_cleanup_even_on_failed_validation(tmp_path,monkeypatch):
+  seen=[]
+  def fail(output,scratch):
+    seen.append(scratch)
+    (scratch/'disposable').write_text('test fixture')
+    return {'status':'failed'}
+  monkeypatch.setattr(validate,'run_with_scratch',fail)
+  assert validate.run(tmp_path)['status']=='failed'
+  assert len(seen)==1 and not seen[0].exists()

@@ -282,6 +282,10 @@ def test_actual_usb_setup_bulk_bounds_and_no_legacy_write(images):
   serial=setup(0x80,6,0x0303,length=50)
   assert serial[2:].decode('utf-16-le')==b'test-device!'.hex()
   assert setup(0xc0,0xd6)==b'voltgw-v1'
+  indication=setup(0xc0,0xd7,length=7)
+  assert len(indication)==7 and indication[:4]==bytes([1,1,0,0])
+  assert setup(0xc0,0xd7,value=1,length=7)==b''
+  assert setup(0xc0,0xd7,length=2)==indication[:2]
   assert not any(name.startswith('vgw_debug_') for name in symbols)
   cpu.mem_write(0x2001c400,b'KEEP')
   cpu.mem_write(0x2001f000,struct.pack('<4sIII',b'VGM1',1,0x2001c400,0x12345678))

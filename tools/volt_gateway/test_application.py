@@ -42,7 +42,7 @@ def inject(r,state,address=0x123,payload=b'12345678',stamp=50000):
 
 def test_authenticated_observe_capture_pagination(service_library,native,bundle,built):
   r,app,lib,hw,state=setup(service_library,native,bundle,built)
-  assert r.command(1)[1:3]==b'\x01\0'
+  assert r.command(1)[1:3]==b'\x01\1'
   assert r.command(14)==b'\0\0'
   assert r.command(5,b'\3\0\x1e')==b'\0'
   assert r.command(11,b'\x08\0\x1e')==b'\0'
@@ -62,6 +62,53 @@ def test_authenticated_observe_capture_pagination(service_library,native,bundle,
   assert r.command(4,b'\3')==b'\0'
   assert r.command(7,b'\3\0\0')==b'\0\x01\0\0'
   assert r.slot.erases==r.slot.writes==0
+
+
+def test_actual_indicator_snapshot_and_disabled_peer(service_library,native,bundle,built):
+  from openpilot.tools.volt_gateway.test_status_led import Status
+  from openpilot.tools.volt_gateway.device_cli import indicators
+  r,app,lib,hw,state=setup(service_library,native,bundle,built)
+  assert r.command(15)==b'\1'  # no invented status before a renderer snapshot
+  r.lib.vgw_application_indication.argtypes=[C.c_void_p,C.POINTER(Status),C.c_uint8]
+  led=Status()
+  led.state=1
+  led.slot=0
+  r.lib.vgw_application_indication(app,C.byref(led),4)
+  state.can.config.backhaul=0
+  value=indicators(r.command(15)[1:])
+  assert value['state']=='running' and value['error']=='none' and value['can_peer']=='disabled'
+  assert value['rgb_sample']==4 and value['slot']=='A'
+  state.can.config.backhaul=2
+  assert indicators(r.command(15)[1:])['can_peer']=='authenticated'
+  state.local_control=True
+  assert indicators(r.command(15)[1:])['can_peer']=='local_usb_owner'
+  led.state=5
+  led.error=9
+  r.lib.vgw_application_indication(app,C.byref(led),1)
+  assert indicators(r.command(15)[1:])['error']=='update_aborted'
+  assert r.command(15,b'x')==b'\1'
+
+
+@pytest.mark.parametrize('seen',[False,True])
+def test_peer_awaiting_vs_stale_is_observational(service_library,native,bundle,built,seen):
+  from openpilot.tools.volt_gateway.test_status_led import Status
+  from openpilot.tools.volt_gateway.device_cli import indicators
+  r,app,lib,hw,state=setup(service_library,native,bundle,built)
+  led=Status()
+  led.state=1
+  r.lib.vgw_application_indication.argtypes=[C.c_void_p,C.POINTER(Status),C.c_uint8]
+  r.lib.vgw_application_indicator_snapshot.argtypes=[C.c_void_p,C.c_void_p]
+  r.lib.vgw_application_indicator_snapshot.restype=C.c_bool
+  r.lib.vgw_application_indication(app,C.byref(led),4)
+  if seen:
+    state.can.elapsed_ms=r.now
+    assert r.lib.vgw_application_step(app,C.byref(state))
+  assert r.command(0x87)==b'\0'
+  before=len(hw.writes)
+  snapshot=C.create_string_buffer(7)
+  assert r.lib.vgw_application_indicator_snapshot(app,snapshot)
+  assert indicators(snapshot.raw)['can_peer']==('stale' if seen else 'awaiting_authenticated_peer')
+  assert len(hw.writes)==before and r.slot.erases==r.slot.writes==0
 
 
 @pytest.mark.parametrize('op,payload',[(5,b'\2\0\x01'),(5,b'\3\0\0'),(7,b'\3\xff\xff'),

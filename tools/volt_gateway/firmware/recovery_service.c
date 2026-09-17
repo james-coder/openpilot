@@ -9,7 +9,11 @@ static void put32(uint8_t *p,uint32_t v) { for (unsigned i=0;i<4;i++) p[3-i]=(ui
 size_t vgw_recovery_service_size(void) { return sizeof(vgw_recovery_service); }
 static void end_session(vgw_recovery_service *s) {
   if (s->application_reset) s->application_reset(s->application_context);
-  if (s->update.authority && s->update.state!=VGW_UPDATE_TRIAL) vgw_update_abort(&s->update);
+  /* Session cleanup always revokes authority, but is an update failure only
+   * if an update was actually in progress. Preserve real abort indications. */
+  if (s->update.authority && (s->update.state==VGW_UPDATE_RECEIVING ||
+      s->update.phase==VGW_PROGRESS_ERASE || s->update.phase==VGW_PROGRESS_VERIFY ||
+      s->update.phase==VGW_PROGRESS_COMMIT)) vgw_update_abort(&s->update);
   vgw_authority_close(&s->authority);
   s->active=false; s->fresh=false; s->request_size=s->reply_size=0;
   zero(s->host_key,32); zero(s->gateway_key,32); zero(s->session,8);

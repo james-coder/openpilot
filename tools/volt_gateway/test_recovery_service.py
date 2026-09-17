@@ -32,11 +32,14 @@ class Provision(C.Structure):
 def service_library(tmp_path_factory):
   own=Path(__file__).parent/'firmware'
   out=tmp_path_factory.mktemp('recovery-service')/'service.so'
+  adapter=out.with_suffix('.c')
+  adapter.write_text('#include "recovery_service.h"\n'+
+    'bool vgw_test_update_led(vgw_recovery_service *s,uint8_t out[3]) { return vgw_update_led(&s->update,s->previous,out); }\n')
   names=('authority','update','recovery_service','recovery_runtime','white_runtime','white_startup',
          'white_clock','white_rng','white_can','white_board','white_watchdog','status_led','observe',
          'recovery_link','recovery_transport','application')
   subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fanalyzer','-shared','-fPIC',
-                  *(str(own/(n+'.c')) for n in names),'-o',str(out)],check=True)
+                  '-I',str(own),str(adapter),*(str(own/(n+'.c')) for n in names),'-o',str(out)],check=True)
   return out
 
 
@@ -189,6 +192,28 @@ def test_close_rotates_challenge_old_open_cannot_reenter(service_library,native,
   new=RecoveryClient(r.pairing,hello,device=m.device,layout=m.layout,policy=r.policy,host_nonce=b'n'*32)
   new.accept_open(r.wire(new.open_request,4000))
   assert r.wire(r.client.request(0x85)) is None
+
+
+@pytest.mark.parametrize('expiry',[False,True])
+@pytest.mark.parametrize('updating',[False,True])
+def test_normal_session_end_is_not_an_update_fault(service_library,native,bundle,expiry,updating):
+  r=Recovery(service_library,native,bundle)
+  r.lib.vgw_test_update_led.argtypes=[C.c_void_p,C.c_void_p]
+  r.lib.vgw_test_update_led.restype=C.c_bool
+  led=C.create_string_buffer(3)
+  assert not r.lib.vgw_test_update_led(r.state,led)
+  if updating:
+    r.authorize()
+    assert r.command(0x82)==b'\0'
+  if expiry:
+    assert r.wire(r.client.request(0x85),now=r.now+20000) is None
+  else:
+    assert r.command(0x87)==b'\0'
+  assert r.lib.vgw_test_update_led(r.state,led)==updating
+  if updating:
+    assert led.raw==bytes([5,255,9])  # a real interrupted transfer still faults
+  else:
+    assert r.slot.erases==r.slot.writes==0
 
 
 def test_expiry_and_entropy_failure_fail_closed(service_library,native,bundle):

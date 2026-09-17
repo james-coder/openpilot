@@ -21,6 +21,12 @@ void vgw_led_set(vgw_status_led *s, unsigned state, unsigned slot, unsigned erro
 static uint8_t pulses(uint32_t phase, unsigned count, uint8_t color) {
   return phase / 300U < count && phase % 300U < 150U ? color : 0;
 }
+static uint8_t fault_pulses(uint32_t elapsed,unsigned count) {
+  /* Half-second ON/OFF pulses, then three extra seconds of darkness. The
+   * cycle scales with the code so even nine flashes have an obvious boundary. */
+  uint32_t phase=elapsed%(count*1000U+3000U);
+  return phase<count*1000U && phase%1000U<500U ? VGW_LED_RED : 0;
+}
 uint8_t vgw_led_sample(vgw_status_led *s, uint32_t now) {
   if (!s) return 0;
   uint32_t elapsed = now - s->since_ms;
@@ -51,10 +57,10 @@ uint8_t vgw_led_sample(vgw_status_led *s, uint32_t now) {
     case VGW_LED_UPDATE_ERASE: return elapsed % 1000U < 500U ? VGW_LED_RED | VGW_LED_GREEN : 0;
     case VGW_LED_FAULT:
       if (s->error < 1 || s->error > 9) break;
-      return pulses(elapsed % 4000U, s->error, VGW_LED_RED);
+      return fault_pulses(elapsed,s->error);
     default: break;
   }
-  return pulses(elapsed % 4000U, VGW_LED_INTERNAL, VGW_LED_RED);
+  return fault_pulses(elapsed,VGW_LED_INTERNAL);
 }
 uint32_t vgw_white_led_bsrr(uint8_t rgb) {
   uint32_t on = ((rgb & VGW_LED_RED) ? 1U << 9 : 0) |

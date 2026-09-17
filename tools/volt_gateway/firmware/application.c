@@ -1,6 +1,20 @@
 #include "application.h"
 #include "recovery_runtime.h"
 size_t vgw_application_size(void) { return sizeof(vgw_application); }
+void vgw_application_indication(vgw_application *s,const vgw_status_led *led,uint8_t rgb) {
+  if (!s || !led) return;
+  s->indication[0]=led->state; s->indication[1]=led->slot; s->indication[2]=led->error;
+  s->indication[3]=rgb; s->indication[4]=led->intro_active;
+  s->indication_valid=true;
+}
+bool vgw_application_indicator_snapshot(const vgw_application *s,uint8_t out[7]) {
+  if (!s || !out || !s->indication_valid || !s->runtime || !s->session) return false;
+  out[0]=1;
+  for (unsigned i=0;i<5;i++) out[1+i]=s->indication[i];
+  out[6]=!s->runtime->can.config.backhaul_controller ? 0 : s->runtime->local_control ? 1 :
+    s->session->active ? 3 : s->can_peer_seen ? 4 : 2;
+  return true;
+}
 static uint16_t get16(const uint8_t *p) { return (uint16_t)(((uint16_t)p[0]<<8)|p[1]); }
 static uint32_t get32(const uint8_t *p) { return ((uint32_t)get16(p)<<16)|get16(p+2); }
 static void put16(uint8_t *p,uint16_t v) { p[0]=(uint8_t)(v>>8); p[1]=(uint8_t)v; }
@@ -43,7 +57,7 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
   switch (op) {
     case 1: /* INFO: capabilities, firmware build, fixed mapping, protocol */
       if (!n) {
-        ok=true; out[1]=1; out[2]=0; put32(out+3,0x0000000fU);
+        ok=true; out[1]=1; out[2]=1; put32(out+3,0x0000001fU);
         for (unsigned i=0;i<32;i++) out[7+i]=s->session->provision.build[i];
         out[39]=s->runtime->can.config.swcan_controller;
         out[40]=s->runtime->can.config.hscan_mask;
@@ -106,6 +120,9 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
       } break;
     case 14: /* Write policy is intentionally empty. No generic TX rule engine. */
       if (!n) { ok=true; out[1]=0; length=2; } break;
+    case 15: /* Versioned snapshot of the actual renderer, not inferred health.
+              * Link: disabled/local USB/awaiting/authenticated/stale. */
+      if (!n && vgw_application_indicator_snapshot(s,out+1)) { ok=true; length=8; } break;
     default: break;
   }
   out[0]=ok ? 0 : 1;
@@ -115,6 +132,7 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
 bool vgw_application_step(void *ctx,vgw_white_runtime *runtime) {
   vgw_application *s=ctx;
   if (!s || s->runtime!=runtime || !vgw_recovery_runtime_step(s->session,runtime)) return false;
+  if (!runtime->local_control && runtime->can.config.backhaul_controller && s->session->active) s->can_peer_seen=true;
   if (!s->session->active || runtime->can.elapsed_ms>=s->lease_until ||
       s->session->update.state==VGW_UPDATE_RECEIVING) {
     if (s->pending) inc(&s->telemetry_drops);

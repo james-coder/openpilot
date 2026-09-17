@@ -71,7 +71,11 @@ def test_arm_never_executes_invalid_probe(elf, key, defect):
     assert result['selected'] == 0 and result['probe'] == 0xa0
   else:
     assert result['selected'] < 0 and result['probe'] == 0
-    assert result['led_rgb'] == 1
+    code=1 if defect=='both_invalid' else 2
+    assert result['status']==[5,255,code]
+    # The harness samples at 4000ms. With human-countable fault groups,
+    # code 2 is now in its intentional dark separator, not a lost fault.
+    assert result['led_rgb']==(1 if code==1 else 0)
 
 
 def test_led_absent_does_not_change_boot(elf, key):

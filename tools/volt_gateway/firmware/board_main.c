@@ -60,7 +60,13 @@ static _Noreturn void fatal(void) { vgw_white_physical_reset(); }
 static void indication(uint8_t state,uint8_t slot,uint8_t error) {
   uint32_t now=vgw_white_startup_now(&runtime.startup);
   vgw_led_set(&led,state,slot,error,now);
-  vgw_white_led(vgw_white_physical_mmio(),vgw_led_sample(&led,now));
+  uint8_t rgb=vgw_led_sample(&led,now);
+  vgw_white_led(vgw_white_physical_mmio(),rgb);
+  vgw_application_indication(&application,&led,rgb);
+#ifdef VGW_BOARD_USB
+  uint8_t snapshot[7];
+  if (vgw_application_indicator_snapshot(&application,snapshot)) vgw_white_usb_indication(snapshot);
+#endif
 }
 static bool boot_needs_safe_power(void) {
   /* This is only a conservative scheduling hint, never image authentication.
@@ -136,6 +142,9 @@ void vgw_loader_main(void) {
 #endif
   vgw_boot_trace(11);
   if (!vgw_board_storage_recovery_ready(&storage)) fatal();
+  uint8_t initial_status[3];
+  vgw_boot_get_status(initial_status);
+  indication(initial_status[0],initial_status[1],initial_status[2]);
 #ifdef VGW_BOARD_USB
   /* Do not advertise a USB device while signature verification/boot work
    * cannot service enumeration requests. The cold recovery window is separate

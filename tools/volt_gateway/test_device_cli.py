@@ -16,6 +16,15 @@ bundle=app.bundle
 built=app.built
 
 
+@pytest.mark.parametrize('data',[b'',bytes(7),bytes([1,99,0,0,0,0,0]),bytes([1,1,2,0,0,0,0]),
+                                bytes([1,1,0,10,0,0,0]),bytes([1,1,0,0,8,0,0]),
+                                bytes([1,1,0,0,0,2,0]),bytes([1,1,0,0,0,0,5])])
+def test_invalid_indicator_schema_rejected(data):
+  from openpilot.tools.volt_gateway.device_cli import indicators
+  with pytest.raises(ProtocolError,match='indicator'):
+    indicators(data)
+
+
 class UsbTimeout(Exception):
   pass
 
@@ -73,7 +82,7 @@ def test_cli_paginated_real_dispatch_over_usb_wire(service_library,native,bundle
   monkeypatch.setattr('openpilot.tools.volt_gateway.usb_transport.time.sleep',lambda _:None)
   r,state,lib,hw,runtime=app.setup(service_library,native,bundle,built)
   d=device(r)
-  assert d.command(1)[:2]==b'\1\0'
+  assert d.command(1)[:2]==b'\1\1'
   d.command(5,b'\3\0\x1e')
   for i in range(9):
     app.inject(r,runtime,address=0x300+i,stamp=100000+i)

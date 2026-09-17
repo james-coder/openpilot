@@ -2,6 +2,7 @@
 #define VGW_APPLICATION_H
 #include "recovery_service.h"
 #include "white_runtime.h"
+#include "status_led.h"
 /* No vehicle TX operations. Read-only decoded telemetry remains untrusted and
  * may never feed actuation without a separate authenticated safety design. */
 typedef struct {
@@ -14,11 +15,15 @@ typedef struct {
   bool pending;
   vgw_link_send local_send;
   void *local_context;
+  uint8_t indication[5];
+  bool indication_valid, can_peer_seen;
 } vgw_application;
 size_t vgw_application_size(void);
 bool vgw_application_init(vgw_application *,vgw_white_runtime *,vgw_recovery_service *);
 size_t vgw_application_command(void *,uint8_t,const uint8_t *,size_t,uint64_t,uint8_t[128]);
 void vgw_application_reset(void *);
+void vgw_application_indication(vgw_application *,const vgw_status_led *,uint8_t);
+bool vgw_application_indicator_snapshot(const vgw_application *,uint8_t[7]);
 /* Call after the control transport has had its transmit opportunity. */
 bool vgw_application_step(void *,vgw_white_runtime *);
 void vgw_application_telemetry(vgw_application *);

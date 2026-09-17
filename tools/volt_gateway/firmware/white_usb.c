@@ -19,6 +19,12 @@ static bool failed,owned,window,recover;
 static vgw_white_startup *startup;
 static vgw_recovery_link link;
 static uint8_t queue[16][8],head,tail,count;
+static uint8_t indicator_snapshot[7];
+static bool indicator_valid;
+void vgw_white_usb_indication(const uint8_t snapshot[7]) {
+  if (!snapshot) return;
+  memcpy(indicator_snapshot,snapshot,7); indicator_valid=true;
+}
 #ifdef DEBUG
 #include "debug_memory.h"
 static uint8_t debug_reply[16];
@@ -67,6 +73,12 @@ int usb_cb_control_msg(USB_Setup_TypeDef *p,uint8_t *out,int hardwired) {
     size_t n=strlen(version); memcpy(out,version,n); return (int)n;
   }
   if (p->b.bmRequestType==0xc0 && p->b.bRequest==0xc1) { out[0]=1; return 1; }
+  /* Bounded, non-secret local observation only. In particular this does not
+   * open/refresh a session, which would hide an idle/expiry indication bug. */
+  if (!window && indicator_valid && p->b.bmRequestType==0xc0 && p->b.bRequest==0xd7 &&
+      p->b.wValue.w==0 && p->b.wIndex.w==0) {
+    memcpy(out,indicator_snapshot,7); return 7;
+  }
   /* Explicit local USB-only cold-start request. Not exposed through CAN or
    * the running application's dispatcher. No flash writes here. */
   if (window && p->b.bmRequestType==0x40 && p->b.bRequest==0xb5 &&

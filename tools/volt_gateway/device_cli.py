@@ -1,4 +1,4 @@
-"""Paired local USB gateway CLI. No raw CAN transmit or firmware signing API.
+"""Paired local USB gateway CLI, including opt-in parked SWCAN experiments.
 
 Pairing bundle is a private, owner-only JSON file: device (hex12), pairing
 (hex32), layout (hex32), policy (hex32). It is never printed or logged.
@@ -157,17 +157,29 @@ def main():
   parser=argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--pairing',type=Path,required=True)
   parser.add_argument('command',choices=['info','status','indicators','buses','utilization','rx-health','clear-ids','observe','ids','capture','rules','subscribe',
-                                        'hvac-trial-status','hvac-button-trial','parked-gateway-reboot','usb-recovery','recovery-diagnostics'])
+                                        'hvac-trial-status','hvac-button-trial','swcan-tx','parked-gateway-reboot','usb-recovery','recovery-diagnostics'])
   parser.add_argument('--bus',type=int,choices=[0,1,2,3],default=3,help='HSCAN CAN1=0, CAN2=1, CAN3=2; SWCAN=3 regardless of mux')
   parser.add_argument('--seconds',type=int,default=30)
   parser.add_argument('--id',type=lambda x:int(x,0))
   parser.add_argument('--extended',action='store_true')
+  parser.add_argument('--data',help='swcan-tx: hexadecimal payload, 0..8 bytes (empty string permits DLC0)')
   parser.add_argument('--max-hz',type=int,default=10)
   args=parser.parse_args()
   if not 1<=args.seconds<=3600 or not 1<=args.max_hz<=1000:
     parser.error('duration 1..3600 seconds; max-hz 1..1000')
   if args.command=='subscribe' and (args.id is None or not 0<=args.id<=(0x1fffffff if args.extended else 0x7ff)):
     parser.error('valid --id required')
+  raw_payload=None
+  if args.command=='swcan-tx':
+    if args.bus!=3 or args.id is None or not 0<=args.id<=(0x1fffffff if args.extended else 0x7ff):
+      parser.error('swcan-tx requires bus 3 and a valid --id; use --extended for 29-bit IDs')
+    try:
+      data=bytes.fromhex(args.data) if args.data is not None else None
+    except ValueError:
+      parser.error('--data must contain hexadecimal bytes')
+    if data is None or len(data)>8:
+      parser.error('--data is required and must contain 0..8 bytes')
+    raw_payload=args.id.to_bytes(4,'big')+bytes([int(args.extended),len(data)])+data
   keys=credentials(args.pairing)
   with UsbTransport(keys['device'].hex()) as transport:
     if args.command=='recovery-diagnostics':
@@ -224,7 +236,7 @@ def main():
       elif args.command=='rules':
         policy=device.command(14)
         if policy==b'\1':
-          print('Experimental USB-only parked HVAC button pair; no arbitrary vehicle TX.')
+          print('Experimental USB-only parked SWCAN TX; query INFO for configurable-frame capability (0x100).')
         elif policy==b'\0':
           print('Vehicle-side TX policy: no permitted messages.')
         else:
@@ -236,7 +248,7 @@ def main():
         device.command(20)
         reboot_requested=True
         print('Authenticated USB recovery requested. CAN transceivers are quiesced on reset; no flash writes requested.')
-      elif args.command in ('hvac-trial-status','hvac-button-trial','parked-gateway-reboot'):
+      elif args.command in ('hvac-trial-status','hvac-button-trial','swcan-tx','parked-gateway-reboot'):
         info=device.command(1)
         if len(info)!=46 or info[0]!=1 or not int.from_bytes(info[2:6],'big')&64:
           raise ProtocolError('experimental HVAC capability absent')
@@ -248,12 +260,14 @@ def main():
           reboot_requested=True
           print('Authenticated secondary-gateway reboot requested; fresh Park/RUN/zero-speed rechecked before reset.')
           return
-        if args.command=='hvac-button-trial':
+        if args.command in ('hvac-button-trial','swcan-tx'):
+          if args.command=='swcan-tx' and not int.from_bytes(info[2:6],'big')&256:
+            raise ProtocolError('installed firmware does not support configurable SWCAN TX')
           # Explicit CLI operation only; never auto-run on connect or retry with
           # a new sequence. The firmware independently enforces all interlocks.
           if not hvac_status(status)['interlock_ready']:
             raise ProtocolError('physical safety/session interlock not ready; no TX requested')
-          device.command(17)
+          device.command(21,raw_payload) if args.command=='swcan-tx' else device.command(17)
           deadline=time.monotonic()+4
           while time.monotonic()<deadline:
             time.sleep(0.1)

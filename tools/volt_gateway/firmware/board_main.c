@@ -61,7 +61,7 @@ static uint64_t hvac_now(void) {
    * timestamps. Use the same live clock extension as the storage safety gate. */
   return runtime.can.elapsed_ms+(uint32_t)(vgw_white_startup_now(&runtime.startup)-runtime.can.previous_ms);
 }
-static size_t hvac_command(void *ctx,uint8_t op,uint64_t now,uint8_t *out) {
+static size_t hvac_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,uint64_t now,uint8_t *out) {
   (void)ctx;
   now=hvac_now();
   /* USB-only first experiment; no production Tres changes required. */
@@ -70,6 +70,7 @@ static size_t hvac_command(void *ctx,uint8_t op,uint64_t now,uint8_t *out) {
   vgw_hvac_trial_step(&hvac,now,enabled);
   bool ok=op==18;
   if (op==17 && !restart_at) ok=enabled && vgw_hvac_trial_start(&hvac,now);
+  if (op==21 && !restart_at) ok=enabled && vgw_hvac_trial_raw(&hvac,now,p,n);
   if (op==19 && enabled && !restart_at && vgw_hvac_trial_can_restart(&hvac,now)) {
     restart_at=now+250U; ok=true;
   }

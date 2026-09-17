@@ -61,7 +61,7 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
     case 1: /* INFO: capabilities, firmware build, fixed mapping, protocol */
       if (!n) {
         ok=true; out[1]=1; out[2]=1;
-        put32(out+3,0x0000003fU|(s->experiment ? 0x40U : 0U)|(s->local_recovery ? 0x80U : 0U));
+        put32(out+3,0x0000003fU|(s->experiment ? 0x140U : 0U)|(s->local_recovery ? 0x80U : 0U));
         for (unsigned i=0;i<32;i++) out[7+i]=s->session->provision.build[i];
         out[39]=s->runtime->can.config.swcan_controller;
         out[40]=s->runtime->can.config.hscan_mask;
@@ -139,9 +139,9 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
       if (!n && s->session->active && s->runtime->local_control && s->local_recovery)
         ok=s->local_recovery(s->local_recovery_context);
       break;
-    case 17: case 18: case 19:
-      if (!n && s->session->active && s->experiment) {
-        return s->experiment(s->experiment_context,op,now,out);
+    case 17: case 18: case 19: case 21:
+      if ((op==21 || !n) && s->session->active && s->runtime->local_control && s->experiment) {
+        return s->experiment(s->experiment_context,op,p,n,now,out);
       } break;
     default: break;
   }

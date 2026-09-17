@@ -18,7 +18,7 @@ typedef struct {
   uint8_t indication[5];
   bool indication_valid, can_peer_seen;
   /* Optional board-owned authenticated experiment. NULL in normal/loader builds. */
-  size_t (*experiment)(void *,uint8_t,uint64_t,uint8_t *);
+  size_t (*experiment)(void *,uint8_t,const uint8_t *,size_t,uint64_t,uint8_t *);
   void *experiment_context;
   bool (*local_recovery)(void *);
   void *local_recovery_context;

@@ -45,6 +45,31 @@ bool vgw_hvac_trial_start(vgw_hvac_trial *s,uint64_t now) {
   s->state=1; s->deadline=now+20U;
   return true;
 }
+bool vgw_hvac_trial_raw(vgw_hvac_trial *s,uint64_t now,const uint8_t *p,size_t n) {
+  if (!p || n<6 || p[4]>1 || p[5]>8 || n!=(size_t)(6U+p[5])) return false;
+  uint32_t address=((uint32_t)p[0]<<24)|((uint32_t)p[1]<<16)|((uint32_t)p[2]<<8)|p[3];
+  if (address>(p[4] ? 0x1fffffffU : 0x7ffU)) return false;
+  if (!s || !s->safety || !s->allowed || s->previous!=now || !parked(s,now) ||
+      (s->state!=0 && s->state!=4) || now<s->cooldown || !healthy(s,now)) return false;
+  if (!(rd(s,8)&(1U<<26))) return false;
+  uint32_t low=0,high=0;
+  for (unsigned i=0;i<p[5];i++) {
+    if (i<4) low|=(uint32_t)p[6+i]<<(8*i);
+    else high|=(uint32_t)p[6+i]<<(8*(i-4));
+  }
+  wr(s,8,1U);
+  wr(s,0x184,p[5]); wr(s,0x188,low); wr(s,0x18c,high);
+  if (rd(s,0x184)!=p[5] || rd(s,0x188)!=low || rd(s,0x18c)!=high) {
+    fault(s); return false;
+  }
+  /* Exactly one outstanding frame, at most one per second. State 3 completes
+   * directly to done; unlike the legacy button pair it schedules no release. */
+  s->cooldown=now+1000U;
+  if (s->attempts<UINT8_MAX) s->attempts++;
+  s->state=3; s->deadline=now+20U;
+  wr(s,0x180,p[4] ? (address<<3)|5U : (address<<21)|1U);
+  return true;
+}
 void vgw_hvac_trial_step(vgw_hvac_trial *s,uint64_t now,bool authorized) {
   if (!s || !s->safety || !s->safety->can || s->state==5) return;
   uint64_t sampled=0; bool safe=false;

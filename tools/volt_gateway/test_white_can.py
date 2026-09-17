@@ -149,6 +149,28 @@ def poll(lib, state):
   return lib.vgw_white_can_poll(C.byref(state),RECEIVE(receive),None),frames
 
 
+def test_startup_drains_running_bus_while_next_controller_synchronizes(lib):
+  class DelayedSync(CanHardware):
+    def __init__(self):
+      super().__init__(fifo_depth=3)
+      self.sync_reads=0
+
+    def read(self,ctx,a):
+      if a==BASES[2]+4 and self.values.get(BASES[2])==24 and self.sync_reads<48:
+        self.sync_reads+=1
+        self.inject(1,address=0x123,data=b'12345678')
+        return 1
+      return super().read(ctx,a)
+
+  hw=DelayedSync()
+  h,s,c,state,ok=start(lib,backhaul=2,hw=hw)
+  assert ok and hw.sync_reads==48
+  assert hw.lost==[0,0,0]
+  assert state.stats[0].received==48
+  assert state.stats[0].overflow==state.stats[0].software_drops==0
+  assert not state.tx_inhibited
+
+
 @pytest.mark.parametrize('swcan,hscan',[(2,1),(2,4),(2,5),(3,1),(3,2),(3,3)])
 def test_mux_filters_silent_and_bounded_receive(lib,swcan,hscan):
   h,s,c,state,ok=start(lib,swcan,hscan)

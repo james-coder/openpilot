@@ -61,6 +61,20 @@ static bool wait(const vgw_white_can *s,uint32_t a,uint32_t mask,uint32_t expect
   }
   return false;
 }
+static RAM void collect(vgw_white_can *,unsigned);
+static bool wait_receiving(vgw_white_can *s,uint32_t a) {
+  /* Earlier controllers already receive while the next controller waits for
+   * bus synchronization. RX IRQs are not enabled until init returns. Drain
+   * those three-entry FIFOs here too; do not clear/ignore a real overflow. */
+  uint32_t start=rd(s,0x40000024U);
+  for (unsigned n=0;n<100000;n++) {
+    for (unsigned c=1;c<=3;c++)
+      if (active(s,c) && rd(s,base(c)+MCR)==NART_RFLM) collect(s,c);
+    if (!(rd(s,a)&1U)) return true;
+    if ((uint32_t)(rd(s,0x40000024U)-start)>10U) break;
+  }
+  return false;
+}
 RAM void vgw_white_can_stop(vgw_white_can *s) {
   if (!s) return;
   uint32_t saved=lock();
@@ -143,7 +157,7 @@ bool vgw_white_can_init(vgw_white_can *s,const vgw_white_clock *clock,const vgw_
       if (rd(s,phy+20U)&pin) goto fail;
     }
     wr(s,base(c)+MCR,NART_RFLM);
-    if (!wait(s,base(c)+MSR,1,0) || rd(s,base(c)+MCR)!=NART_RFLM) goto fail;
+    if (!wait_receiving(s,base(c)+MSR) || rd(s,base(c)+MCR)!=NART_RFLM) goto fail;
   }
   s->previous_ms=s->token_ms=rd(s,0x40000024U);
   for (unsigned c=0;c<3;c++) for (unsigned w=0;w<3;w++) s->stats[c].window_start[w]=s->previous_ms;

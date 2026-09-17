@@ -81,3 +81,17 @@ from granting permission. Installed application has no software reboot or
 clear-latch operation; authenticated session close does not reset the device.
 No intentional crash, malformed command, or bypass was attempted. This trial
 does not establish whether the captured action controls recirculation.
+
+Second cold boot again showed one Powertrain FIFO overflow already present at
+the first query; the count stayed constant and op17 was not issued. Inspection
+found an unserviced startup interval: CAN1 receives while later controllers
+wait for bus synchronization, before RX interrupts are enabled. The candidate
+fix drains already-running controllers into the existing bounded queues during
+those waits, retaining all overflow reporting and TX fault behavior. A delayed
+synchronization regression test stages48 frames with no loss. CAN/trial tests:
+58 passed. This addresses a real code gap, but the cause of the physical
+overflow is not yet conclusively localized or the fix vehicle-verified.
+
+Candidate build `hvac-trial-20260917-02` and signed private `bench-hvac02`
+prepared against the exact hvac01 readback. Deployment still requires entry
+into the installed cold recovery loader; preparation is not a successful flash.

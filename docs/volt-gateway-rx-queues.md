@@ -114,3 +114,49 @@ Readbacks, programming logs and `usb-rx-irq01.json` are preserved under
 Signed factory images remain private because they contain provisioning material.
 Next gate: parked receive-only comparison with hardware and software loss counters.
 A post-flash physical cold power-cycle has not yet been validated.
+
+## First active-vehicle RX validation
+
+After the owner reconnected OBD and turned the car on, a read-only comma snapshot
+reported valid/live carState, Park and 0 m/s. No device changes or CAN transmissions
+were requested. A 90-second simultaneous probe sampled White via paired USB and
+Tres via the existing boardd publication. White counter endpoints spanned
+03:01:51.707–03:03:18.851 UTC on 2026-09-17 (about 87.1 seconds):
+
+| White bus | RX increase | Hardware overflow | Software drops | Queue peak / 64 | Maximum queue age |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Primary HSCAN 0 | 231,138 | 0 | 0 | 34 | 11 ms |
+| Object HSCAN 1 | 82,493 | 0 | 0 | 21 | 13 ms |
+| SWCAN 3 | 15,260 | 0 | 0 | 2 | 4 ms |
+
+Peak/age values are cumulative since boot, not reset at the capture boundary.
+All sampled malformed/TX/TX-error/ESR counters were zero, uptime increased and
+reset flags were unchanged. IRQ counts increased on all three controllers.
+Both finite observers exited successfully. This demonstrates physical servicing
+without reported FIFO or queue loss during this test, not universal losslessness.
+It contrasts with the prior parked startup's 56/10 primary/object FIFO-overflow
+events, but is not an identical replay of the prior traffic.
+
+Tres observed 238,298/85,048/162,168 frames on primary/object/chassis; different
+counter sampling endpoints prevent interpreting cross-device count differences
+as packet loss. Artifacts: `vehicle-observations/rx-irq-ready-20260917T030149Z/`
+under `/home/james/diagnostics/volt-gateway/`, with SHA-256:
+
+- White: `db9bf84284767229d7d1ac8d8b037d1430fb08a9a8ebe5758f9f37ef3aeecda1`
+- Tres: `82934c499f024dcc4119a922f24e604992e29c702016f7b439905d288d110127`
+
+The host-only probe now capability-checks opcode 16 and records queue diagnostics;
+five focused probe tests and lint passed. This does not change the flashed image.
+
+### Concurrent dashcam-mode diagnosis
+
+The user reported Dashcam Mode. Live CarParams identified CHEVROLET_VOLT (CAN
+fingerprint, not fuzzy), but `radarUnavailable=true`, `networkLocation=gateway`,
+`dashcamOnly=true`, `passive=true`. Live alert was `dashcamMode/permanent`, not
+carUnrecognized. The deployed GM interface sets radarUnavailable when neither
+object-bus header 1120 nor 1056 was in the startup fingerprint, then selects
+dashcamOnly for gateway cars with unavailable radar. Both IDs were present in
+this later Tres capture. This supports a startup timing/detection problem; the
+exact early timing was not recovered from logs in this pass. All manager processes
+marked shouldBeRunning were running. No production restart or safety change was
+made. Engagement/driving validation is therefore NOT established by this test.

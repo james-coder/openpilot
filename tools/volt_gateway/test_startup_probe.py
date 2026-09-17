@@ -7,7 +7,8 @@ from openpilot.tools.volt_gateway import device_cli, startup_probe, usb_transpor
 
 
 @pytest.mark.parametrize('transmitted', [0, 1])
-def test_white_probe_only_queries_and_closes(monkeypatch, transmitted):
+@pytest.mark.parametrize('rx_health', [False, True])
+def test_white_probe_only_queries_and_closes(monkeypatch, transmitted, rx_health):
   calls = []
   reports = []
   class Transport:
@@ -23,11 +24,14 @@ def test_white_probe_only_queries_and_closes(monkeypatch, transmitted):
     def command(self, op, payload=b''):
       calls.append(op)
       if op == 1:
-        return b'\1\1' + bytes(36) + bytes([3, 3, 0]) + bytes(5)
+        return b'\1\1' + (32 if rx_health else 0).to_bytes(4, 'big') + bytes(32) + bytes([3, 3, 0]) + bytes(5)
       if op == 14:
         return b'\0'
       if op == 2:
         return struct.pack('>Q6I', 1000, 0, 0, 0, 0, 0, 0)
+      if op == 16:
+        assert rx_health and payload in (b'\0', b'\1', b'\3')
+        return struct.pack('>4I', 0, 5, 1, 2)
       assert op == 3 and payload in (b'\0', b'\1', b'\3')
       return struct.pack('>14I', 5, 0, 0, transmitted, *([0]*10))
     def close(self):
@@ -45,7 +49,8 @@ def test_white_probe_only_queries_and_closes(monkeypatch, transmitted):
   else:
     startup_probe.white(1, None)
     assert reports[-1]['event'] == 'finished'
-  assert calls[-1] == 'close' and set(calls) <= {1, 2, 3, 14, 'close'}
+    assert ('software_drops' in reports[1]['buses'][0]) == rx_health
+  assert calls[-1] == 'close' and set(calls) <= {1, 2, 3, 14, 16, 'close'}
 
 
 def test_tres_uses_existing_stream_and_excludes_echoes(monkeypatch):

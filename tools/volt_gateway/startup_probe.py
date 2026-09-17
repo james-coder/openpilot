@@ -59,6 +59,7 @@ def white(seconds, pairing):
           device.command(14) != b'\0'):
         raise ValueError('expected CAN-silent USB bench policy')
       emit('white', event='armed', seconds=seconds, build=info[6:38].hex())
+      rx_health = bool(int.from_bytes(info[2:6], 'big') & 0x20)
       start = time.monotonic()
       while time.monotonic() - start < seconds:
         status = struct.unpack('>Q6I', device.command(2))
@@ -66,6 +67,9 @@ def white(seconds, pairing):
         for bus in (0, 1, 3):
           v = struct.unpack('>14I', device.command(3, bytes([bus])))
           buses[bus] = dict(zip(('rx', 'malformed', 'overflow', 'tx', 'arbitration_lost', 'tx_errors', 'esr'), v[:7], strict=True))
+          if rx_health:
+            counters = struct.unpack('>4I', device.command(16, bytes([bus])))
+            buses[bus].update(zip(('software_drops', 'irq_calls', 'queue_peak', 'max_queue_age_ms'), counters, strict=True))
           if v[3] or v[5] or v[6] & 6:
             raise ValueError('unexpected TX or CAN fault; observation stopped')
         emit('white', uptime_ms=status[0], reset_flags=status[1], buses=buses)

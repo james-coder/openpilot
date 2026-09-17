@@ -13,6 +13,41 @@ CAN transmission completed, but HVAC acceptance, recirc LED change, and physical
 flap movement remain unconfirmed pending user observation. No success claim for
 recirculation control follows from the CAN TX counter.
 
+Owner subsequently confirmed **no recirc-state change** during our TX trial.
+The infotainment popup occurs during manual button presses; the owner did not
+notice one during our injection (explicitly uncertain). Do not report the
+injection as successful popup control either.
+
+The subsequent passive recording
+`/home/james/diagnostics/volt-gateway/hvac-after-failed-tx-20260917-01.jsonl`
+contains420 subscribed observations,86 discovered IDs, zero host observation
+drops, and another manual ON/OFF pair. Same-bus MCU timestamps, not host arrival:
+
+| Transition | Selection report 0x10B02099 | Candidate 0x10AD6080 | Candidate lag |
+| --- | --- | --- | --- |
+| ON | 756008000 us, `0006070d00000001` | 756074000 us, `0a0707022b000000` | 66 ms |
+| OFF | 763255000 us, `0006070d00000000` | 763325000 us, `0a0707022b000000` | 70 ms |
+
+Candidate clear payloads followed about3s later, with a second clear roughly
+31–33ms afterward. This ordering and failed injection favor a downstream
+event/display exchange, not the initiating request, but do not prove exact ODI
+semantics. Another observed family was0x560/`ODIEvent_LS`, actual ID0x10AC0099,
+DLC4, `000e0700`, twice; it was counted but not raw-subscribed during this pass.
+The generic DBC's0x22D remote-climate request family was not observed in the
+180s discovery interval, including both manual toggles. Absence is not proof
+that the controller cannot accept that family.
+
+GM's2017 Volt service-manual data-link table lists both A26 HVAC Controls and
+K33 HVAC Control Module on SWCAN and LIN. Its LIN schematic connects A26 pin9
+to K33 pin4 over circuit7531 GN/YE (HVAC LIN1). This makes a direct LIN button
+path plausible; it does not establish a recirc payload or exclude a separate
+CAN/diagnostic control interface. Do not substitute Gen1 wiring/protocols.
+Sources: [GM data-link table](https://estimate.mymitchell.com/GMC/document/4/6/4/0/0/100304692_4640002_11741334.html),
+[GM LIN schematic](https://estimate.mymitchell.com/GMC/document/4/2/9/1/5/4291538.html).
+Local source SVG is retained under `vehicle-observations/2017-volt-lin-4290886.svg`.
+Next target is an evidenced request to K33 (ordinary CAN or documented diagnostic
+control), not repeat injection of the failed ODI pair. No further TX issued.
+
 Installed hvac05 includes the later separation of the cabin-action interlock
 from flash-programming voltage/dwell requirements described below. The original
 12.5–15.5V/five-second cabin gate in the initial design is no longer applicable.

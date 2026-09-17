@@ -102,6 +102,25 @@ command resulted from this research pass. Most decisive next evidence would be
 a capture of the listed HVAC diagnostic recirculation function, including entry,
 commands, responses, keepalive and return-to-normal—not just its visible result.
 
+Further research found no verified Volt recirc command. GMW3110 describes AE
+control-PID-specific payloads rather than a universal HVAC command. The Gen1
+volty-pi/volt-pi projects and additional code searches supplied no usable Gen2
+recirc packet (grep.app access returned HTTP429, so no claim of exhaustive code
+search). Broadcast hypotheses remain separately testable: at the same unverified
+0x1045A080/DLC5 baseline, `0400000000` means raw recirc2; `0300000000` means
+raw recirc1 plus HMIActIndReq1; `0500000000` means raw recirc2 plus that flag.
+These are bit-layout-derived experiments, **not newly discovered working
+commands**. The HMI field name does not prove it is an enable/validity bit, and
+zero elsewhere still does not imply no-change. None sent in this research pass.
+
+Owner subsequently authorized all three variants sequentially,20s apart. Sent
+`0400000000`, `0300000000`, `0500000000`, each once on extended0x1045A080/DLC5,
+using a monotonic20s wait from the preceding acceptance plus pre-send checks.
+All three completed: TX3→4→5→6, attempts3→4→5→6, state done each time, fresh
+parked interlocks. Reported malformed/overflow/arbitration_lost/tx_errors/ESR
+remained zero. No resets/retries/flashes or receive subscriptions. User-visible
+effects pending owner report; successful transmission does not prove acceptance.
+
 ## Latest physical result: first completed TX pair, hvac05
 
 On September17, with OBD/USB connected and fresh Park/RUN/zero-speed evidence,

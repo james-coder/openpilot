@@ -6,6 +6,7 @@
 #if defined(VGW_HVAC_EXPERIMENT) && defined(VGW_APPLICATION_SLOT)
 #include "hvac_trial.h"
 static vgw_hvac_trial hvac;
+static uint64_t restart_at;
 #endif
 #ifdef VGW_BOARD_USB
 #include "white_usb.h"
@@ -26,15 +27,36 @@ static uint8_t public_key[91], target[44];
 static uint32_t divider;
 static uint8_t powertrain;
 #if defined(VGW_HVAC_EXPERIMENT) && defined(VGW_APPLICATION_SLOT)
+static uint64_t hvac_now(void) {
+  /* CAN elapsed_ms is the poll-entry epoch; RX callbacks can carry newer
+   * timestamps. Use the same live clock extension as the storage safety gate. */
+  return runtime.can.elapsed_ms+(uint32_t)(vgw_white_startup_now(&runtime.startup)-runtime.can.previous_ms);
+}
 static size_t hvac_command(void *ctx,uint8_t op,uint64_t now,uint8_t *out) {
   (void)ctx;
+  now=hvac_now();
   /* USB-only first experiment; no production Tres changes required. */
   bool enabled=runtime.local_control && recovery.active && now<application.lease_until &&
     recovery.update.state!=VGW_UPDATE_RECEIVING;
   vgw_hvac_trial_step(&hvac,now,enabled);
-  out[0]=(op==18 || (enabled && vgw_hvac_trial_start(&hvac,now))) ? 0 : 1;
-  out[1]=1; out[2]=hvac.state; out[3]=hvac.attempts; out[4]=hvac.allowed;
-  return 5;
+  bool ok=op==18;
+  if (op==17 && !restart_at) ok=enabled && vgw_hvac_trial_start(&hvac,now);
+  if (op==19 && enabled && !restart_at && vgw_hvac_trial_can_restart(&hvac,now)) {
+    restart_at=now+250U; ok=true;
+  }
+  out[0]=ok ? 0 : 1;
+  out[1]=2; out[2]=hvac.state; out[3]=hvac.attempts; out[4]=hvac.allowed;
+  out[5]=safety.seen;
+  out[6]=(uint8_t)(safety.safe[0]|(safety.safe[1]<<1)|(safety.safe[2]<<2));
+  out[7]=safety.ready; out[8]=safety.power_valid; out[9]=safety.stable;
+  out[10]=runtime.can.tx_inhibited; out[11]=enabled;
+  for (unsigned i=0;i<4;i++) out[12+i]=(uint8_t)(safety.voltage_mv>>(24-8*i));
+  for (unsigned i=0;i<3;i++) {
+    uint64_t age=now>=safety.received[i] ? now-safety.received[i] : UINT64_MAX;
+    uint16_t bounded=(uint16_t)(age>65535U ? 65535U : age);
+    out[16+2*i]=(uint8_t)(bounded>>8); out[17+2*i]=(uint8_t)bounded;
+  }
+  return 22;
 }
 static void hvac_attach(void) {
   application.experiment=hvac_command;
@@ -217,8 +239,13 @@ void vgw_loader_main(void) {
     vgw_boot_trace(13);
     if (!vgw_white_runtime_step(&runtime,vgw_application_step,&application)) fatal();
 #if defined(VGW_HVAC_EXPERIMENT) && defined(VGW_APPLICATION_SLOT)
-    vgw_hvac_trial_step(&hvac,runtime.can.elapsed_ms,runtime.local_control && recovery.active &&
+    vgw_hvac_trial_step(&hvac,hvac_now(),runtime.local_control && recovery.active &&
       runtime.can.elapsed_ms<application.lease_until && recovery.update.state!=VGW_UPDATE_RECEIVING);
+    if (restart_at && hvac_now()>=restart_at) {
+      restart_at=0;
+      if (runtime.local_control && recovery.update.state!=VGW_UPDATE_RECEIVING &&
+          vgw_hvac_trial_can_restart(&hvac,hvac_now())) vgw_white_physical_reset();
+    }
 #endif
 #ifdef VGW_BOARD_USB
     vgw_boot_trace(14);

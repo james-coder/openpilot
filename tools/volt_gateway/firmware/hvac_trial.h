@@ -13,4 +13,7 @@ typedef struct {
 void vgw_hvac_trial_init(vgw_hvac_trial *,vgw_white_safety *);
 void vgw_hvac_trial_step(vgw_hvac_trial *,uint64_t,bool authorized);
 bool vgw_hvac_trial_start(vgw_hvac_trial *,uint64_t);
+/* Secondary-gateway reset, not a driving-process restart. Does not require
+ * good VIN or a cleared RX latch, but must have fresh parked vehicle evidence. */
+bool vgw_hvac_trial_can_restart(const vgw_hvac_trial *,uint64_t);
 #endif

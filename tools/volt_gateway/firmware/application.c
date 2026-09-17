@@ -131,7 +131,7 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
         put32(out+9,v->queue_peak); put32(out+13,v->max_queue_age_ms);
         ok=true; length=17;
       } break;
-    case 17: case 18:
+    case 17: case 18: case 19:
       if (!n && s->session->active && s->experiment) {
         return s->experiment(s->experiment_context,op,now,out);
       } break;

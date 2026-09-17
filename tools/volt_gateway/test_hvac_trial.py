@@ -25,7 +25,7 @@ def library(tmp_path_factory):
   stub.write_text('''#include "white_safety.h"
 bool safe=true; bool valid=true;
 bool vgw_white_safety_sample(void *s,uint64_t n,uint64_t *t,bool *a)
-{(void)s;*t=n;*a=safe;return valid;}
+{((vgw_white_safety *)s)->safe[0]=safe;*t=n;*a=safe;return valid;}
 ''')
   out=root/'trial.so'
   subprocess.run(['cc','-std=c11','-Wall','-Wextra','-Werror','-fanalyzer','-shared','-fPIC',
@@ -42,6 +42,8 @@ bool vgw_white_safety_sample(void *s,uint64_t n,uint64_t *t,bool *a)
     getattr(lib,name).restype=C.c_bool
   lib.vgw_hvac_trial_init.argtypes=[C.POINTER(Trial),C.c_void_p]
   lib.vgw_hvac_trial_step.argtypes=[C.POINTER(Trial),C.c_uint64,C.c_bool]
+  lib.vgw_hvac_trial_can_restart.argtypes=[C.POINTER(Trial),C.c_uint64]
+  lib.vgw_hvac_trial_can_restart.restype=C.c_bool
   return lib
 
 
@@ -54,6 +56,8 @@ def start(lib):
   assert lib.vgw_white_can_init(C.byref(can),C.byref(clock),C.byref(Config(3,3,2,0x6f1)))
   safety=Safety()
   safety.can=C.pointer(can)
+  safety.seen=7
+  safety.safe[:]=[True,True,True]
   trial=Trial()
   lib.vgw_hvac_trial_init(C.byref(trial),C.byref(safety))
   C.c_bool.in_dll(lib,'safe').value=True
@@ -63,6 +67,9 @@ def start(lib):
 
 
 def step(lib,can,trial,now,authorized=True):
+  from openpilot.tools.volt_gateway.test_white_safety import Safety
+  safety=C.cast(trial.safety,C.POINTER(Safety)).contents
+  safety.received[:]=[now]*3
   can.elapsed_ms=now
   lib.vgw_hvac_trial_step(C.byref(trial),now,authorized)
 
@@ -94,13 +101,11 @@ def test_exact_pair_and_no_boot_transmission(library):
   assert library.vgw_hvac_trial_start(C.byref(t),10100)
 
 
-@pytest.mark.parametrize('failure',['unsafe','invalid','unauthenticated','overflow','can_failed','wrong_bus','bus_off','silent'])
+@pytest.mark.parametrize('failure',['unsafe','unauthenticated','overflow','can_failed','wrong_bus','bus_off','silent'])
 def test_interlocks_never_send(library,failure):
   hw,can,t,owners=start(library)
   if failure=='unsafe':
     C.c_bool.in_dll(library,'safe').value=False
-  if failure=='invalid':
-    C.c_bool.in_dll(library,'valid').value=False
   if failure=='overflow':
     can.tx_inhibited=True
   if failure=='can_failed':
@@ -146,4 +151,56 @@ def test_attempt_bound(library):
   t.attempts=4
   step(library,can,t,100000)
   assert not library.vgw_hvac_trial_start(C.byref(t),100000)
+  assert not transmissions(hw)
+
+
+@pytest.mark.parametrize('elapsed,now,allowed',[(100,101,True),(100,110,True),(100,111,False),(100,99,False)])
+def test_live_clock_after_poll_entry(library,elapsed,now,allowed):
+  hw,can,t,owners=start(library)
+  can.elapsed_ms=elapsed
+  owners[2].received[:]=[now]*3
+  library.vgw_hvac_trial_step(C.byref(t),now,True)
+  assert bool(library.vgw_hvac_trial_start(C.byref(t),now))==allowed
+  assert len(transmissions(hw))==int(allowed)
+
+
+def test_status_diagnostics():
+  import struct
+  from openpilot.tools.volt_gateway.device_cli import hvac_status
+  from openpilot.tools.volt_gateway.protocol import ProtocolError
+  assert not hvac_status(bytes([1,0,0,0]))['interlock_ready']
+  value=bytes([2,0,0,0,7,7,1,1,0,0,1])+struct.pack('>I3H',4990,10,20,30)
+  decoded=hvac_status(value)
+  assert decoded['voltage_mv']==4990 and decoded['input_ages_ms']==[10,20,30]
+  assert decoded['safe_mask']==7 and not decoded['stable']
+  for bad in (b'',value[:-1],value+b'\0',bytes([3,0,0,0]),bytes([1,6,0,0])):
+    with pytest.raises(ProtocolError):
+      hvac_status(bad)
+
+
+def test_flash_power_failure_is_not_cabin_tx_requirement(library):
+  hw,can,t,owners=start(library)
+  C.c_bool.in_dll(library,'valid').value=False
+  step(library,can,t,100)
+  assert library.vgw_hvac_trial_start(C.byref(t),100)
+
+
+@pytest.mark.parametrize('condition',['fresh','stale','future','moving','missing','active_press','fault'])
+def test_restart_and_passive_park_evidence(library,condition):
+  hw,can,t,owners=start(library)
+  safety=owners[2]
+  safety.received[:]=[100,100,100]
+  if condition=='stale':
+    safety.received[1]=0
+  if condition=='future':
+    safety.received[1]=301
+  if condition=='moving':
+    safety.safe[0]=False
+  if condition=='missing':
+    safety.seen=3
+  if condition=='active_press':
+    t.state=1
+  if condition=='fault':
+    t.state=5
+  assert library.vgw_hvac_trial_can_restart(C.byref(t),300)==(condition in ('fresh','fault'))
   assert not transmissions(hw)

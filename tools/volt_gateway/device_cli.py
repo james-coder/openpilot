@@ -22,6 +22,20 @@ LED_ERRORS=('none','no_image','image_policy','storage','configuration','can','wa
 PEER_STATES=('disabled','local_usb_owner','awaiting_authenticated_peer','authenticated','stale')
 
 
+def hvac_status(data):
+  if not ((len(data)==4 and data[0]==1) or (len(data)==21 and data[0]==2)) or data[1]>5:
+    raise ProtocolError('invalid HVAC trial status')
+  result={'state':('idle','press_pending','release_wait','release_pending','done','fault')[data[1]],
+          'attempts':data[2],'interlock_ready':bool(data[3]),
+          'note':'CAN completion is not proof of recirculation actuation'}
+  if data[0]==2:
+    result.update(seen_mask=data[4],safe_mask=data[5],sampler_ready=bool(data[6]),power_valid=bool(data[7]),
+                  stable=bool(data[8]),tx_inhibited=bool(data[9]),session_enabled=bool(data[10]),
+                  voltage_mv=int.from_bytes(data[11:15],'big'),
+                  input_ages_ms=list(struct.unpack('>3H',data[15:21])))
+  return result
+
+
 def indicators(data):
   if (len(data)!=7 or data[0]!=1 or data[1]>=len(LED_STATES) or data[2] not in (0,1,255) or
       data[3]>=len(LED_ERRORS) or data[4]>7 or data[5]>1 or data[6]>=len(PEER_STATES)):
@@ -131,7 +145,7 @@ def main():
   parser=argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--pairing',type=Path,required=True)
   parser.add_argument('command',choices=['info','status','indicators','buses','utilization','rx-health','clear-ids','observe','ids','capture','rules','subscribe',
-                                        'hvac-trial-status','hvac-button-trial'])
+                                        'hvac-trial-status','hvac-button-trial','parked-gateway-reboot'])
   parser.add_argument('--bus',type=int,choices=[0,1,2,3],default=3,help='HSCAN CAN1=0, CAN2=1, CAN3=2; SWCAN=3 regardless of mux')
   parser.add_argument('--seconds',type=int,default=30)
   parser.add_argument('--id',type=lambda x:int(x,0))
@@ -148,6 +162,7 @@ def main():
       print(json.dumps(indicators(bytes(transport.handle.controlRead(0xc0,0xd7,0,0,7,timeout=1000)))))
       return  # Do not open a session just to inspect its closed/expired state.
     device=Device(transport,keys)
+    reboot_requested=False
     try:
       if args.command in ('info','buses'):
         data=device.command(1)
@@ -199,30 +214,32 @@ def main():
           print('Vehicle-side TX policy: no permitted messages.')
         else:
           raise ProtocolError('unexpected write policy')
-      elif args.command in ('hvac-trial-status','hvac-button-trial'):
+      elif args.command in ('hvac-trial-status','hvac-button-trial','parked-gateway-reboot'):
         info=device.command(1)
         if len(info)!=46 or info[0]!=1 or not int.from_bytes(info[2:6],'big')&64:
           raise ProtocolError('experimental HVAC capability absent')
         status=device.command(18)
+        if args.command=='parked-gateway-reboot':
+          if len(status)!=21 or status[0]!=2:
+            raise ProtocolError('parked reboot not supported by this firmware')
+          device.command(19)
+          reboot_requested=True
+          print('Authenticated secondary-gateway reboot requested; fresh Park/RUN/zero-speed rechecked before reset.')
+          return
         if args.command=='hvac-button-trial':
           # Explicit CLI operation only; never auto-run on connect or retry with
           # a new sequence. The firmware independently enforces all interlocks.
-          if len(status)!=4 or status[0]!=1 or not status[3]:
+          if not hvac_status(status)['interlock_ready']:
             raise ProtocolError('physical safety/session interlock not ready; no TX requested')
           device.command(17)
           deadline=time.monotonic()+4
           while time.monotonic()<deadline:
             time.sleep(0.1)
             status=device.command(18)
-            if len(status)!=4 or status[0]!=1:
-              raise ProtocolError('invalid HVAC trial status')
+            hvac_status(status)
             if status[1] in (4,5):
               break
-        if len(status)!=4 or status[0]!=1 or status[1]>5:
-          raise ProtocolError('invalid HVAC trial status')
-        print(json.dumps({'state':('idle','press_pending','release_wait','release_pending','done','fault')[status[1]],
-                          'attempts':status[2],'interlock_ready':bool(status[3]),
-                          'note':'CAN completion is not proof of recirculation actuation'}))
+        print(json.dumps(hvac_status(status)))
       else:
         device.command(8,bytes([0,args.bus,int(args.extended)])+args.id.to_bytes(4,'big')+args.max_hz.to_bytes(2,'big'))
         end=time.monotonic()+args.seconds
@@ -242,7 +259,8 @@ def main():
             print(json.dumps(observation),flush=True)
         device.command(10)
     finally:
-      device.close()
+      if not reboot_requested:
+        device.close()
 
 
 if __name__=='__main__':

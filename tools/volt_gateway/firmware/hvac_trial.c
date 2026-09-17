@@ -10,11 +10,21 @@ static void fault(vgw_hvac_trial *s) {
 void vgw_hvac_trial_init(vgw_hvac_trial *s,vgw_white_safety *safety) {
   if (s) *s=(vgw_hvac_trial){.safety=safety};
 }
+static bool parked(const vgw_hvac_trial *s,uint64_t now) {
+  if (!s || !s->safety || s->safety->seen!=7) return false;
+  for (unsigned i=0;i<3;i++)
+    if (!s->safety->safe[i] || now<s->safety->received[i] || now-s->safety->received[i]>250U) return false;
+  return true;
+}
+bool vgw_hvac_trial_can_restart(const vgw_hvac_trial *s,uint64_t now) {
+  return parked(s,now) && !(s->state>=1 && s->state<=3);
+}
 static bool healthy(vgw_hvac_trial *s,uint64_t now) {
   vgw_white_can *c=s->safety->can;
   return c->ready && !c->failed && !c->tx_inhibited && c->config.swcan_controller==3 &&
     c->config.backhaul_controller==2 && c->config.hscan_mask==3 &&
-    now==c->elapsed_ms && rd(s,28)==((5U<<16)|89U) && rd(s,0)==24U && !(rd(s,24)&7U);
+    now>=c->elapsed_ms && now-c->elapsed_ms<=10U &&
+    rd(s,28)==((5U<<16)|89U) && rd(s,0)==24U && !(rd(s,24)&7U);
 }
 static bool send(vgw_hvac_trial *s,bool press) {
   if (!(rd(s,8)&(1U<<26))) return false;
@@ -38,8 +48,11 @@ bool vgw_hvac_trial_start(vgw_hvac_trial *s,uint64_t now) {
 void vgw_hvac_trial_step(vgw_hvac_trial *s,uint64_t now,bool authorized) {
   if (!s || !s->safety || !s->safety->can || s->state==5) return;
   uint64_t sampled=0; bool safe=false;
-  bool valid=vgw_white_safety_sample(s->safety,now,&sampled,&safe);
-  s->allowed=valid && safe && sampled==now && authorized && healthy(s,now) && now>=s->previous;
+  /* Keep flash-power diagnostics sampled, but do not impose the flash erase
+   * voltage/dwell policy on two volatile cabin-button frames. Firmware updates
+   * retain their separate, unchanged supply/awake requirements. */
+  (void)vgw_white_safety_sample(s->safety,now,&sampled,&safe);
+  s->allowed=parked(s,now) && authorized && healthy(s,now) && now>=s->previous;
   s->previous=now;
   if (s->state==0 || s->state==4) return;
   if (!s->allowed) { fault(s); return; }

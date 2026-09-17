@@ -110,3 +110,38 @@ against the prepared ELF identity and matched exactly:
 Indicators running/error none; capabilities127; experimental TX policy1;
 HVAC idle/attempts0/interlock false on USB only. This confirms installation
 of the startup fix plus bounded HVAC TX support, not successful vehicle TX.
+
+## hvac03 prepared correction (not deployed)
+
+With hvac02 physically running, all three buses had zero hardware/software RX
+overflows, but the trial stayed idle/interlock false and op17 was not issued.
+Read-only subscriptions confirmed repeated primary frames309
+`00001146991a1a12` (Park),497 `a21200001800007a` (RUN), and1001
+`0000000000000000` (zero speed), with changing unrelated PRNDL bytes later.
+The installed status does not expose VIN/sampler details, so the remaining
+physical blocker is not conclusively identified.
+
+hvac03 separates the short cabin-button trial from flash-write power policy:
+fresh (<=250ms) Park/RUN/zero-speed evidence and healthy CAN are required, but
+12.5–15.5V and five-second stability are no longer HVAC prerequisites. Signed
+firmware updates retain their existing power interlocks. Exact two-frame policy,
+authentication, session timeout, and no arbitrary raw TX remain unchanged.
+
+It also corrects a clock inconsistency: trial sampling previously used the
+CAN poll-entry epoch even though RX timestamps may be later. The new caller
+uses the actual monotonic clock extension, as the storage gate already does;
+driver health tolerates at most10ms since the last CAN poll. Native tests cover
+that difference, future/stale timestamps, and missing/unsafe vehicle evidence.
+
+Status op18 version2 additionally exposes VIN, sampler/power-valid/stability
+flags, input seen/safe masks and ages, TX-inhibit and session state. New op19
+requests a USB-authenticated secondary-gateway reboot, acknowledged before a
+250ms delay and fresh parked-state recheck. It does not require valid VIN or a
+cleared RX latch, does not restart the driving processes, and cannot run during
+an active button pair or receiving update. Loader/default builds do not expose
+this hook. CLI adds `parked-gateway-reboot` and understands both status versions.
+
+88 native CAN/HVAC/physical-safety tests passed; lint/diff checks passed; ARM
+loader/A/B build succeeded. Signed candidate `bench-hvac03` is prepared against
+hvac02's exact readback. None of these results establish physical deployment or
+successful HVAC control. Installed hvac02 still lacks the new reboot operation.

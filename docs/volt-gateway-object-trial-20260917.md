@@ -239,3 +239,18 @@ across modeled peripheral resets; correcting that model, not weakening firmware
 overflow checks, removed the spurious handoff overflow. Candidate signed image
 is privately prepared as `bench-object02`, and its exact-predecessor/region
 validation passed. No flash yet: owner must disconnect OBD and leave USB only.
+
+### Object02 flashed
+
+After owner disconnected OBD and cold-replugged USB, recovery was caught and
+the exact ROM serial attached to WSL. Full prior readback matched Object01;
+reviewed regions were programmed with no option-byte changes. Complete 1 MiB
+post-write SHA256: `9b275b8dc8b3458a2565eb896366ca1cda4dff4d82d67aa51ea8aaa683afbb5c`.
+Evidence: `flashing/370022000651363038363036-20260916/object02/` (private).
+DFU exit succeeded. Authenticated USB INFO reported build
+`0081abdab2058619641af8565d1c7f336a6617ba1b9acc479be69c3d7870fe66`;
+STATUS showed slot A running, no error, uptime 35,778 ms, zero drop counters.
+Primary RX-health was zero with OBD disconnected, not a busy-car validation.
+Two immediately successive separate CLI sessions timed out during HELLO;
+subsequent sessions succeeded. That reconnect behavior remains unresolved.
+Busy physical cold-boot and Object CAN exchange remain unverified.

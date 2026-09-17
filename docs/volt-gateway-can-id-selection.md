@@ -1,5 +1,23 @@
 # CAN-ID selection — no IDs approved
 
+## Additional screening, 2026-09-17 UTC
+
+Offline screening of seven full rlogs (route 74 segments 0/5/10/15 and route 76
+segments 2/3/4), local GM DBC files, and the simultaneous startup observation
+found no conflicts for `0x600–0x602` or `0x6F0–0x6F2` on the screened HSCAN buses.
+Evidence with per-file hashes and counts is preserved at
+`/home/james/diagnostics/volt-gateway/traffic/id-screen-20260917.json`, SHA-256
+`8c84eeb7dcadfc9d8a7124f58ac5ae95f2b178eabf75e56ae5a232b07e9cc67e`.
+
+The [startup comparison](volt-gateway-startup-comparison-20260916.md) now provides
+positive simultaneous CAN2 Object / CAN3 SWCAN receive evidence through the
+connected splitter. This strengthens Object as a backhaul candidate, but does
+not approve transport IDs. Enhanced diagnostic traffic and unrepresented vehicle
+states remain unresolved. Among otherwise equally supported IDs, the `0x6F0`
+group has lower arbitration priority and is preferred on that criterion alone.
+
+## Earlier evidence
+
 2026-09-16 additional evidence: full driving rlogs were copied and compared with
 stationary traffic. Object-bus estimates were 22.0–23.6% during three highway
 minutes with openpilot active and radar-reported targets, versus 24.1% stationary.

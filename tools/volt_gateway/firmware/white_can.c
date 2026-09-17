@@ -18,6 +18,20 @@ static RAM uint32_t rd(const vgw_white_can *s,uint32_t a) { const vgw_white_mmio
 static RAM void wr(const vgw_white_can *s,uint32_t a,uint32_t v) { const vgw_white_mmio *io=io_of(s); io->write32(io->ctx,a,v); }
 static void change(const vgw_white_can *s,uint32_t a,uint32_t mask,uint32_t v) { wr(s,a,(rd(s,a)&~mask)|v); }
 static RAM uint32_t inc(uint32_t n) { return n==UINT32_MAX ? n : n+1; }
+static RAM uint32_t lock(void) {
+  uint32_t saved=0;
+#if defined(__arm__) || defined(__thumb__)
+  __asm__ volatile("mrs %0, primask\ncpsid i" : "=r"(saved) :: "memory");
+#endif
+  return saved;
+}
+static RAM void unlock(uint32_t saved) {
+#if defined(__arm__) || defined(__thumb__)
+  __asm__ volatile("dmb\nmsr primask, %0" :: "r"(saved) : "memory");
+#else
+  (void)saved;
+#endif
+}
 /* Accidental configuration-corruption check, not an authentication mechanism. */
 static RAM uint32_t config_check(const vgw_white_can_config *c) {
   uint8_t bytes[5]={c->swcan_controller,c->hscan_mask,c->backhaul_controller,
@@ -45,8 +59,10 @@ static bool wait(const vgw_white_can *s,uint32_t a,uint32_t mask,uint32_t expect
 }
 RAM void vgw_white_can_stop(vgw_white_can *s) {
   if (!s) return;
+  uint32_t saved=lock();
   s->ready=false; s->failed=true; s->pending=false; s->tokens=0;
   if (s->clock && s->clock->startup) (void)vgw_white_quiesce(io_of(s));
+  unlock(saved);
 }
 static bool alternate(const vgw_white_can *s,uint32_t port,unsigned pin,unsigned af,bool pullup) {
   uint32_t afr=port+32U+(pin/8U)*4U, shift=(pin%8U)*4U, pair=pin*2U;
@@ -147,6 +163,57 @@ static RAM void account(vgw_white_can *s,unsigned c,uint32_t now,uint32_t bits) 
     if (load>st->peak_permille) st->peak_permille=load;
   }
 }
+/* Called only while interrupts are masked. Stage before any expensive callback.
+ * The real FIFO holds three frames; eight reads also bound arrival during drain.
+ * Separate per-controller queues prevent a busy HSCAN consuming SWCAN storage. */
+static RAM void collect(vgw_white_can *s,unsigned c) {
+  uint32_t b=base(c); unsigned index=c-1U;
+  vgw_white_can_stats *st=&s->stats[index];
+  for (unsigned n=0;n<8;n++) {
+    uint32_t fifo=rd(s,b+FIFO);
+    if (fifo&16U) { st->overflow=inc(st->overflow); s->tx_inhibited=true; wr(s,b+FIFO,16U); }
+    if (!(fifo&3U)) break;
+    vgw_white_can_raw raw={rd(s,b+0x1b0U),rd(s,b+0x1b4U)&15U,
+      rd(s,b+0x1b8U),rd(s,b+0x1bcU),rd(s,0x40000024U),s->sequence++};
+    wr(s,b+FIFO,32U);
+    st->received=inc(st->received);
+    account(s,c,raw.stamp,(raw.id&4U) ? 185U : 160U);
+    if (raw.dlc>8) { st->malformed=inc(st->malformed); s->tx_inhibited=true; continue; }
+    if (s->rx_count[index]>=VGW_CAN_RX_DEPTH) {
+      st->software_drops=inc(st->software_drops); s->tx_inhibited=true; continue;
+    }
+    unsigned tail=s->rx_tail[index];
+    if (tail>=VGW_CAN_RX_DEPTH) { s->tx_inhibited=true; s->failed=true; return; }
+    s->rx[index][tail]=raw;
+    s->rx_tail[index]=(uint8_t)((tail+1U)%VGW_CAN_RX_DEPTH);
+    s->rx_count[index]++;
+    if (s->rx_count[index]>st->queue_peak) st->queue_peak=s->rx_count[index];
+  }
+}
+bool vgw_white_can_enable_rx(vgw_white_can *s) {
+  if (!s || !s->ready || s->failed || s->rx_interrupts) return false;
+  uint32_t saved=lock();
+  s->rx_interrupts=true;
+  bool ok=true;
+  for (unsigned c=1;c<=3;c++) {
+    uint32_t mask=active(s,c) ? 2U : 0U; /* FIFO0 pending only, no TX IRQ */
+    wr(s,base(c)+IER,mask);
+    if (rd(s,base(c)+IER)!=mask) ok=false;
+  }
+  if (!ok) vgw_white_can_stop(s);
+  unlock(saved); return ok;
+}
+RAM void vgw_white_can_rx_irq(vgw_white_can *s,unsigned c) {
+  if (!s || c<1 || c>3 || !s->ready || s->failed) return;
+  uint32_t saved=lock();
+  if (s->config_check!=config_check(&s->config) || !active(s,c)) {
+    vgw_white_can_stop(s);
+  } else {
+    s->stats[c-1U].irq_calls=inc(s->stats[c-1U].irq_calls);
+    collect(s,c);
+  }
+  unlock(saved);
+}
 RAM bool vgw_white_can_poll(vgw_white_can *s,vgw_can_receive receive,void *context) {
   if (!s || !s->ready || s->failed) return false;
   if (s->config_check!=config_check(&s->config) || !vgw_white_clock_valid(s->clock)) goto fail;
@@ -156,20 +223,31 @@ RAM bool vgw_white_can_poll(vgw_white_can *s,vgw_can_receive receive,void *conte
   for (unsigned c=1;c<=3;c++) {
     if (!active(s,c)) continue;
     uint32_t b=base(c); vgw_white_can_stats *st=&s->stats[c-1];
-    if (rd(s,b+BTR)!=timing(s,c) || rd(s,b+MCR)!=NART_RFLM || rd(s,b+IER)!=0) goto fail;
+    if (rd(s,b+BTR)!=timing(s,c) || rd(s,b+MCR)!=NART_RFLM || rd(s,b+IER)!=(s->rx_interrupts ? 2U : 0U)) goto fail;
     st->last_esr=rd(s,b+ESR);
     if (st->last_esr&6U) goto fail; /* error passive or bus-off: no automatic restart */
-    account(s,c,now,0);
+    uint32_t saved=lock();
+    /* An IRQ may have accounted a newer timestamp since poll's initial sample.
+     * Never roll its utilization window backwards using that older sample. */
+    account(s,c,rd(s,0x40000024U),0);
+    unlock(saved);
     for (unsigned n=0;n<8;n++) {
-      uint32_t fifo=rd(s,b+FIFO);
-      if (fifo&16U) { st->overflow=inc(st->overflow); s->tx_inhibited=true; wr(s,b+FIFO,16U); }
-      if (!(fifo&3U)) break;
-      uint32_t id=rd(s,b+0x1b0U), dlc=rd(s,b+0x1b4U)&15U;
-      uint32_t lo=rd(s,b+0x1b8U), hi=rd(s,b+0x1bcU);
-      wr(s,b+FIFO,32U); /* release exactly one hardware mailbox */
-      st->received=inc(st->received); account(s,c,now,(id&4U) ? 185U : 160U);
-      if (dlc>8) { st->malformed=inc(st->malformed); s->tx_inhibited=true; continue; }
-      vgw_frame f={.timestamp_us=s->elapsed_ms*1000U,.sequence=s->sequence++,
+      saved=lock();
+      collect(s,c); /* Also service while flash code has IRQs globally masked. */
+      unsigned index=c-1U, head=s->rx_head[index];
+      if (head>=VGW_CAN_RX_DEPTH || s->rx_count[index]>VGW_CAN_RX_DEPTH || s->failed) {
+        unlock(saved); goto fail;
+      }
+      if (!s->rx_count[index]) { unlock(saved); break; }
+      vgw_white_can_raw raw=s->rx[index][head];
+      s->rx_head[index]=(uint8_t)((head+1U)%VGW_CAN_RX_DEPTH); s->rx_count[index]--;
+      unlock(saved);
+      uint32_t id=raw.id, dlc=raw.dlc, lo=raw.lo, hi=raw.hi;
+      uint32_t sampled=rd(s,0x40000024U);
+      uint32_t age=sampled-raw.stamp;
+      if (age>st->max_queue_age_ms) st->max_queue_age_ms=age;
+      uint64_t current=s->elapsed_ms+(uint32_t)(sampled-now);
+      vgw_frame f={.timestamp_us=(current>=age ? current-age : 0)*1000U,.sequence=raw.sequence,
         .address=(id&4U) ? id>>3 : id>>21,.bus=(uint8_t)(c==s->config.swcan_controller ? 3 : c-1),
         .flags=(uint8_t)(((id&4U) ? VGW_EXTENDED : 0)|((id&2U) ? VGW_RTR : 0)),.dlc=(uint8_t)dlc};
       if (!(id&2U)) for (unsigned j=0;j<dlc;j++) f.data[j]=(uint8_t)((j<4 ? lo : hi)>>(8*(j%4)));
@@ -189,8 +267,9 @@ RAM bool vgw_white_can_poll(vgw_white_can *s,vgw_can_receive receive,void *conte
 fail:
   vgw_white_can_stop(s); return false;
 }
-bool vgw_white_can_response(vgw_white_can *s,const uint8_t data[8]) {
+static RAM bool response(vgw_white_can *s,const uint8_t data[8]) {
   if (!s || !data || !s->ready || s->failed || s->tx_inhibited || s->pending || !s->config.backhaul_controller) return false;
+  for (unsigned c=1;c<=3;c++) if (active(s,c) && (s->rx_count[c-1U] || (rd(s,base(c)+FIFO)&3U))) return false;
   if (s->config_check!=config_check(&s->config) || !vgw_white_clock_valid(s->clock)) { vgw_white_can_stop(s); return false; }
   uint32_t now=rd(s,0x40000024U), b=base(s->config.backhaul_controller);
   if ((uint32_t)(now-s->previous_ms)>2U) return false; /* fresh health/RX service */
@@ -211,4 +290,9 @@ bool vgw_white_can_response(vgw_white_can *s,const uint8_t data[8]) {
   s->tokens--; s->pending=true; s->pending_ms=now;
   account(s,s->config.backhaul_controller,now,160U);
   return true;
+}
+bool vgw_white_can_response(vgw_white_can *s,const uint8_t data[8]) {
+  uint32_t saved=lock();
+  bool ok=response(s,data);
+  unlock(saved); return ok;
 }

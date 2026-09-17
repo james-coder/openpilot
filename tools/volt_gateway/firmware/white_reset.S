@@ -8,9 +8,23 @@
 vgw_vectors:
   .word __stack_top
   .word vgw_reset
+  .set vgw_vector_index, 2
   .rept 116
-  .word vgw_early_fault
+  .if vgw_vector_index == 36
+    .word vgw_can1_rx0
+  .elseif vgw_vector_index == 80
+    .word vgw_can2_rx0
+  .elseif vgw_vector_index == 91
+    .word vgw_can3_rx0
+  .else
+    .word vgw_early_fault
+  .endif
+  .set vgw_vector_index, vgw_vector_index+1
   .endr
+.weak vgw_can1_rx0, vgw_can2_rx0, vgw_can3_rx0
+.thumb_set vgw_can1_rx0, vgw_early_fault
+.thumb_set vgw_can2_rx0, vgw_early_fault
+.thumb_set vgw_can3_rx0, vgw_early_fault
 
 .section .text.vgw_reset,"ax",%progbits
 .thumb_func

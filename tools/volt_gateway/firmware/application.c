@@ -57,7 +57,7 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
   switch (op) {
     case 1: /* INFO: capabilities, firmware build, fixed mapping, protocol */
       if (!n) {
-        ok=true; out[1]=1; out[2]=1; put32(out+3,0x0000001fU);
+        ok=true; out[1]=1; out[2]=1; put32(out+3,0x0000003fU);
         for (unsigned i=0;i<32;i++) out[7+i]=s->session->provision.build[i];
         out[39]=s->runtime->can.config.swcan_controller;
         out[40]=s->runtime->can.config.hscan_mask;
@@ -123,6 +123,14 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
     case 15: /* Versioned snapshot of the actual renderer, not inferred health.
               * Link: disabled/local USB/awaiting/authenticated/stale. */
       if (!n && vgw_application_indicator_snapshot(s,out+1)) { ok=true; length=8; } break;
+    case 16: /* RX staging diagnostics; separate from historical bus counters. */
+      if (n==1 && bus(s,p[0])) {
+        unsigned c=p[0]==3 ? s->runtime->can.config.swcan_controller-1U : p[0];
+        const vgw_white_can_stats *v=&s->runtime->can.stats[c];
+        put32(out+1,v->software_drops); put32(out+5,v->irq_calls);
+        put32(out+9,v->queue_peak); put32(out+13,v->max_queue_age_ms);
+        ok=true; length=17;
+      } break;
     default: break;
   }
   out[0]=ok ? 0 : 1;

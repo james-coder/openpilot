@@ -17,7 +17,7 @@ from openpilot.tools.volt_gateway.recovery_client import RecoveryClient, HELLO_R
 from openpilot.tools.volt_gateway.usb_transport import UsbTransport
 
 LED_STATES=('boot','running','trial','recovery','update','fault','update_wait','update_verify',
-            'update_commit','update_ready','update_erase','probe')
+            'update_commit','update_ready','update_erase','probe','rx_degraded')
 LED_ERRORS=('none','no_image','image_policy','storage','configuration','can','watchdog','crypto','internal','update_aborted')
 PEER_STATES=('disabled','local_usb_owner','awaiting_authenticated_peer','authenticated','stale')
 
@@ -130,7 +130,7 @@ def main():
   resource.setrlimit(resource.RLIMIT_CORE,(0,0))
   parser=argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--pairing',type=Path,required=True)
-  parser.add_argument('command',choices=['info','status','indicators','buses','utilization','clear-ids','observe','ids','capture','rules','subscribe'])
+  parser.add_argument('command',choices=['info','status','indicators','buses','utilization','rx-health','clear-ids','observe','ids','capture','rules','subscribe'])
   parser.add_argument('--bus',type=int,choices=[0,1,2,3],default=3,help='HSCAN CAN1=0, CAN2=1, CAN3=2; SWCAN=3 regardless of mux')
   parser.add_argument('--seconds',type=int,default=30)
   parser.add_argument('--id',type=lambda x:int(x,0))
@@ -167,6 +167,14 @@ def main():
           raise ProtocolError('incompatible gateway information')
         result['indicators']=indicators(device.command(15)) if int.from_bytes(info[2:6],'big')&16 else {'supported':False}
         print(json.dumps(result))
+      elif args.command=='rx-health':
+        info=device.command(1)
+        if len(info)!=46 or info[0]!=1 or not int.from_bytes(info[2:6],'big')&32:
+          raise ProtocolError('RX staging diagnostics unsupported by this firmware')
+        data=device.command(16,bytes([args.bus]))
+        if len(data)!=16:
+          raise ProtocolError('RX staging diagnostics length')
+        print(json.dumps(dict(zip(('software_drops','irq_calls','queue_peak','max_queue_age_ms'),struct.unpack('>4I',data),strict=True))))
       elif args.command=='utilization':
         data=device.command(3,bytes([args.bus]))
         if len(data)!=56:

@@ -8,7 +8,8 @@
 enum vgw_led_color { VGW_LED_RED=1, VGW_LED_GREEN=2, VGW_LED_BLUE=4 };
 enum vgw_led_state { VGW_LED_BOOT=0, VGW_LED_RUNNING, VGW_LED_TRIAL,
   VGW_LED_RECOVERY, VGW_LED_UPDATE, VGW_LED_FAULT, VGW_LED_UPDATE_WAIT,
-  VGW_LED_UPDATE_VERIFY, VGW_LED_UPDATE_COMMIT, VGW_LED_UPDATE_READY, VGW_LED_UPDATE_ERASE, VGW_LED_PROBE };
+  VGW_LED_UPDATE_VERIFY, VGW_LED_UPDATE_COMMIT, VGW_LED_UPDATE_READY, VGW_LED_UPDATE_ERASE, VGW_LED_PROBE,
+  VGW_LED_RX_DEGRADED };
 enum vgw_led_error { VGW_LED_NO_IMAGE=1, VGW_LED_IMAGE_POLICY=2,
   VGW_LED_STORAGE=3, VGW_LED_CONFIG=4, VGW_LED_CAN=5,
   VGW_LED_WATCHDOG=6, VGW_LED_CRYPTO=7, VGW_LED_INTERNAL=8, VGW_LED_UPDATE_ABORT=9 };
@@ -17,6 +18,9 @@ typedef struct {
   uint8_t state, slot, error, intro_active, intro_seen, intro_slot;
 } vgw_status_led;
 void vgw_led_init(vgw_status_led *, uint32_t now_ms);
+/* Degraded RX overrides only normal running/trial indication, not faults or
+ * update/recovery phases. Pure display policy; never clears TX inhibition. */
+void vgw_led_rx_health(uint8_t status[3], bool tx_inhibited);
 /* Repeated identical status does not restart the pattern. Invalid input
  * displays INTERNAL fault. Slot is 0=A, 1=B, 255=unknown/not applicable. */
 void vgw_led_set(vgw_status_led *, unsigned state, unsigned slot, unsigned error, uint32_t now_ms);

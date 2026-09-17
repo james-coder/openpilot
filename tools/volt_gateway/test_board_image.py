@@ -254,6 +254,16 @@ def run(images,slot,*,confirmed=False):
   assert len(mutations)==(2 if slot is not None and not confirmed else 0)
   assert read(0xe000ed08)==(start if slot is not None else loader_start)
   assert len(watchdog)>0
+  # Actual linked F413 vectors, not an assumed family IRQ numbering. USB stays
+  # polling-only even though only the fixed CAN RX0 IRQs are now enabled.
+  vector_base=start if slot is not None else loader_start
+  for number,name in ((20,'vgw_can1_rx0'),(64,'vgw_can2_rx0'),(75,'vgw_can3_rx0')):
+    assert 0x20000000<=app[name]<0x2001c000
+    assert read(vector_base+4*(16+number))==app[name]|1
+  assert read(0xe000e100)==1<<20
+  assert read(0xe000e108)==(1<<0)|(1<<11)
+  for b in BASES:
+    assert read(b+20)==(2 if b in (BASES[0],BASES[1],BASES[2]) else 0)
   if slot is not None:
     assert cpu.mem_read(off+0x08000000+boot_image.SLOT_SIZE-32,1)==b'\1'
     assert cpu.mem_read(off+0x08000000+boot_image.SLOT_SIZE-24,1)==b'\1'

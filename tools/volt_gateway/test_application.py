@@ -64,6 +64,21 @@ def test_authenticated_observe_capture_pagination(service_library,native,bundle,
   assert r.slot.erases==r.slot.writes==0
 
 
+def test_rx_health_capability_and_separate_counters(service_library,native,bundle,built):
+  r,app,lib,hw,state=setup(service_library,native,bundle,built)
+  assert int.from_bytes(r.command(1)[3:7],'big')&0x20
+  counters=state.can.stats[2]
+  counters.software_drops=37
+  counters.irq_calls=1234
+  counters.queue_peak=64
+  counters.max_queue_age_ms=9
+  assert r.command(16,b'\3')==b'\0'+struct.pack('>IIII',37,1234,64,9)
+  assert r.command(16,b'\2')==b'\1'  # muxed-out HSCAN
+  assert r.command(16)==b'\1'
+  assert r.command(16,b'\3\0')==b'\1'
+  assert counters.overflow==0  # hardware loss is a different counter
+
+
 def test_actual_indicator_snapshot_and_disabled_peer(service_library,native,bundle,built):
   from openpilot.tools.volt_gateway.test_status_led import Status
   from openpilot.tools.volt_gateway.device_cli import indicators

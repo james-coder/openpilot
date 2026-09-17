@@ -4,6 +4,16 @@
 static RAM const vgw_white_mmio *io(vgw_white_safety *s) { return &s->can->clock->startup->watchdog.io; }
 static RAM uint32_t rd(vgw_white_safety *s,uint32_t a) { const vgw_white_mmio *m=io(s); return m->read32(m->ctx,a); }
 static RAM void wr(vgw_white_safety *s,uint32_t a,uint32_t v) { const vgw_white_mmio *m=io(s); m->write32(m->ctx,a,v); }
+static RAM uint64_t milliseconds(uint64_t us) {
+  /* Bounded division without an out-of-image libgcc 64-bit divide helper.
+   * This path must also execute from SRAM during flash operations. */
+  uint64_t result=0; uint32_t remainder=0;
+  for (unsigned bit=64;bit>0;bit--) {
+    remainder=(remainder<<1)|(uint32_t)((us>>(bit-1U))&1U);
+    if (remainder>=1000U) { remainder-=1000U; result|=UINT64_C(1)<<(bit-1U); }
+  }
+  return result;
+}
 bool vgw_white_safety_init(vgw_white_safety *s,vgw_white_can *can,uint8_t pt,uint32_t divider) {
   if (!s || !can || !can->ready || pt>2 || !(can->config.hscan_mask&(1U<<pt)) ||
       (divider!=3791U && divider!=8862U)) return false;
@@ -38,7 +48,8 @@ RAM void vgw_white_safety_receive(void *ctx,const vgw_frame *f) {
     if (index==1) safe=(f->data[0]&7U)==0; /* Park */
     if (index==2) safe=(f->data[0]&3U)==2; /* RUN, not accessory/off/crank */
   }
-  s->received[index]=s->can->elapsed_ms; s->seen|=(uint8_t)(1U<<index); s->safe[index]=safe;
+  /* Queueing must not turn an old Park/zero-speed frame into fresh evidence. */
+  s->received[index]=milliseconds(f->timestamp_us); s->seen|=(uint8_t)(1U<<index); s->safe[index]=safe;
   if (!safe) s->stable=false;
 }
 static RAM bool power(vgw_white_safety *s,uint32_t now) {

@@ -19,6 +19,11 @@ class Config(C.Structure):
 class Stats(C.Structure):
   _fields_ = [(n, C.c_uint32) for n in ('received','malformed','overflow','transmitted','arbitration_lost','tx_errors','last_esr')]
   _fields_ += [('window_start',C.c_uint32*3),('window_bits',C.c_uint32*3),('peak',C.c_uint32)]
+  _fields_ += [(n,C.c_uint32) for n in ('software_drops','irq_calls','queue_peak','max_queue_age_ms')]
+
+
+class Raw(C.Structure):
+  _fields_ = [(n,C.c_uint32) for n in ('id','dlc','lo','hi','stamp','sequence')]
 
 
 class Can(C.Structure):
@@ -26,6 +31,9 @@ class Can(C.Structure):
   _fields_ += [(n,C.c_uint32) for n in ('previous_ms','token_ms','pending_ms','sequence','config_check')]
   _fields_ += [('elapsed_ms',C.c_uint64),('tokens',C.c_uint8)]
   _fields_ += [(n,C.c_bool) for n in ('ready','failed','pending','tx_inhibited')]
+  _fields_ += [('rx_interrupts',C.c_bool)]
+  _fields_ += [(n,C.c_uint8*3) for n in ('rx_head','rx_tail','rx_count')]
+  _fields_ += [('rx',(Raw*64)*3)]
 
 
 class Frame(C.Structure):
@@ -37,10 +45,14 @@ RECEIVE = C.CFUNCTYPE(None,C.c_void_p,C.POINTER(Frame))
 
 
 class CanHardware(Hardware):
-  def __init__(self, ignore=None, stuck=None):
+  def __init__(self, ignore=None, stuck=None, fifo_depth=None):
     super().__init__(ignore=ignore)
     self.fifos = {b:deque() for b in BASES}
     self.can_stuck = stuck
+    # Existing algebraic backlog tests deliberately use an unbounded offered
+    # queue. Physical FIFO tests opt into the RM0430 three-message locked FIFO.
+    self.fifo_depth=fifo_depth
+    self.lost=[0,0,0]
     self.values.update({b+8:1<<26 for b in BASES})
     self.values.update({BASES[0]+0x200:0x2a1c0e01,BASES[2]+0x200:0x2a1c0e01})
 
@@ -80,6 +92,11 @@ class CanHardware(Hardware):
     super().write(ctx,a,v)
 
   def inject(self, controller, address=0x123, data=b'abcdefgh', flags=0, dlc=None):
+    b=BASES[controller-1]
+    if self.fifo_depth is not None and len(self.fifos[b])>=self.fifo_depth:
+      self.values[b+12]=self.values.get(b+12,0)|16
+      self.lost[controller-1]+=1
+      return
     rir=(address<<3|4) if flags&1 else address<<21
     if flags&2:
       rir|=2
@@ -104,9 +121,12 @@ def lib(tmp_path_factory):
                     ('vgw_white_clock_init',[C.POINTER(Clock),C.POINTER(Startup)]),
                     ('vgw_white_can_init',[C.POINTER(Can),C.POINTER(Clock),C.POINTER(Config)]),
                     ('vgw_white_can_poll',[C.POINTER(Can),RECEIVE,C.c_void_p]),
+                    ('vgw_white_can_enable_rx',[C.POINTER(Can)]),
                     ('vgw_white_can_response',[C.POINTER(Can),C.c_void_p])]:
     getattr(dll,name).argtypes=args
     getattr(dll,name).restype=C.c_bool
+  dll.vgw_white_can_rx_irq.argtypes=[C.POINTER(Can),C.c_uint]
+  dll.vgw_white_can_rx_irq.restype=None
   return dll
 
 
@@ -177,15 +197,108 @@ def test_rejected_can_register_writes(lib,offset):
 
 
 def test_flood_budget_and_overflow(lib):
-  h,s,c,state,ok=start(lib,backhaul=2)
+  h,s,c,state,ok=start(lib,backhaul=2,hw=CanHardware(fifo_depth=3))
   assert ok
   for _ in range(30):
     h.inject(2)
   h.values[BASES[1]+12]=16
   good,frames=poll(lib,state)
-  assert good and len(frames)==8 and state.stats[1].received==8
+  assert good and len(frames)==3 and state.stats[1].received==3 and h.lost[1]==27
   assert state.stats[1].overflow==1 and state.tx_inhibited
   assert not lib.vgw_white_can_response(C.byref(state),b'12345678')
+
+
+@pytest.mark.parametrize('interrupts',[False,True])
+def test_real_three_frame_fifo_during_delayed_processing(lib,interrupts):
+  h,s,c,state,ok=start(lib,hw=CanHardware(fifo_depth=3))
+  assert ok and lib.vgw_white_can_enable_rx(C.byref(state))
+  for i in range(24):
+    h.values[0x40000024]+=1
+    for controller in (1,2,3):
+      h.inject(controller,address=0x100+i)
+      if interrupts:
+        lib.vgw_white_can_rx_irq(C.byref(state),controller)
+  frames=[]
+  for _ in range(4):
+    good,part=poll(lib,state)
+    assert good
+    frames+=part
+  assert len(frames)==(72 if interrupts else 9)
+  assert h.lost==([0,0,0] if interrupts else [21,21,21])
+  for index,bus in enumerate((0,1,3)):
+    selected=[f for f in frames if f[0]==bus]
+    assert [f[1] for f in selected]==list(range(0x100,0x100+len(selected)))
+    assert state.stats[index].software_drops==0
+    assert state.stats[index].irq_calls==(24 if interrupts else 0)
+    assert state.stats[index].overflow==(0 if interrupts else 1)
+    assert all(a[5]<=b[5] for a,b in zip(selected,selected[1:],strict=False))
+  assert not any(a in {b+0x180 for b in BASES} for a,_ in h.writes)
+
+
+def test_irq_ring_bounded_drop_new_and_bus_isolation(lib):
+  h,s,c,state,ok=start(lib,hw=CanHardware(fifo_depth=3),backhaul=2)
+  assert ok and lib.vgw_white_can_enable_rx(C.byref(state))
+  for i in range(100):
+    h.inject(1,address=i)
+    lib.vgw_white_can_rx_irq(C.byref(state),1)
+  h.inject(3,address=0x123)
+  lib.vgw_white_can_rx_irq(C.byref(state),3)
+  assert list(state.rx_count)==[64,0,1]
+  assert state.stats[0].software_drops==36 and state.stats[0].queue_peak==64
+  assert state.stats[0].overflow==0 and state.tx_inhibited
+  good,frames=poll(lib,state)
+  assert good and [f[1] for f in frames if f[0]==0]==list(range(8))
+  assert [f[1] for f in frames if f[0]==3]==[0x123]
+  assert not lib.vgw_white_can_response(C.byref(state),b'12345678')
+
+
+def test_irq_ring_wrap_preserves_order_and_payload(lib):
+  h,s,c,state,ok=start(lib,hw=CanHardware(fifo_depth=3))
+  assert ok and lib.vgw_white_can_enable_rx(C.byref(state))
+  delivered=[]
+  for batch in range(40):
+    for offset in range(8):
+      number=batch*8+offset
+      h.inject(2,address=number,data=number.to_bytes(8,'little'))
+      lib.vgw_white_can_rx_irq(C.byref(state),2)
+    good,frames=poll(lib,state)
+    assert good
+    delivered+=frames
+  assert [f[1] for f in delivered]==list(range(320))
+  assert [int.from_bytes(f[4],'little') for f in delivered]==list(range(320))
+  assert state.stats[1].software_drops==state.stats[1].overflow==0
+  assert state.stats[1].queue_peak==8 and list(state.rx_count)==[0,0,0]
+
+
+def test_two_busy_hscan_and_swcan_during_five_ms_foreground_stalls(lib):
+  h,s,c,state,ok=start(lib,hw=CanHardware(fifo_depth=3))
+  assert ok and lib.vgw_white_can_enable_rx(C.byref(state))
+  delivered=[]
+  offered=[0,0,0]
+  origin=h.values[0x40000024]
+  # Deterministic event schedule, not a CPU-cycle/WCET claim: 8-byte HSCAN
+  # frames every 300 us on each bus; extended SWCAN frames every 6 ms.
+  # Interrupt service runs between arrivals, foreground pauses up to 5 ms.
+  for tick in range(600):
+    h.values[0x40000024]=origin+tick//10
+    for controller,period in ((1,3),(2,3),(3,60)):
+      if tick%period==0:
+        h.inject(controller,address=offered[controller-1])
+        offered[controller-1]+=1
+        lib.vgw_white_can_rx_irq(C.byref(state),controller)
+    if tick%50==49:
+      for _ in range(3):
+        good,part=poll(lib,state)
+        assert good
+        delivered+=part
+  for _ in range(8):
+    good,part=poll(lib,state)
+    assert good
+    delivered+=part
+  assert [sum(f[0]==b for f in delivered) for b in (0,1,3)]==offered==[200,200,10]
+  assert h.lost==[0,0,0]
+  assert all(v.software_drops==v.overflow==0 for v in state.stats)
+  assert all(v.queue_peak<=17 for v in state.stats)
 
 
 def test_only_fixed_response_id_one_mailbox_and_rate_limit(lib):

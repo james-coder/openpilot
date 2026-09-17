@@ -131,6 +131,30 @@ def test_invalid_status_is_internal_fault(leds, state, slot, code):
   assert leds.vgw_led_sample(C.byref(s), 2100) == 1
 
 
+def test_rx_degraded_human_spacing_and_repeated_status(leds):
+  s=Status()
+  start=0xfffff000
+  leds.vgw_led_init(C.byref(s),start)
+  leds.vgw_led_set(C.byref(s),12,0,0,start)
+  for elapsed in range(18000):
+    now=(start+elapsed)&0xffffffff
+    leds.vgw_led_set(C.byref(s),12,0,0,now)
+    phase=elapsed%6000
+    expected=1 if phase<1500 else 4 if 2000<=phase<2250 else 0
+    assert leds.vgw_led_sample(C.byref(s),now)==expected
+  assert not s.intro_active
+
+
+@pytest.mark.parametrize('state',range(13))
+@pytest.mark.parametrize('inhibited',[False,True])
+def test_rx_degraded_never_overrides_fault_or_update(leds,state,inhibited):
+  leds.vgw_led_rx_health.argtypes=[C.POINTER(C.c_uint8),C.c_bool]
+  code=5 if state==5 else 0
+  status=(C.c_uint8*3)(state,1,code)
+  leds.vgw_led_rx_health(status,inhibited)
+  assert list(status)==[12 if inhibited and state in (1,2) else state,1,code]
+
+
 def test_boot_recovery_update_and_absence(leds):
   s = Status()
   leds.vgw_led_init(None, 0)

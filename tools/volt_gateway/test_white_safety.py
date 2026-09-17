@@ -101,3 +101,17 @@ def test_stale_reversed_clock_and_unknown_divider(safety_lib,built):
   assert not allowed
   assert sample(safety_lib,hw,state,s,1)==(False,False)
   assert not safety_lib.vgw_white_safety_init(C.byref(s),C.byref(state.can),0,8000)
+
+
+def test_queued_old_safe_frames_do_not_refresh_update_interlock(safety_lib,built):
+  hw,state,s=initialize(safety_lib,built)
+  state.can.elapsed_ms=10000
+  for address in (1001,309,497):
+    data=bytearray(8)
+    if address==497:
+      data[0]=2
+    frame=Frame(1000*1000,0,address,0,0,8,(C.c_uint8*8)(*data))
+    safety_lib.vgw_white_safety_receive(C.byref(s),C.byref(frame))
+  assert list(s.received)==[1000,1000,1000]
+  for t in range(10000,10010):
+    assert not sample(safety_lib,hw,state,s,t,frames=False)[1]

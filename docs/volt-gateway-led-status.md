@@ -47,6 +47,7 @@ sequence. Fault-clearing does not replay an interrupted introduction.
 | Green, four short pulses every four seconds | Update committed; **not** yet booted/confirmed |
 | Red, one long second every four seconds | Recovery waiting (reserved for the actual recovery service) |
 | Red, numbered half-second pulses with a long group separator | Fault category below |
+| Red 1.5 s, dark 0.5 s, blue 0.25 s, dark 3.75 s | RX-degraded / optional TX inhibited; inspect hardware/software loss counters (new off-device candidate) |
 
 Normal short pulses are 150 ms on/150 ms off. Numbered **fault** pulses are
 500 ms on/500 ms off, followed by three additional seconds dark. A nine-flash

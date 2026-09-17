@@ -21,6 +21,25 @@ static vgw_status_led led;
 static uint8_t public_key[91], target[44];
 static uint32_t divider;
 static uint8_t powertrain;
+/* F413 CMSIS IRQ numbers: CAN1_RX0=20, CAN2_RX0=64, CAN3_RX0=75.
+ * These handlers only stage raw RX. Never protocol, crypto, flash or TX. */
+__attribute__((section(".ramfunc.vgw_can_irq"))) void vgw_can1_rx0(void) { vgw_white_can_rx_irq(&runtime.can,1); }
+__attribute__((section(".ramfunc.vgw_can_irq"))) void vgw_can2_rx0(void) { vgw_white_can_rx_irq(&runtime.can,2); }
+__attribute__((section(".ramfunc.vgw_can_irq"))) void vgw_can3_rx0(void) { vgw_white_can_rx_irq(&runtime.can,3); }
+static bool start_rx_interrupts(const vgw_white_mmio *io) {
+  if (!vgw_white_can_enable_rx(&runtime.can)) return false;
+  /* Equal priority, so CAN producers cannot nest each other. Clear only their
+   * pending bits; other IRQs remain disabled. USB is explicitly polling-only. */
+  io->write32(io->ctx,0xe000e414U,0x80808080U);
+  io->write32(io->ctx,0xe000e440U,0x80808080U);
+  io->write32(io->ctx,0xe000e448U,0x80808080U);
+  io->write32(io->ctx,0xe000e280U,1U<<20);
+  io->write32(io->ctx,0xe000e288U,(1U<<0)|(1U<<11));
+  io->write32(io->ctx,0xe000e100U,1U<<20);
+  io->write32(io->ctx,0xe000e108U,(1U<<0)|(1U<<11));
+  __asm__ volatile("dsb\nisb\ncpsie i" ::: "memory");
+  return true;
+}
 #ifndef VGW_BUILD_ID
 #error Board images must have a source-derived build identity
 #endif
@@ -94,6 +113,7 @@ void vgw_loader_main(void) {
   if (!vgw_white_quiesce(io) || !configuration(&can,&request)) fatal();
   vgw_boot_trace(2);
   if (!vgw_white_runtime_init(&runtime,io,&can,request)) fatal();
+  if (!start_rx_interrupts(io)) fatal();
   vgw_boot_trace(3);
   if (!vgw_white_safety_init(&safety,&runtime.can,powertrain,divider)) fatal();
   runtime.listener=vgw_white_safety_receive; runtime.listener_context=&safety;
@@ -177,6 +197,7 @@ void vgw_loader_main(void) {
     vgw_application_telemetry(&application);
     uint8_t status[3];
     if (!vgw_update_led(&recovery.update,runtime.can.elapsed_ms,status)) vgw_boot_get_status(status);
+    vgw_led_rx_health(status,runtime.can.tx_inhibited);
     indication(status[0],status[1],status[2]);
     vgw_boot_trace(15);
     /* Never auto-reboot after update: host retains control of parked validation.

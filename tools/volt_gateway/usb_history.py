@@ -55,5 +55,10 @@ def extract(repository: Path,root: Path):
     if text.count(old)!=1:
       raise ValueError('historical USB source does not match reviewed patch')
     text=text.replace(old,new)
+  # Both historical enable sites (initialization and the IRQ tail) must remain
+  # disabled now that CAN-only NVIC interrupts are globally enabled.
+  if text.count('NVIC_EnableIRQ(OTG_FS_IRQn);')!=2:
+    raise ValueError('unexpected historical USB interrupt enable sites')
+  text=text.replace('NVIC_EnableIRQ(OTG_FS_IRQn);','NVIC_DisableIRQ(OTG_FS_IRQn); /* gateway polling-only USB */')
   path.write_text(text)
   return root/'board'

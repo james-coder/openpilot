@@ -141,6 +141,9 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
       break;
     case 17: case 18: case 19: case 21:
       if ((op==21 || !n) && s->session->active && s->runtime->local_control && s->experiment) {
+        /* Authenticated status is also liveness, like GET_STATUS. Previously
+         * this early return left a newly opened session's lease at zero. */
+        if (op==18) s->lease_until=now+10000U;
         return s->experiment(s->experiment_context,op,p,n,now,out);
       } break;
     default: break;

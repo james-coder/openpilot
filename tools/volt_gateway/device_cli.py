@@ -35,16 +35,22 @@ def recovery_diagnostics(data):
 
 
 def hvac_status(data):
-  if not ((len(data)==4 and data[0]==1) or (len(data)==21 and data[0] in (2,3))) or data[1]>5:
+  if not ((len(data)==4 and data[0]==1) or (len(data)==21 and data[0] in (2,3)) or
+          (len(data)==30 and data[0]==4)) or data[1]>(6 if data[0]==4 else 5):
     raise ProtocolError('invalid HVAC trial status')
-  result={'state':('idle','press_pending','release_wait','release_pending','done','fault')[data[1]],
+  result={'state':('idle','press_pending','release_wait','release_pending','done','fault','failed')[data[1]],
           'attempts':data[2],'interlock_ready':bool(data[3]),
           'note':'CAN completion is not proof of recirculation actuation'}
-  if data[0] in (2,3):
+  if data[0] in (2,3,4):
     result.update(seen_mask=data[4],safe_mask=data[5],sampler_ready=bool(data[6]),power_valid=bool(data[7]),
                   stable=bool(data[8]),tx_inhibited=bool(data[9]),session_enabled=bool(data[10]),
                   voltage_mv=int.from_bytes(data[11:15],'big'),
                   input_ages_ms=list(struct.unpack('>3H',data[15:21])))
+  if data[0]==4:
+    reasons=('none','interlock_lost','timeout','arbitration_lost','transmit_error','register_mismatch','late_release')
+    result.update(failure_reason=reasons[data[21]] if data[21]<len(reasons) else 'unknown',
+                  tx_status=hex(int.from_bytes(data[22:26],'big')),
+                  error_status=hex(int.from_bytes(data[26:30],'big')))
   return result
 
 
@@ -65,6 +71,8 @@ class Device:
     self.client.accept_open(transport.exchange(self.client.open_request))
 
   def command(self,opcode,payload=b''):
+    if opcode in (17,18,19,21):
+      self.command(2)  # establish/refresh the lease before experimental status/TX
     packet=self.client.request(opcode,payload)
     # Repeat only exact authenticated bytes, never manufacture a fresh sequence
     # to retry an operation that may already have committed persistent state.
@@ -254,7 +262,7 @@ def main():
           raise ProtocolError('experimental HVAC capability absent')
         status=device.command(18)
         if args.command=='parked-gateway-reboot':
-          if len(status)!=21 or status[0] not in (2,3):
+          if not ((len(status)==21 and status[0] in (2,3)) or (len(status)==30 and status[0]==4)):
             raise ProtocolError('parked reboot not supported by this firmware')
           device.command(19)
           reboot_requested=True
@@ -273,7 +281,7 @@ def main():
             time.sleep(0.1)
             status=device.command(18)
             hvac_status(status)
-            if status[1] in (4,5):
+            if status[1] in (4,5,6):
               break
         print(json.dumps(hvac_status(status)))
       else:

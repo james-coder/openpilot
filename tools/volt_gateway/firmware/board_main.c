@@ -75,7 +75,7 @@ static size_t hvac_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,uint64
     restart_at=now+250U; ok=true;
   }
   out[0]=ok ? 0 : 1;
-  out[1]=3; out[2]=hvac.state; out[3]=hvac.attempts; out[4]=hvac.allowed;
+  out[1]=4; out[2]=hvac.state; out[3]=hvac.attempts; out[4]=hvac.allowed;
   out[5]=safety.seen;
   out[6]=(uint8_t)(safety.safe[0]|(safety.safe[1]<<1)|(safety.safe[2]<<2));
   out[7]=safety.ready; out[8]=safety.power_valid; out[9]=safety.stable;
@@ -86,7 +86,12 @@ static size_t hvac_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,uint64
     uint16_t bounded=(uint16_t)(age>65535U ? 65535U : age);
     out[16+2*i]=(uint8_t)(bounded>>8); out[17+2*i]=(uint8_t)bounded;
   }
-  return 22;
+  out[22]=hvac.reason;
+  for (unsigned i=0;i<4;i++) {
+    out[23+i]=(uint8_t)(hvac.tx_status>>(24-8*i));
+    out[27+i]=(uint8_t)(hvac.error_status>>(24-8*i));
+  }
+  return 31;
 }
 static void hvac_attach(void) {
   application.experiment=hvac_command;

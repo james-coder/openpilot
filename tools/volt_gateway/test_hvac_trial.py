@@ -13,7 +13,8 @@ from openpilot.tools.volt_gateway.test_white_board import IO
 
 class Trial(C.Structure):
   _fields_=[('safety',C.c_void_p),('deadline',C.c_uint64),('cooldown',C.c_uint64),('previous',C.c_uint64),
-            ('state',C.c_uint8),('attempts',C.c_uint8),('allowed',C.c_bool)]
+            ('state',C.c_uint8),('attempts',C.c_uint8),('allowed',C.c_bool),
+            ('raw',C.c_bool),('reason',C.c_uint8),('tx_status',C.c_uint32),('error_status',C.c_uint32)]
 
 
 @pytest.fixture(scope='module')
@@ -42,6 +43,8 @@ bool vgw_white_safety_sample(void *s,uint64_t n,uint64_t *t,bool *a)
     getattr(lib,name).restype=C.c_bool
   lib.vgw_hvac_trial_init.argtypes=[C.POINTER(Trial),C.c_void_p]
   lib.vgw_hvac_trial_step.argtypes=[C.POINTER(Trial),C.c_uint64,C.c_bool]
+  lib.vgw_hvac_trial_raw.argtypes=[C.POINTER(Trial),C.c_uint64,C.c_char_p,C.c_size_t]
+  lib.vgw_hvac_trial_raw.restype=C.c_bool
   lib.vgw_hvac_trial_can_restart.argtypes=[C.POINTER(Trial),C.c_uint64]
   lib.vgw_hvac_trial_can_restart.restype=C.c_bool
   return lib
@@ -173,6 +176,10 @@ def test_status_diagnostics():
   decoded=hvac_status(value)
   assert decoded['voltage_mv']==4990 and decoded['input_ages_ms']==[10,20,30]
   assert decoded['safe_mask']==7 and not decoded['stable']
+  diagnostic=bytes([4,6])+value[2:]+bytes([3])+struct.pack('>II',5,0)
+  decoded=hvac_status(diagnostic)
+  assert decoded['state']=='failed' and decoded['failure_reason']=='arbitration_lost'
+  assert decoded['tx_status']=='0x5' and decoded['error_status']=='0x0'
   for bad in (b'',value[:-1],value+b'\0',bytes([3,0,0,0]),bytes([1,6,0,0])):
     with pytest.raises(ProtocolError):
       hvac_status(bad)
@@ -183,6 +190,31 @@ def test_flash_power_failure_is_not_cabin_tx_requirement(library):
   C.c_bool.in_dll(library,'valid').value=False
   step(library,can,t,100)
   assert library.vgw_hvac_trial_start(C.byref(t),100)
+
+
+@pytest.mark.parametrize('outcome',['success_delayed_poll','arbitration','timeout','error'])
+def test_raw_completion_and_explicit_next_attempt(library,outcome):
+  hw,can,t,owners=start(library)
+  packet=bytes.fromhex('10b0209901080006070d00000001')
+  step(library,can,t,100)
+  assert library.vgw_hvac_trial_raw(C.byref(t),100,packet,len(packet))
+  if outcome=='timeout':
+    step(library,can,t,120)
+  else:
+    hw.complete(3,{'success_delayed_poll':3,'arbitration':5,'error':9}[outcome])
+    # Intentionally don't advance the CAN poll epoch: hardware completion
+    # must still be accounted for when the old 10ms guard is false.
+    library.vgw_hvac_trial_step(C.byref(t),111,True)
+  assert len(transmissions(hw))==1  # never automatically retry
+  assert t.state=={'success_delayed_poll':4,'arbitration':6,'timeout':6,'error':5}[outcome]
+  assert t.reason=={'success_delayed_poll':0,'arbitration':3,'timeout':2,'error':4}[outcome]
+  assert can.stats[2].transmitted==int(outcome=='success_delayed_poll')
+  assert can.stats[2].arbitration_lost==int(outcome=='arbitration')
+  assert can.stats[2].tx_errors==int(outcome=='error')
+  step(library,can,t,1120)
+  # Model abort completion before accepting a new explicitly requested frame.
+  hw.values[BASES[2]+8]|=1<<26
+  assert library.vgw_hvac_trial_raw(C.byref(t),1120,packet,len(packet))==(outcome!='error')
 
 
 @pytest.mark.parametrize('condition',['fresh','stale','future','moving','missing','active_press','fault'])

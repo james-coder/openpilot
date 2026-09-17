@@ -41,6 +41,39 @@ Implementation/build does not mean deployment. The previously installed hvac05
 image lacks opcode 21. No physical TX or flashing was performed for this change.
 OBD-connected ROM recovery remains an unresolved physical issue.
 
+## TX/session correction (candidate, not flashed)
+
+The original physical ON/OFF replay of `0x10B02099` selector `0006070d`
+completed both sends (counter 0 → 1 → 2), ten seconds apart. Owner observed no
+LED/screen change. This is not evidence of recirculation actuation.
+
+The initial status could report session disabled after successful authentication:
+opening a session did not establish the application lease, and the experiment
+dispatch returned before normal lease renewal. The host now explicitly sends
+authenticated liveness before experimental operations, including status. The
+firmware also renews the lease on authenticated experimental status. Neither
+change bypasses the independent physical interlocks. The updated host was
+checked against the installed old firmware: status returned session enabled,
+interlock ready, state done, attempts 2. No additional CAN TX/reset was requested.
+
+The candidate handles a raw-frame arbitration loss or clean-controller timeout
+as `failed`, not a permanent fault. There is no automatic retransmission. A new
+explicit request must satisfy cooldown, mailbox availability and every normal
+interlock. Hardware errors and loss of permission remain blocking. Legacy
+two-frame behavior retains its fault latch.
+
+Hardware completion is accounted for before evaluating permission for future
+transmission, so a delayed poll cannot hide a completed raw TX. SWCAN arbitration
+and TX-error counters now include experimental mailbox results. Status v4 adds
+failure reason plus saved TSR/ESR; v1–v3 remain readable. A failed attempt is
+distinct from a successful `done`. These changes address demonstrated software
+defects but do not establish the cause of each historical intermittent failure.
+
+Build: `/home/james/diagnostics/volt-gateway/builds/usb-swcan-tx-fix-20260917-01`.
+Experimental loader/A/B ARM builds succeed with no undefined symbols. Native
+HVAC, application and CLI regression suites: 82 passed, no skips, using pinned
+crypto/boot dependencies. This is not physical validation of the new firmware.
+
 ## Physical USB-only deployment, September 17
 
 After the owner disconnected OBD, flashed labeled serial

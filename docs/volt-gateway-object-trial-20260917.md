@@ -67,8 +67,8 @@ Therefore **USB must be disconnected and White cold-powered from OBD alone**
 for CAN control. Merely closing the USB CLI is insufficient. Do not interpret
 USB-owned silence as an Object-bus wiring fault.
 
-Primary Tres and comma changes have NOT yet been deployed or physically tested.
-Before their deployment verify fresh live Park/zero-speed/disengagement; retain
+Primary Tres and comma changes are now deployed (details below); the actual CAN
+exchange remains pending. Before any further deployment verify fresh live Park/zero-speed/disengagement; retain
 the current primary firmware/software rollback, run safety tests, build its exact
 target and enable only the reviewed flag. No all-output mode. Do not change the
 global manager watchdog or stop driving processes to run this optional feature.
@@ -100,3 +100,46 @@ SHA-256 `e0e8833307e12242d8d9a4b1105ae742da08f348264fbad1459d0ede1b5e9a4e`.
 have not yet been validated. Root implementation commit `18a3e656d`, primary
 safety/opt-in commit `276a7f69`, both pushed. Existing unrelated diagnostic edits
 remain unstaged and were not swept into these commits.
+
+## Primary deployment and post-restart validation
+
+Device source differs from the development working tree; initial patch checks
+correctly rejected broad patches without applying them. Only the gateway hunks
+were adapted to preserved device files. The resulting primary `gm.h` was checked
+byte-for-byte against the locally tested/built file. Existing diagnostic changes
+on device were preserved. Firmware build used unchanged Panda `7ffc9165` and
+the new exact safety header; signing-tool modules were excluded from host runtime.
+
+Device tests: **316 passed, 129 inherited skips, 448 subtests passed**. Parameter
+construction explicitly tested opt-in absent/present: safety 60 / 124, both
+non-dashcam. A further local runtime test with its crypto dependency supplied
+passed 16/16 (zero skips) after splitting the bounded credential reader away
+from the development-only signer module.
+
+Fresh live Park/zero-speed/disengagement was asserted immediately before image
+replacement and software reboot. Preserved image SHA-256:
+`cf4fee369c3c660589a6d22482e721af80c9388f664fc379159463c177fe5ef1`.
+New primary image SHA-256:
+`b7190cfb89630de1e1544b0774e6fce44c667f96ab24f4487b1e996a901728bb`.
+Rollback copy: `/data/voltgw-trial/20260917/panda_h7.before.bin.signed` and host
+`/home/james/diagnostics/volt-gateway/deployment/object01/before/panda_h7.bin.signed`.
+Reverting source/launch opt-in as well as restoring the image is necessary for a
+complete rollback; never do so while moving.
+
+After reboot: CHEVROLET_VOLT, passive false, dashcam false, radarUnavailable false;
+live Panda GM parameter 124, controls disallowed; Park/0 m/s; no selfdrive alert;
+all required manager processes running. White was still absent from the car.
+This demonstrates parked startup with the optional gateway absent, not a road
+engagement test. No gateway service was added to manager/process health.
+
+Deployed commits (pushed): opendbc `a7a847f0`, root `aed008afe` on
+`deploy/volt-gm-egr`. Runtime pairing is owner-only under
+`/data/voltgw-trial/20260917/private/pairing.json`, outside Git; no firmware
+signing private key or passphrase was transferred. Host source commits include
+`6ebbdfd2d` in addition to `18a3e656d`.
+
+Intermittent SSH was investigated read-only: active legacy firewall INPUT policy
+ACCEPT, custom drops scoped solely to `ppp+`/`wwan+`, Wi-Fi `wlan0` address
+192.168.98.187. No firewall service failure observed; previous boot journal was
+not persistent. No firewall rules were changed and no definitive outage cause
+was established. SSH recovered before deployment.

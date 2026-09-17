@@ -19,6 +19,17 @@ The older cold-entry attempt with OBD attached returned to hvac02 rather than
 remaining in ROM; its cause is unproven. The new software path still needs its
 OBD-connected recovery/program/readback/return test.
 
+## Completed USB-only software reflash proof
+
+With OBD still disconnected and no USB replug, authenticated opcode20 entered
+ROM DFU, the host read and matched the predecessor, actually erased/programmed
+the four reviewed regions, verified all 1 MiB, and booted the application.
+The prepared image was byte-for-byte identical to the first hvac05 image (same
+SHA256 above). Running build matched, capabilities255, slotA, error none.
+Evidence is in the sibling `hvac05-software-reflash/` directory, including
+before/after readbacks and programming logs. This proves actual software-initiated
+reflashing on the USB-only physical Panda, not yet with OBD attached.
+
 The new recovery path is independent of the HVAC feature switch and of the
 application firmware updater's VIN, CAN freshness, parked-state, and RX-overflow
 gates. It is present in both ordinary and experimental USB application builds.

@@ -42,6 +42,7 @@ class CanHardware(Hardware):
     self.fifos = {b:deque() for b in BASES}
     self.can_stuck = stuck
     self.values.update({b+8:1<<26 for b in BASES})
+    self.values.update({BASES[0]+0x200:0x2a1c0e01,BASES[2]+0x200:0x2a1c0e01})
 
   def read(self, ctx, a):
     for b in BASES:
@@ -57,6 +58,11 @@ class CanHardware(Hardware):
         break
       if a==b:
         self.values[b+4] = (v&1) if self.can_stuck!='enter' else 0
+        if not v&1 and self.values.get(b+28,0)&1023==89:
+          # Undriven White SWCAN RX needs its historical recessive bias.
+          pin=12 if b==BASES[1] else 3
+          if self.values.get(0x4002040c,0)>>(pin*2)&3!=1:
+            self.values[b+4]=1
         if self.can_stuck=='leave':
           self.values[b+4]=1
       if a==b+12:
@@ -128,7 +134,8 @@ def test_mux_filters_silent_and_bounded_receive(lib,swcan,hscan):
   h,s,c,state,ok=start(lib,swcan,hscan)
   assert ok
   assert h.values[0x40020414]&0xc000==0xc000
-  assert h.values[BASES[0]+0x200]==14<<8
+  assert h.values[BASES[0]+0x200]==0x2a1c0e00
+  assert h.values[BASES[2]+0x200]==0x2a1c0e00  # reserved fields retained, FINIT cleared
   assert not any(BASES[1]+0x200<=a<BASES[1]+0x300 for a,_ in h.writes)
   for ctrl,b in enumerate(BASES,1):
     if ctrl==swcan or hscan&(1<<(ctrl-1)):
@@ -140,6 +147,7 @@ def test_mux_filters_silent_and_bounded_receive(lib,swcan,hscan):
             [(0x40020000,8,11),(0x40020000,15,11)])
       for port,pin,af in pins:
         assert h.values[port+32+4*(pin//8)]>>(4*(pin%8))&15==af
+        assert h.values[port+12]>>(2*pin)&3==int(ctrl==swcan and pin==pins[0][1])
       assert h.values[b+28]&0x80000000
       h.inject(ctrl,0x10734099,b'abcdefgh',1)
       h.inject(ctrl,0x123,b'\x01\x02')

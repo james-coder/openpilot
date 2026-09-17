@@ -10,6 +10,27 @@ static vgw_white_clock clock;
 static vgw_white_rng rng;
 static vgw_white_can can;
 static uint32_t step;
+static uint32_t traced_read(void *ctx,uint32_t address) {
+  (void)ctx;
+  uint32_t value=*(volatile uint32_t *)(uintptr_t)address;
+  if (address>=0x40006400U && address<0x40007000U) {
+    volatile uint32_t *p=(volatile uint32_t *)0x2001c400U;
+    p[0]=0x314e4356; p[1]=address; p[2]=value; p[5]=0x56434e31;
+  }
+  return value;
+}
+static uint16_t traced_read16(void *ctx,uint32_t address) {
+  (void)ctx; return *(volatile uint16_t *)(uintptr_t)address;
+}
+static void traced_write(void *ctx,uint32_t address,uint32_t value) {
+  (void)ctx;
+  if (address>=0x40006400U && address<0x40007000U) {
+    volatile uint32_t *p=(volatile uint32_t *)0x2001c400U;
+    p[3]=address; p[4]=value;
+  }
+  *(volatile uint32_t *)(uintptr_t)address=value;
+  __asm__ volatile("dsb" ::: "memory");
+}
 static void mark(uint32_t n) {
   volatile uint32_t *p=(volatile uint32_t *)0x2001c000U;
   step=n; p[0]=0x56505231; p[1]=n; p[2]=~n; p[3]=0x31475052;
@@ -21,7 +42,10 @@ unsigned vgw_ram_probe_report(uint8_t out[64]) {
   return 20;
 }
 void vgw_loader_main(void) {
-  const vgw_white_mmio *io=vgw_white_physical_mmio();
+  static const vgw_white_mmio trace_io={0,traced_read,traced_read16,traced_write};
+  const vgw_white_mmio *io=&trace_io;
+  volatile uint32_t *trace=(volatile uint32_t *)0x2001c400U;
+  for (unsigned i=0;i<6;i++) trace[i]=0;
   mark(201);
   if (!vgw_white_startup_init(&startup,io)) {
     mark(0x20100000U | ((uint32_t)startup.watchdog.started<<19) |

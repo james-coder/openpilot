@@ -63,5 +63,6 @@ family is absent and its write command cannot modify RAM in a normal image.
 The combined updated DEBUG, normal-board execution and initial-image packaging
 suite subsequently passed **39 tests, none skipped**, with lint passing. After
 the physical memory test, the probe timed out and the installed loader's USB
-recovery command returned the device to ROM DFU. The outstanding CAN startup
-failure is not resolved by these debugging-tool tests.
+recovery command returned the device to ROM DFU. Those debugging-tool tests
+alone did not resolve startup. Subsequent CAN and handoff findings are recorded
+in [the bench bring-up chronology](volt-gateway-bench-bringup-20260916.md).

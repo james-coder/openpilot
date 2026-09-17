@@ -1,6 +1,7 @@
 #include "application.h"
 #include "board_storage.h"
 #include "status_led.h"
+#include "boot_trace.h"
 #include <string.h>
 #ifdef VGW_BOARD_USB
 #include "white_usb.h"
@@ -83,44 +84,46 @@ void vgw_loader_main(void) {
   vgw_white_can_config can; uint16_t request;
   /* Invalid provisioning never enables a CAN controller. The fixed USB
    * recovery window above is independent of this sector and both app slots. */
+  vgw_boot_trace(1);
   if (!vgw_white_quiesce(io) || !configuration(&can,&request)) fatal();
-  if (!vgw_white_runtime_init(&runtime,io,&can,request) ||
-      !vgw_white_safety_init(&safety,&runtime.can,powertrain,divider)) fatal();
+  vgw_boot_trace(2);
+  if (!vgw_white_runtime_init(&runtime,io,&can,request)) fatal();
+  vgw_boot_trace(3);
+  if (!vgw_white_safety_init(&safety,&runtime.can,powertrain,divider)) fatal();
   runtime.listener=vgw_white_safety_receive; runtime.listener_context=&safety;
-#ifdef VGW_BOARD_USB
-  if (!vgw_white_usb_init(&runtime.startup,false)) fatal();
-#endif
   vgw_led_init(&led,vgw_white_startup_now(&runtime.startup));
   /* A confirmed image can boot from bench USB or while moving, read-only.
    * Trial/repair metadata changes require the full physical power interlock. */
   while (boot_needs_safe_power()) {
-#ifdef VGW_BOARD_USB
-    (void)vgw_white_usb_poll();
-#endif
     if (!vgw_white_runtime_step(&runtime,quiet,NULL)) fatal();
     uint64_t sampled; bool allowed=false;
     if (!vgw_white_safety_sample(&safety,runtime.can.elapsed_ms,&sampled,&allowed)) fatal();
     indication(VGW_LED_UPDATE_WAIT,255,0);
     if (allowed) break;
   }
+  vgw_boot_trace(5);
   if (!vgw_board_storage_init(&storage,&runtime,&safety,&recovery,public_key,target)) fatal();
   unsigned inactive;
 #ifdef VGW_APPLICATION_SLOT
+  vgw_boot_trace(6);
   const unsigned running=VGW_APPLICATION_SLOT;
   uint32_t vector=io->read32(io->ctx,0xe000ed08U);
   if (!vgw_boot_resume(running,vector)) fatal();
   inactive=1-running;
 #else
   vgw_boot_choice choice;
+  vgw_boot_trace(7);
   int selected=vgw_boot_select(&choice);
   if (selected>=0) {
     indication(VGW_LED_BOOT,(uint8_t)selected,0);
+    vgw_boot_trace(8);
     (void)vgw_white_physical_handoff(&choice); fatal();
   }
   if (selected!=-1) fatal();
   inactive=0; /* Both invalid: fixed self-contained signed recovery. */
 #endif
   vgw_update_io updater;
+  vgw_boot_trace(9);
   if (!vgw_board_storage_updater(&storage,inactive,&updater) ||
       !vgw_recovery_service_init(&recovery,&provision,&updater,vgw_crypto_verify,vgw_crypto_authority_hash,
         vgw_crypto_hmac,vgw_crypto_sha256,entropy,&storage.crypto,&runtime.rng,inactive) ||
@@ -128,10 +131,21 @@ void vgw_loader_main(void) {
 #ifdef VGW_APPLICATION_SLOT
   /* Confirm only after the complete mandatory application/control stack has
    * initialized, not merely after reaching the application reset vector. */
+  vgw_boot_trace(10);
   if (!vgw_boot_confirm()) fatal();
 #endif
+  vgw_boot_trace(11);
   if (!vgw_board_storage_recovery_ready(&storage)) fatal();
+#ifdef VGW_BOARD_USB
+  /* Do not advertise a USB device while signature verification/boot work
+   * cannot service enumeration requests. The cold recovery window is separate
+   * and already disconnected before runtime startup. Only connect the normal
+   * interface once its cooperative dispatcher can run continuously. */
+  vgw_boot_trace(4);
+  if (!vgw_white_usb_init(&runtime.startup,false)) fatal();
+#endif
   for (;;) {
+    vgw_boot_trace(12);
 #ifdef VGW_BOARD_USB
     if (!vgw_white_usb_poll()) fatal();
     if (vgw_white_usb_owned() && !runtime.local_control) {
@@ -145,14 +159,17 @@ void vgw_loader_main(void) {
       application.local_send=vgw_white_usb_telemetry_send;
     }
 #endif
+    vgw_boot_trace(13);
     if (!vgw_white_runtime_step(&runtime,vgw_application_step,&application)) fatal();
 #ifdef VGW_BOARD_USB
+    vgw_boot_trace(14);
     if (runtime.local_control && !vgw_white_usb_dispatch(&recovery,runtime.can.elapsed_ms)) fatal();
 #endif
     vgw_application_telemetry(&application);
     uint8_t status[3];
     if (!vgw_update_led(&recovery.update,runtime.can.elapsed_ms,status)) vgw_boot_get_status(status);
     indication(status[0],status[1],status[2]);
+    vgw_boot_trace(15);
     /* Never auto-reboot after update: host retains control of parked validation.
      * Power cycle selects the signed trial; failed trial reverts on next boot. */
   }

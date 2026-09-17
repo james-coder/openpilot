@@ -12,6 +12,14 @@ static bool wait(const vgw_white_mmio *io, uint32_t address, uint32_t mask, uint
   return false;
 }
 static bool clock_timer(const vgw_white_mmio *io) {
+  /* A signed loader handoff is not a peripheral reset. Stop its RNG before
+   * changing HCLK/PLL: otherwise the inherited generator latches a clock
+   * error, which the application's entropy health check correctly rejects.
+   * Do not clear RNG error status or weaken the subsequent health checks. */
+  if (io->read32(io->ctx,0x40023834U)&64U) {
+    io->write32(io->ctx,0x50060800U,0);
+    if (io->read32(io->ctx,0x50060800U)!=0) return false;
+  }
   change(io,CR,0,1); /* HSI enable; don't disable the inherited source early. */
   if (!wait(io,CR,2,2)) return false;
   change(io,CFGR,3,0);

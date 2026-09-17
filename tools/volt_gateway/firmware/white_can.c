@@ -48,26 +48,31 @@ RAM void vgw_white_can_stop(vgw_white_can *s) {
   s->ready=false; s->failed=true; s->pending=false; s->tokens=0;
   if (s->clock && s->clock->startup) (void)vgw_white_quiesce(io_of(s));
 }
-static bool alternate(const vgw_white_can *s,uint32_t port,unsigned pin,unsigned af) {
+static bool alternate(const vgw_white_can *s,uint32_t port,unsigned pin,unsigned af,bool pullup) {
   uint32_t afr=port+32U+(pin/8U)*4U, shift=(pin%8U)*4U, pair=pin*2U;
   change(s,port+4U,1U<<pin,0);
   change(s,port+8U,3U<<pair,2U<<pair);
-  change(s,port+12U,3U<<pair,0);
+  change(s,port+12U,3U<<pair,pullup ? 1U<<pair : 0);
   change(s,afr,15U<<shift,af<<shift);
   change(s,port,3U<<pair,2U<<pair);
   return (rd(s,afr)&(15U<<shift))==(af<<shift) && (rd(s,port)&(3U<<pair))==(2U<<pair) &&
-    !(rd(s,port+4U)&(1U<<pin)) && !(rd(s,port+12U)&(3U<<pair)) &&
+    !(rd(s,port+4U)&(1U<<pin)) && (rd(s,port+12U)&(3U<<pair))==(pullup ? 1U<<pair : 0) &&
     (rd(s,port+8U)&(3U<<pair))==(2U<<pair);
 }
 static bool filters(const vgw_white_can *s,unsigned controller,uint32_t enabled) {
   uint32_t b=base(controller), split=controller==1 ? 14U<<8 : 0;
-  wr(s,b+0x200U,split|1U);
+  /* CAN1 owns the shared CAN2SB field; CAN3 only needs FINIT. Reserved
+   * FMR bits are nonzero on silicon (CAN1 observed 0x2a1c0e01 at reset).
+   * Preserve them and verify only the documented writable fields. */
+  uint32_t mask=controller==1 ? 0x3f01U : 1U;
+  uint32_t fmr=(rd(s,b+0x200U)&~mask)|split;
+  wr(s,b+0x200U,fmr|1U);
   wr(s,b+0x21cU,0); wr(s,b+0x204U,0); /* inactive, mask mode */
   wr(s,b+0x20cU,enabled); wr(s,b+0x214U,0); /* 32 bit, FIFO0 */
   wr(s,b+0x240U,0); wr(s,b+0x244U,0);
   if (controller==1) { wr(s,b+0x2b0U,0); wr(s,b+0x2b4U,0); }
-  wr(s,b+0x21cU,enabled); wr(s,b+0x200U,split);
-  return rd(s,b+0x200U)==split && rd(s,b+0x21cU)==enabled && rd(s,b+0x20cU)==enabled &&
+  wr(s,b+0x21cU,enabled); wr(s,b+0x200U,fmr);
+  return (rd(s,b+0x200U)&mask)==split && rd(s,b+0x21cU)==enabled && rd(s,b+0x20cU)==enabled &&
     rd(s,b+0x204U)==0 && rd(s,b+0x214U)==0 && rd(s,b+0x240U)==0 && rd(s,b+0x244U)==0 &&
     (controller!=1 || (rd(s,b+0x2b0U)==0 && rd(s,b+0x2b4U)==0));
 }
@@ -104,7 +109,10 @@ bool vgw_white_can_init(vgw_white_can *s,const vgw_white_clock *clock,const vgw_
     else if (c==2) { rx=c==config->swcan_controller ? 12 : 5; tx=rx+1; }
     else if (c==config->swcan_controller) { rx=3; tx=4; }
     else { port=0x40020000U; rx=8; tx=15; }
-    if (!alternate(s,port,rx,af) || !alternate(s,port,tx,af)) goto fail;
+    /* Historical White setup pulls the GMLAN RX signal up (PB12).
+     * Retain a recessive bias on the selected RX pad, including PB3/CAN3;
+     * an undriven low/floating RX otherwise prevents bxCAN synchronization. */
+    if (!alternate(s,port,rx,af,c==config->swcan_controller) || !alternate(s,port,tx,af,false)) goto fail;
     if (c==config->swcan_controller) {
       wr(s,0x40020418U,0xc000U); /* both mode bits simultaneously normal */
       if ((rd(s,0x40020414U)&0xc000U)!=0xc000U) goto fail;

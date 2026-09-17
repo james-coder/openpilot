@@ -14,6 +14,8 @@ FIELDS = {'flash_kib': (0, 0x1fff7a22, 2), 'debug_idcode': (0, 0xe0042000, 4),
           'legacy_rom_vectors': (0, 0x1fff0000, 8), 'f413_rom_vectors': (0, 0x1ff00000, 8),
           'probe_stage': (0, 0x2001c000, 16),
           'probe_usb_trace': (0, 0x2001c000, 288),
+          'probe_can_trace': (0, 0x2001c400, 24),
+          'board_stage': (0, 0x2001c800, 16),
           'option_bytes': (1, 0x1fffc000, 16)}
 
 
@@ -88,6 +90,20 @@ def inspect():
         for name in FIELDS:
           try:
             raw = read_field(h, name)
+            if name == 'board_stage':
+              magic,phase,inverse,end=struct.unpack('<4I',raw)
+              if magic!=0x56474231 or end!=0x31424756 or phase^inverse!=0xffffffff:
+                raise ValueError('no valid board breadcrumb; unrelated SRAM withheld')
+              report['fields'][name]={'phase':phase&65535,'image':phase>>16}
+              continue
+            if name == 'probe_can_trace':
+              magic,address,value,write_address,write_value,end=struct.unpack('<6I',raw)
+              if (magic!=0x314e4356 or end!=0x56434e31 or
+                  not 0x40006400<=address<0x40007000 or not 0x40006400<=write_address<0x40007000):
+                raise ValueError('no valid CAN-only trace; unrelated SRAM contents withheld')
+              report['fields'][name]={'read_address':address,'read_value':value,
+                                     'write_address':write_address,'write_value':write_value}
+              continue
             if name in ('probe_stage', 'probe_usb_trace'):
               magic, stage, inverse, end = struct.unpack_from('<4I', raw)
               if magic != 0x56505231 or end != 0x31475052 or inverse != stage ^ 0xffffffff:

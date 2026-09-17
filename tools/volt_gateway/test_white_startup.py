@@ -47,6 +47,22 @@ def test_order_and_silent_startup(lib):
     assert lib.vgw_white_startup_now(C.byref(s))==now
 
 
+def test_inherited_rng_stopped_before_clock_changes(lib):
+  r,s=registers(),Startup()
+  r.values.update({0x40023834:64,0x50060800:4})
+  assert lib.vgw_white_startup_init(C.byref(s),C.byref(r.io))
+  assert r.writes.index((0x50060800,0))<next(i for i,(a,_) in enumerate(r.writes) if a==0x40023800)
+  assert not any(a==0x50060804 for a,_ in r.writes)  # never conceal an entropy error
+
+
+def test_inherited_rng_stop_failure_blocks_clock_changes(lib):
+  r,s=registers(0x50060800),Startup()
+  r.values.update({0x40023834:64,0x50060800:4})
+  assert not lib.vgw_white_startup_init(C.byref(s),C.byref(r.io))
+  assert not s.ready and s.watchdog.failed
+  assert not any(a==0x40023800 for a,_ in r.writes)
+
+
 @pytest.mark.parametrize('address', [0x40023840,0x40000000,0x40000028,0x4000002c])
 def test_clock_timer_write_failure_latches(lib, address):
   r, s = registers(address), Startup()

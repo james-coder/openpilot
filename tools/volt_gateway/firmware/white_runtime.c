@@ -1,4 +1,5 @@
 #include "white_runtime.h"
+#include "boot_trace.h"
 size_t vgw_white_runtime_size(void) { return sizeof(vgw_white_runtime); }
 void vgw_white_runtime_stop(vgw_white_runtime *s) {
   if (!s) return;
@@ -15,12 +16,21 @@ bool vgw_white_runtime_init(vgw_white_runtime *s,const vgw_white_mmio *io,const 
   uint8_t *bytes=(uint8_t *)s;
   for (unsigned i=0;i<sizeof(*s);i++) bytes[i]=0;
   vgw_observer_init(&s->observer);
-  if (!vgw_white_startup_init(&s->startup,io) || !vgw_white_clock_init(&s->clock,&s->startup) ||
-      !vgw_white_rng_init(&s->rng,&s->clock) || !vgw_white_rng_nonce(&s->rng,s->boot_nonce) ||
-      !vgw_recovery_link_init(&s->recovery,request_id) || !vgw_white_can_init(&s->can,&s->clock,config)) {
-    vgw_white_runtime_stop(s); return false;
-  }
+  vgw_boot_trace(101);
+  if (!vgw_white_startup_init(&s->startup,io)) goto fail;
+  vgw_boot_trace(102);
+  if (!vgw_white_clock_init(&s->clock,&s->startup)) goto fail;
+  vgw_boot_trace(103);
+  if (!vgw_white_rng_init(&s->rng,&s->clock)) goto fail;
+  vgw_boot_trace(104);
+  if (!vgw_white_rng_nonce(&s->rng,s->boot_nonce)) goto fail;
+  vgw_boot_trace(105);
+  if (!vgw_recovery_link_init(&s->recovery,request_id)) goto fail;
+  vgw_boot_trace(106);
+  if (!vgw_white_can_init(&s->can,&s->clock,config)) goto fail;
   s->ready=true; return true;
+fail:
+  vgw_white_runtime_stop(s); return false;
 }
 static void receive(void *ctx,const vgw_frame *f) {
   vgw_white_runtime *s=ctx;

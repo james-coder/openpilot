@@ -108,6 +108,8 @@ def run(images,slot,*,confirmed=False):
   cpu.mem_write(0x1fff7a22,struct.pack('<H',1024))
   for a,v in [(0x40023800,3),(0x40023874,3),(0x40007004,0x4000),(0x50060804,1),(0x40023c10,0x80000000)]:
     put(a,v)
+  for b in (BASES[0],BASES[2]):
+    put(b+0x200,0x2a1c0e01)
   queue=[]
   rng=[0]
   busy=[0]
@@ -142,6 +144,12 @@ def run(images,slot,*,confirmed=False):
     entered.append(True)
   a=app['vgw_application_init']&~1
   cpu.hook_add(UC_HOOK_CODE,app_init,begin=a,end=a)
+  def usb_init(machine,address,size,data):
+    if not cpu.reg_read(UC_ARM_REG_R1):
+      assert entered, 'USB connected before application/crypto initialization could service enumeration'
+  for symbols in (ls,app):
+    a=symbols['vgw_white_usb_init']&~1
+    cpu.hook_add(UC_HOOK_CODE,usb_init,begin=a,end=a)
   def running(machine,address,size,data):
     if entered:
       complete.append(True)
@@ -197,6 +205,8 @@ def run(images,slot,*,confirmed=False):
       iwdg_pending[a]=(value,3)
     if a==0x50000014:
       put(a,read(a)&~value)
+    if a==0x40023800 and not value&(1<<24) and read(0x50060800)&4:
+      put(0x50060804,read(0x50060804)|0x22)  # running RNG loses PLL48 clock
     if a in (0x40020018,0x40020418,0x40020818):
       put(a-4,(read(a-4)|(value&0xffff))&~(value>>16))
     if a in BASES:
@@ -232,8 +242,15 @@ def run(images,slot,*,confirmed=False):
   cpu.hook_add(UC_HOOK_MEM_WRITE,flash_write,begin=0x08000000,end=0x080fffff)
   sp,entry=struct.unpack_from('<II',loader)
   cpu.reg_write(UC_ARM_REG_SP,sp)
-  cpu.emu_start(entry,0,timeout=60_000_000,count=300_000_000)
+  try:
+    cpu.emu_start(entry,0,timeout=60_000_000,count=300_000_000)
+  except Exception as error:
+    raise AssertionError(f'whole board execution failed at PC={cpu.reg_read(UC_ARM_REG_PC):#x}, '+
+                         f'phase={read(0x2001c804):#x}') from error
   assert complete, f'whole board instruction/time limit: PC={cpu.reg_read(UC_ARM_REG_PC):#x}'
+  marker,phase,inverse,end=struct.unpack('<4I',cpu.mem_read(0x2001c800,16))
+  assert (marker,end)==(0x56474231,0x31424756) and phase^inverse==0xffffffff
+  assert phase==(13|((slot+1)<<16) if slot is not None else 13)
   assert len(mutations)==(2 if slot is not None and not confirmed else 0)
   assert read(0xe000ed08)==(start if slot is not None else loader_start)
   assert len(watchdog)>0

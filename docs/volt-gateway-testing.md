@@ -1,5 +1,12 @@
 # Gateway testing: integrated workflows, simulation and hardware evidence
 
+## Current physical bring-up evidence
+
+See [USB-only bench bring-up](volt-gateway-bench-bringup-20260916.md) for the
+measured device identity, actual startup discrepancies, regression additions,
+and hardware results. Older model-only milestones below are historical, not
+claims that every physical deployment gate has passed.
+
 ## Target crypto integration — 2026-09-16
 
 **686 passed, zero failed/skipped**, with Ruff, Cortex-M4/core builds, pinned

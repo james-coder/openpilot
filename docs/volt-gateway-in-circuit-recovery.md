@@ -1,8 +1,23 @@
 # Local USB in-circuit recovery
 
 Implemented in candidate `hvac-trial-20260917-05` / private `bench-hvac05`.
-**Not physically deployed or in-circuit validated yet.** Installed hvac02 does
-not have this operation. Its final cold-loader installation is still necessary.
+**Physically deployed September 17, 2026; OBD-connected validation pending.**
+Installed hvac05 with OBD disconnected. Full 1 MiB readback matched SHA256
+`160512deb0699931e946e65e26c392dedee739640cedf0f7ea3c7ef570c7a574`.
+Running build `1058815db11b8e0cf0b3eeccca91364c0dd296a6ac9e3423ea10bc2b008b8d05`
+reported capabilities255. Authenticated opcode20 physically entered ROM DFU
+without a USB replug; the application returned through the host ROM jump helper,
+also without a replug. No vehicle CAN transmission was requested.
+
+Fresh software-entered ROM reported status10/state10 (errFIRMWARE/dfuERROR).
+The host leave helper now clears the DFU protocol error before abort/jump;
+this does not erase flash or change option bytes. Seven focused host tests passed.
+One sequential application status query timed out; a later HVAC status query
+succeeded. This timeout is not claimed resolved by the recovery test.
+Evidence: `/home/james/diagnostics/volt-gateway/flashing/370022000651363038363036-20260916/hvac05/`.
+The older cold-entry attempt with OBD attached returned to hvac02 rather than
+remaining in ROM; its cause is unproven. The new software path still needs its
+OBD-connected recovery/program/readback/return test.
 
 The new recovery path is independent of the HVAC feature switch and of the
 application firmware updater's VIN, CAN freshness, parked-state, and RX-overflow

@@ -19,6 +19,14 @@ def leave():
     with closing(matches[0].open()) as handle:
       handle.claimInterface(0)
       handle.setInterfaceAltSetting(0, 0)
+      # Software-entered STM ROM may initially report errFIRMWARE/dfuERROR.
+      # CLRSTATUS clears only the DFU protocol error; it does not erase flash
+      # or alter readout protection. Never clear an unexpected active state.
+      status = bytes(handle.controlRead(0xa1, 3, 0, 0, 6, timeout=2000))
+      if len(status) != 6:
+        raise RuntimeError('Invalid initial DFU status')
+      if status[4] == 10:
+        handle.controlWrite(0x21, 4, 0, 0, b'', timeout=2000)
       # Abort the previous read transaction; never clear protection or flash.
       handle.controlWrite(0x21, 6, 0, 0, b'', timeout=2000)
       status = bytes(handle.controlRead(0xa1, 3, 0, 0, 6, timeout=2000))

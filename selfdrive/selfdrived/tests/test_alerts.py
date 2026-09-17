@@ -8,7 +8,7 @@ from cereal import log, car
 from cereal.messaging import SubMaster
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
-from openpilot.selfdrive.selfdrived.events import Alert, EVENTS, ET
+from openpilot.selfdrive.selfdrived.events import Alert, EVENTS, ET, startup_master_alert
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.selfdrive.test.process_replay.process_replay import CONFIGS
 
@@ -128,3 +128,16 @@ class TestAlerts:
       written_alert = params.get(a)
       assert "a"*i == written_alert['extra']
       assert alert["text"] == written_alert['text']
+
+  def test_startup_master_alert_shows_mil_codes_from_last_scan(self):
+    params = Params()
+    try:
+      params.remove('ObdLastScan')
+      alert = startup_master_alert(self.CP, self.CS, self.sm, False, 100, log.LongitudinalPersonality.standard)
+      assert 'MIL' not in alert.alert_text_2
+
+      params.put('ObdLastScan', {'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': ['P0401']}}}}, block=True)
+      alert = startup_master_alert(self.CP, self.CS, self.sm, False, 100, log.LongitudinalPersonality.standard)
+      assert 'MIL: P0401' in alert.alert_text_2
+    finally:
+      params.remove('ObdLastScan')

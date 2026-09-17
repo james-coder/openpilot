@@ -9,7 +9,9 @@ from cereal import log, car
 import cereal.messaging as messaging
 from openpilot.common.constants import CV
 from openpilot.common.git import get_short_branch
+from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
+from openpilot.selfdrive.car.obd_scan import summarize_mil
 from openpilot.selfdrive.locationd.calibrationd import MIN_SPEED_FILTER
 from openpilot.system.micd import SAMPLE_RATE, SAMPLE_BUFFER
 from openpilot.selfdrive.ui.feedback.feedbackd import FEEDBACK_MAX_DURATION
@@ -249,7 +251,12 @@ def startup_master_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubM
   if "REPLAY" in os.environ:
     branch = "replay"
 
-  return StartupAlert("WARNING: This branch is not tested", branch, alert_status=AlertStatus.userPrompt)
+  # Reuses the existing check-engine scanner's last saved result (selfdrive/car/obd_scan.py,
+  # selfdrive/car/obd_scan_controller.py) -- this doesn't trigger a scan itself, and adds
+  # nothing to the line below it when there's no scan on file or it came back clean.
+  mil = summarize_mil(Params().get("ObdLastScan"))
+  subtext = f"{branch} — {mil}" if mil else branch
+  return StartupAlert("WARNING: This branch is not tested", subtext, alert_status=AlertStatus.userPrompt)
 
 def below_engage_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:
   return NoEntryAlert(f"Drive above {get_display_speed(CP.minEnableSpeed, metric)} to engage")

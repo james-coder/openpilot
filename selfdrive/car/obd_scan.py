@@ -32,6 +32,31 @@ def scan_block_reason(*, supported, started, initialized, fresh, park, speed, en
   return ""
 
 
+def summarize_mil(report: dict | None) -> str:
+  """One-line summary of DTCs from the last saved check-engine scan (ObdLastScan), for
+  the startup alert. Only counts a service's codes if that service's own read succeeded
+  ("state": "ok") -- a failed/unsupported/timed-out read contributes nothing rather than
+  being silently treated as "no codes". Empty string (display nothing extra) whenever
+  there's no scan on file yet, the saved scan didn't complete/partially complete, or it
+  completed clean -- the menu-based scanner already covers everything else, this is only
+  the boot-time headline."""
+  if not report or report.get("state") not in ("complete", "partial"):
+    return ""
+  codes = set()
+  for ecu in report.get("ecus", {}).values():
+    for service in ("stored", "pending", "permanent"):
+      result = ecu.get(service, {})
+      if result.get("state") == "ok":
+        codes.update(result.get("codes", []))
+  if not codes:
+    return ""
+  shown = sorted(codes)
+  text = "MIL: " + ", ".join(shown[:6])
+  if len(shown) > 6:
+    text += f" +{len(shown) - 6} more"
+  return text
+
+
 def decode_reply(name: str, data: bytes) -> dict:
   if name == "lamp":
     if len(data) != 6 or data[:2] != b"\x41\x01":

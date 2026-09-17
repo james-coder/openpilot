@@ -4,7 +4,7 @@ from types import SimpleNamespace
 
 from opendbc.car.can_definitions import CanData
 from opendbc.car.gm.values import CAR
-from openpilot.selfdrive.car.obd_scan import ObdScanner, decode_reply, scan_block_reason
+from openpilot.selfdrive.car.obd_scan import ObdScanner, decode_reply, scan_block_reason, summarize_mil
 from openpilot.selfdrive.car.obd_scan_controller import ObdScanController
 from openpilot.selfdrive.ui.layouts.settings.obd_diagnostics_data import lamp_status, result_rows, valid_report, descriptions
 
@@ -278,3 +278,38 @@ class TestScanPermission:
     assert scan_block_reason(**args) == ''
     for field in ('supported', 'started', 'initialized', 'fresh', 'park', 'firmware_ready'):
       assert scan_block_reason(**{**args, field: False})
+
+
+class TestSummarizeMil:
+  def test_no_report_or_unfinished_scan(self):
+    assert summarize_mil(None) == ''
+    assert summarize_mil({'state': 'scanning', 'ecus': {}}) == ''
+    assert summarize_mil({'state': 'error', 'ecus': {}}) == ''
+
+  def test_clean_report_shows_nothing(self):
+    report = {'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': []},
+                                                      'pending': {'state': 'ok', 'codes': []},
+                                                      'permanent': {'state': 'ok', 'codes': []}}}}
+    assert summarize_mil(report) == ''
+
+  def test_unread_service_contributes_no_codes(self):
+    report = {'state': 'partial', 'ecus': {'7E8': {'stored': {'state': 'timeout', 'error': 'No response'}}}}
+    assert summarize_mil(report) == ''
+
+  def test_codes_deduplicated_across_ecus_and_services(self):
+    report = {'state': 'complete', 'ecus': {
+      '7E8': {'stored': {'state': 'ok', 'codes': ['P0401']}, 'pending': {'state': 'ok', 'codes': ['P0401']}},
+      '7E9': {'permanent': {'state': 'ok', 'codes': ['P0171']}},
+    }}
+    assert summarize_mil(report) == 'MIL: P0171, P0401'
+
+  def test_partial_scan_still_shows_what_was_read(self):
+    report = {'state': 'partial', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': ['P0300']},
+                                                     'pending': {'state': 'timeout', 'error': 'No response'}}}}
+    assert summarize_mil(report) == 'MIL: P0300'
+
+  def test_many_codes_truncated_for_the_small_display(self):
+    codes = [f'P0{i:03d}' for i in range(10)]
+    report = {'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': codes}}}}
+    summary = summarize_mil(report)
+    assert summary == 'MIL: P0000, P0001, P0002, P0003, P0004, P0005 +4 more'

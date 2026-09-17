@@ -1,7 +1,8 @@
 """Privileged, optional Bluetooth owner. Fixed UART; passive reception only.
 
 The local feed is receive-only. Clients cannot supply commands or device paths.
-Initialization always requires live ignition-off telemetry, including in children.
+Initialization always requires live telemetry proving ignition-off, or Park/standstill/
+disengaged, including in children. See openpilot.system.aranet.safety.OffroadGate.
 """
 import contextlib
 import fcntl
@@ -189,7 +190,7 @@ def main():
         elif now >= retry:
           try:
             if not radio.ready():
-              state, detail = 'initializing', 'Initializing Bluetooth while ignition is off'
+              state, detail = 'initializing', 'Initializing Bluetooth while offroad or safely parked'
               client.send(encode(dict(type='status', state=state, message=detail)))
               radio.initialize()
             if radio.scanner is None:
@@ -212,10 +213,14 @@ def main():
                     pass  # Drop telemetry, never block on a slow recorder.
           except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
             radio.stop_scan()
-            state = 'waiting_offroad' if isinstance(exc, UnsafeInitialization) else 'initialization_failed'
+            unsafe = isinstance(exc, UnsafeInitialization)
+            state = 'waiting_offroad' if unsafe else 'initialization_failed'
             detail = str(exc)[:240]
             LOG.warning('%s: %s', state, detail)
-            retry = time.monotonic() + 30
+            # Merely waiting on safe-to-init telemetry: recheck soon, both to react promptly
+            # once parked and to keep the safety gate's own subscriptions from going stale.
+            # A real hardware/transport failure backs off much further.
+            retry = time.monotonic() + (2 if unsafe else 30)
         if client is not None and time.monotonic() - last_status >= 5:
           try:
             client.send(encode(dict(type='status', state=state, message=detail)))

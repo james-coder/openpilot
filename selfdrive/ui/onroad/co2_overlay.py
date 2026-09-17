@@ -21,6 +21,8 @@ from openpilot.system.ui.widgets import Widget
 
 POLL_SECONDS = 5
 STATUS_MAX_AGE = 20
+HIGH_CO2_PPM = 1000
+HIGH_CO2_COLOR = rl.Color(230, 60, 60, 255)
 
 
 def latest_co2(root: Path = ROOT, now: float | None = None) -> tuple[int, float] | None:
@@ -80,9 +82,11 @@ class Co2Overlay(Widget):
     self._badge = None
     if value is None or time.time() > value[1]:  # noqa: TID251 -- persisted sample expiry
       return
-    text = f'CO₂ {value[0]} ppm'
+    label = 'CO2 '
+    rest = f'{value[0]} ppm'
     size = FONT_SIZES.max_speed
-    text_size = measure_text_cached(self._font, text, size)
+    label_size = measure_text_cached(self._font, label, size)
+    text_size = measure_text_cached(self._font, label + rest, size)
     x = rect.x + rect.width - UI_CONFIG.border_size - text_size.x - 16
     y = rect.y + rect.height - UI_CONFIG.border_size - text_size.y - 20
     # On RHD cars the driver-monitoring icon occupies the bottom-right corner.
@@ -92,7 +96,9 @@ class Co2Overlay(Widget):
     backing = rl.Rectangle(x - 12, y - 8, text_size.x + 28, text_size.y + 16)
     self._badge = backing
     rl.draw_rectangle_rounded(backing, .2, 6, COLORS.BLACK_TRANSLUCENT)
-    rl.draw_text_ex(self._font, text, rl.Vector2(x, y), size, 0, COLORS.WHITE)
+    label_color = HIGH_CO2_COLOR if value[0] > HIGH_CO2_PPM else COLORS.WHITE
+    rl.draw_text_ex(self._font, label, rl.Vector2(x, y), size, 0, label_color)
+    rl.draw_text_ex(self._font, rest, rl.Vector2(x + label_size.x, y), size, 0, COLORS.WHITE)
 
   def hit_test(self, pos) -> bool:
     return self._badge is not None and rl.check_collision_point_rec(pos, self._badge)

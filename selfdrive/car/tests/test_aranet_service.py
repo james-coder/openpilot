@@ -59,7 +59,13 @@ def test_feed_and_database(tmp_path, monkeypatch):
 def test_initialization_gate_denies(failure, monkeypatch):
   monkeypatch.setattr(safety.time, 'monotonic', lambda: 10.)
   panda = SimpleNamespace(ignitionLine=failure=='ignition', ignitionCan=False, controlsAllowed=failure=='controls')
-  data = {'deviceState': SimpleNamespace(started=failure=='started'), 'pandaStates': [] if failure=='empty' else [panda]}
+  data = {
+    'deviceState': SimpleNamespace(started=failure=='started'),
+    'pandaStates': [] if failure=='empty' else [panda],
+    # Not parked, so the ignition/started/controls cases still deny even under the parked-safe path.
+    'carState': SimpleNamespace(gearShifter='drive', standstill=False, vEgo=5.),
+    'selfdriveState': SimpleNamespace(enabled=True),
+  }
   class SM:
     services = list(data)
     seen = dict.fromkeys(data, failure != 'unseen')
@@ -73,6 +79,51 @@ def test_initialization_gate_denies(failure, monkeypatch):
   gate.sm = SM()
   with pytest.raises(safety.UnsafeInitialization):
     gate.check()
+
+
+@pytest.mark.parametrize('case,allowed', [
+  ('parked_ignition_line', True), ('parked_ignition_can', True), ('parked_started', True),
+  ('moving', False), ('drive_gear', False), ('unknown_gear', False), ('engaged', False),
+  ('controls_allowed', False), ('stale_car', False), ('stale_selfdrive', False),
+])
+def test_initialization_gate_allows_while_safely_parked(case, allowed, monkeypatch):
+  """A car whose CAN bus (e.g. the Volt's) keeps reporting ignition on after parking must still
+  be able to start Bluetooth once it's verifiably in Park, stopped, and disengaged."""
+  monkeypatch.setattr(safety.time, 'monotonic', lambda: 10.)
+  panda = SimpleNamespace(
+    # Every case keeps ignition "on" via ignitionLine unless it's specifically exercising
+    # ignitionCan or deviceState.started as the sole on-signal (e.g. the Volt's GMLAN quirk).
+    ignitionLine=case != 'parked_ignition_can',
+    ignitionCan=case == 'parked_ignition_can',
+    controlsAllowed=case == 'controls_allowed',
+  )
+  data = {
+    'deviceState': SimpleNamespace(started=case == 'parked_started'),
+    'pandaStates': [panda],
+    'carState': SimpleNamespace(
+      gearShifter='drive' if case == 'drive_gear' else 'unknown' if case == 'unknown_gear' else 'park',
+      standstill=case != 'moving',
+      vEgo=2. if case == 'moving' else 0.,
+    ),
+    'selfdriveState': SimpleNamespace(enabled=case == 'engaged'),
+  }
+  class SM:
+    services = list(data)
+    seen = dict.fromkeys(data, True)
+    valid = dict.fromkeys(data, True)
+    recv_time = {k: 0. if (case == 'stale_car' and k == 'carState') or (case == 'stale_selfdrive' and k == 'selfdriveState')
+                 else 9. for k in data}
+    def update(self, timeout):
+      pass
+    def __getitem__(self, key):
+      return data[key]
+  gate = safety.OffroadGate.__new__(safety.OffroadGate)
+  gate.sm = SM()
+  if allowed:
+    gate.check()
+  else:
+    with pytest.raises(safety.UnsafeInitialization):
+      gate.check()
 
 
 def test_initialization_denied_before_hardware(monkeypatch):

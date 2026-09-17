@@ -73,20 +73,42 @@ def test_badge_uses_max_font_size_and_lower_right_and_hides_when_stale(monkeypat
   draws = []
   monkeypatch.setattr(co2_overlay, 'measure_text_cached', lambda font, text, size: rl.Vector2(260, 40))
   monkeypatch.setattr(co2_overlay.rl, 'draw_rectangle_rounded', lambda rect, *a: draws.append(('box', rect)))
-  monkeypatch.setattr(co2_overlay.rl, 'draw_text_ex', lambda font, text, pos, size, *a: draws.append(('text', text, pos, size)))
+  monkeypatch.setattr(co2_overlay.rl, 'draw_text_ex', lambda font, text, pos, size, *a: draws.append(('text', text, pos, size, a[-1])))
   monkeypatch.setattr(co2_overlay, 'time', SimpleNamespace(time=lambda: 1000.))
   from openpilot.selfdrive.ui import ui_state as ui_state_module
   monkeypatch.setattr(ui_state_module, 'ui_state', SimpleNamespace(started=False, sm={'driverMonitoringState': SimpleNamespace(isRHD=False)}))
   overlay = SimpleNamespace(_latest=(1159, 1240.), _font=object(), _badge=None)
   co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
-  assert draws[-1][1] == 'CO₂ 1159 ppm'
-  assert draws[-1][3] == co2_overlay.FONT_SIZES.max_speed
-  assert 1750 < draws[-1][2].x < 2130
-  assert 900 < draws[-1][2].y < 1050
+  text_draws = [d for d in draws if d[0] == 'text']
+  assert [d[1] for d in text_draws] == ['CO2 ', '1159 ppm']  # plain "2", not the unsupported ₂ glyph
+  assert text_draws[0][4] == co2_overlay.HIGH_CO2_COLOR  # over 1000ppm: "CO2" label is red
+  assert text_draws[1][4] == co2_overlay.COLORS.WHITE  # the ppm figure stays white
+  assert text_draws[-1][3] == co2_overlay.FONT_SIZES.max_speed
+  assert 1750 < text_draws[0][2].x < 2130
+  assert 900 < text_draws[0][2].y < 1050
+  draws.clear()
   overlay._latest = (1159, 999.)
   co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
   assert overlay._badge is None
-  assert len(draws) == 2
+  assert draws == []
+
+
+def test_badge_label_color_only_turns_red_above_threshold(monkeypatch):
+  draws = []
+  monkeypatch.setattr(co2_overlay, 'measure_text_cached', lambda font, text, size: rl.Vector2(260, 40))
+  monkeypatch.setattr(co2_overlay.rl, 'draw_rectangle_rounded', lambda *a: None)
+  monkeypatch.setattr(co2_overlay.rl, 'draw_text_ex', lambda font, text, pos, size, *a: draws.append((text, a[-1])))
+  monkeypatch.setattr(co2_overlay, 'time', SimpleNamespace(time=lambda: 1000.))
+  from openpilot.selfdrive.ui import ui_state as ui_state_module
+  monkeypatch.setattr(ui_state_module, 'ui_state', SimpleNamespace(started=False, sm={'driverMonitoringState': SimpleNamespace(isRHD=False)}))
+  overlay = SimpleNamespace(_latest=(1000, 1240.), _font=object(), _badge=None)
+  co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
+  assert draws[0] == ('CO2 ', co2_overlay.COLORS.WHITE)  # exactly at threshold: not yet red
+  draws.clear()
+  overlay._latest = (1001, 1240.)
+  co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
+  assert draws[0] == ('CO2 ', co2_overlay.HIGH_CO2_COLOR)
+  assert draws[1] == ('1001 ppm', co2_overlay.COLORS.WHITE)
 
 
 def test_badge_moves_above_right_hand_drive_monitor_and_can_be_hidden(monkeypatch):
@@ -104,7 +126,10 @@ def test_badge_moves_above_right_hand_drive_monitor_and_can_be_hidden(monkeypatc
   state.isRHD = True
   fake_ui.started = True
   co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
-  assert draws[0] - draws[1] == co2_overlay.UI_CONFIG.button_size + 20
+  # Two text draws (label + ppm) per render, sharing one baseline y each time.
+  assert draws[0] == draws[1]
+  assert draws[2] == draws[3]
+  assert draws[0] - draws[2] == co2_overlay.UI_CONFIG.button_size + 20
   co2_overlay.Co2Overlay.hide(overlay)
   assert overlay._badge is None
 

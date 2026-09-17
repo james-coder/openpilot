@@ -53,6 +53,22 @@ done, attempts0 to1, TX0 to1, RX5469 to5641, malformed/overflow/arbitration_lost
 tx_errors/ESR all zero. Owner-visible result pending. This verifies another
 successful candidate1 transmission, not the cause of the intermittent fault.
 
+## Candidate 3: explicit provisional raw-value experiment
+
+After the owner requested trying candidate3 values15s apart despite absent
+enumerations, the host sent two extended DLC5 frames at **provisional** ID
+`0x1045A080`: `0000000000`, then `0200000000` about15s later. These encode raw
+recirc values0 and1 in byte0 bits3..1, leaving all other bits zero. The ID's
+priority/source and payload value meanings are hypotheses, not observed
+request definitions. Zero is **not** established as "no change" for other HVAC
+fields; this uncertainty was stated before sending. No claim of ON/OFF semantics.
+
+Both frames completed, one TX-count increment each, attempts1 to2 to3, state
+done after each, fresh interlocks throughout. Reported malformed/overflow/
+arbitration_lost/tx_errors/ESR remained zero (SWCAN error-accounting limitations
+still apply). No resets, flashes, retries, or subscriptions were used. Physical
+HVAC effects await owner observation.
+
 ## Latest physical result: first completed TX pair, hvac05
 
 On September17, with OBD/USB connected and fresh Park/RUN/zero-speed evidence,

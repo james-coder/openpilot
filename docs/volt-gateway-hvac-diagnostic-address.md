@@ -1,5 +1,10 @@
 # Physical SWCAN diagnostic discovery — September 17, 2026
 
+**Latest result:** K33 accepted both GDS2-derived recirculation/fresh-air
+commands below. During the subsequent alternating test, the owner distinctly
+heard airflow change and confirmed flap actuation. No button LED change.
+This is a parked diagnostic override, not validated persistent cabin automation.
+
 Owner authorized read-only diagnostic-address discovery. No actuator request,
 diagnostic session change, DTC clear, firmware change or device reset was sent.
 
@@ -50,3 +55,61 @@ Private raw evidence in `vehicle-observations/`:
 `k33-ae01-first-1789635854463543121.jsonl` and
 `k33-ae01-fresh-1789635887788598890.jsonl`.
 Both report zero host/transport drops. Owner-visible/audible effect pending.
+
+## Alternating test: owner-confirmed physical airflow change
+
+At the owner's request, sent four single-frame commands in order:
+recirculation → fresh air → recirculation → fresh air, approximately 10 seconds
+apart. Each used standard 11-bit request ID `0x251` on SWCAN; each completed
+hardware transmission and received `02 EE 01 AA AA AA AA AA` on `0x651`.
+There were no automatic retries, vehicle TesterPresent messages, diagnostic
+session/security changes, explicit release requests, resets or firmware changes.
+
+The owner reported no LED change, but distinctly audible airflow changes and
+confirmed that the experiment was moving the vent flap. This is user-observed
+physical evidence in addition to ECU acceptance—not a measured position, travel
+calibration, or proof of absolute endpoint positions. The ON/OFF selection names
+come from the installed GM command enum, not from an independent position sensor.
+
+Using same-device MCU timestamps from received frames:
+
+| Selection | Positive reply timestamp (us) | Subsequent `01 60 AA AA AA AA AA AA` (us) | Interval |
+| --- | ---: | ---: | ---: |
+| Recirculation | 220192000 | 225193000 | 5.001 s |
+| Fresh air | 230164000 | 235170000 | 5.006 s |
+| Recirculation | 240147000 | 245153000 | 5.006 s |
+| Fresh air | 250080000 | 255086000 | 5.006 s |
+
+The unsolicited `0x60` service replies are consistent with return to normal on
+diagnostic timeout, as described by GMW3110. We did not send service `0x20` or
+vehicle `0x3E`. Thus a persistent setting must not be inferred from command
+acceptance. Actual flap position after timeout, explicit cancel behavior, and
+the full GDS2 lifecycle still need verification. Do not infer that maintaining
+diagnostic override while driving is appropriate; effects on HVAC protections
+and diagnostic monitoring have not been validated.
+
+### A26 versus K33
+
+- **A26, HVAC Controls:** user-facing control panel and its selected settings.
+- **K33, HVAC Control Module:** actuator controller targeted by this experiment.
+  Its `0x251` endpoint agrees with both live discovery and the 2017 Volt K33
+  transport definition recovered from installed GM data.
+
+The unchanged button LED does not imply that the wrong module was targeted.
+Diagnostic actuator control can differ from the panel's selected setting;
+that explanation fits the observations, but the LED synchronization mechanism
+has not been separately decoded. Likewise, the previously identified
+`0x10B02099 / 0006070d` value is selected-state feedback, not demonstrated
+physical flap-position feedback. No such report was captured during this test.
+
+2017 Volt module data-link reference:
+https://estimate.mymitchell.com/GMC/document/4/6/4/0/0/100304692_4640002_11741334.html
+
+### Evidence and end state
+
+Raw log:
+`/home/james/diagnostics/volt-gateway/vehicle-observations/k33-ae01-four-1789635956424590122.jsonl`.
+Host and transport drop counters were both zero. All four commands and the last
+timeout response had already been recorded before the owner's stop message was
+handled. The test process was confirmed absent; no further transmission was
+initiated. No persistent automation or driving integration was enabled.

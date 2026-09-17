@@ -32,10 +32,18 @@ It authorizes only the documented operational commands. It does NOT authorize
 update-mode entry, flash erase/program, image activation or trust-key replacement.
 
 Firmware/update authority uses a separate per-device ECDSA-P256/SHA-256 pair.
-The private key stays encrypted in this development checkout's Git-ignored
-`.voltgw-private/<device>/firmware-key.pem`, never in Git. The comma only relays
-public signed artifacts: do not copy the private key there even temporarily,
-forward a signing agent, or expose a general-purpose remote signing service.
+The durable private-key copy stays encrypted in this development checkout's
+Git-ignored `.voltgw-private/<device>/firmware-key.pem`, never in Git. The current
+preferred workflow signs locally and lets the comma relay public signed artifacts.
+This is a least-exposure design choice, not an owner prohibition on interactive
+secret entry: the owner explicitly permits entering a passphrase interactively
+into a script on the comma, provided neither it nor private signing material is
+persisted there or committed. An intentionally implemented transient signing
+workflow would need to prevent files, logs, command-line/environment leakage,
+core dumps and swap from persisting secrets. It would still expose the secret
+to a compromised comma while running; local signing avoids that exposure.
+Transient comma-side signing is not implemented by the current update tools.
+Do not expose unattended signing authority or a general-purpose remote signer.
 The gateway loader contains the verification/public key, not the signing key.
 Public verification keys may be version controlled. Back up private material
 encrypted off-device; a Git clone must not recover signing authority.
@@ -53,8 +61,9 @@ Automatic revert to the previously confirmed image needs no operator secret.
 
 Implemented off-device: fixed-size signed records, public-only Python verifier,
 portable C authority gate, interactive encrypted-key tooling and allowlisted
-public-release packaging. No real signing/pairing secrets have been generated or
-provisioned. C signature/RNG callbacks now have real board implementations and
+public-release packaging. The owner has now created the local signing key and
+authorized private bench provisioning; see the board-integration report for
+deployment status. C signature/RNG callbacks have real board implementations and
 instruction-level tests. Do not treat emulation as a secure deployment.
 Corrupt provisioning must fail closed even when both application slots are invalid.
 

@@ -4,7 +4,7 @@ import subprocess
 
 import pytest
 
-from openpilot.tools.volt_gateway.test_white_board import IO, Registers
+from openpilot.tools.volt_gateway.test_white_board import IO, Registers, R32
 
 CSR, KR, PR, RLR, SR = 0x40023874, 0x40003000, 0x40003004, 0x40003008, 0x4000300c
 
@@ -108,3 +108,45 @@ def test_late_complete_epoch_cannot_rescue_stall(lib):
   lib.vgw_white_watchdog_progress(C.byref(state), 15)
   assert not lib.vgw_white_watchdog_service(C.byref(state), 251)
   assert feeds(regs)==1
+
+
+@pytest.mark.parametrize('delay', [1, 3, 20])
+def test_inherited_and_delayed_lsi_updates(lib, delay):
+  class AsynchronousRegisters(Registers):
+    def __init__(self):
+      super().__init__()
+      self.values.update({CSR:3,PR:6,RLR:4095})
+      self.busy=delay
+      self.pending={}
+      self.illegal_write=False
+      self.io.read32=R32(self.read)
+
+    def read(self, _, address):
+      if address==SR and self.busy:
+        self.busy-=1
+        return 3
+      if address in self.pending:
+        value,left=self.pending[address]
+        if left:
+          self.pending[address]=(value,left-1)
+        else:
+          self.values[address]=value
+          del self.pending[address]
+      return self.values.get(address,0)
+
+    def write(self, ctx, address, value):
+      if address in (PR,RLR):
+        self.writes.append((address,value))
+        if self.busy:
+          self.illegal_write=True
+          return
+        self.pending[address]=(value,delay)
+        return
+      super().write(ctx,address,value)
+
+  regs=AsynchronousRegisters()
+  state=State()
+  assert lib.vgw_white_watchdog_start(C.byref(state),C.byref(regs.io),0)
+  assert not regs.illegal_write and not regs.pending
+  assert regs.values[PR]==3 and regs.values[RLR]==1999
+  assert feeds(regs)==1 and not state.failed

@@ -30,7 +30,7 @@ def payload(raw: bytes, start: int, capacity: int) -> bytes:
   if vectors is None or vectors['sh_addr']!=start or symbols is None:
     raise ValueError('wrong image vector address or missing symbols')
   names={symbol.name for symbol in symbols.iter_symbols()}
-  if any(name.startswith(('vgw_test_','vgw_emu_','vgw_boot_emu_')) for name in names):
+  if any(name.startswith(('vgw_test_','vgw_emu_','vgw_boot_emu_','vgw_debug_')) for name in names):
     raise ValueError('test harness is not board firmware')
   if not {'vgw_loader_main','vgw_white_usb_init','vgw_white_physical_reset'}<=names:
     raise ValueError('required board/recovery implementation absent')

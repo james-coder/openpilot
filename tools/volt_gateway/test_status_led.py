@@ -29,7 +29,7 @@ def leds(tmp_path_factory):
   return lib
 
 
-@pytest.mark.parametrize('state,color', [(1, 2), (2, 4)])
+@pytest.mark.parametrize('state,color', [(1, 4), (2, 2)])
 @pytest.mark.parametrize('slot,count', [(0, 1), (1, 2), (255, 3)])
 def test_slot_pulses(leds, state, color, slot, count):
   s = Status()
@@ -70,9 +70,9 @@ def test_rollover_repeated_state_and_skipped_ticks(leds):
   assert s.since == start
   assert leds.vgw_led_sample(C.byref(s), (start + 350) & 0xffffffff) == 1
   assert leds.vgw_led_sample(C.byref(s), (start + 3999) & 0xffffffff) == 0
-  assert leds.vgw_led_sample(C.byref(s), (start + 8000) & 0xffffffff) == 4
+  assert leds.vgw_led_sample(C.byref(s), (start + 8000) & 0xffffffff) == 2
   assert not s.intro_active
-  assert leds.vgw_led_sample(C.byref(s), (start + 10) & 0xffffffff) == 4  # next full clock wrap, no intro replay
+  assert leds.vgw_led_sample(C.byref(s), (start + 10) & 0xffffffff) == 2  # next full clock wrap, no intro replay
 
 
 @pytest.mark.parametrize('slot,colors', [(0, [1, 2, 4]), (1, [1, 4, 2])])
@@ -102,7 +102,21 @@ def test_fault_recovery_update_preempt_intro(leds, state, code):
   assert leds.vgw_led_sample(C.byref(s), 100) == (4 if state == 4 else 1)
   leds.vgw_led_set(C.byref(s), 1, 0, 0, 200)
   assert not s.intro_active
-  assert leds.vgw_led_sample(C.byref(s), 200) == 2
+  assert leds.vgw_led_sample(C.byref(s), 200) == 4
+
+
+def test_probe_full_lifetime_one_rgb_cycle_then_spaced_blue_only(leds):
+  s=Status()
+  leds.vgw_led_init(C.byref(s),0)
+  leds.vgw_led_set(C.byref(s),11,255,0,0)
+  for t in range(130000):
+    if t<4000:
+      expected=[1,2,4][t//1000] if t<3000 and t%1000<800 else 0
+    else:
+      expected=4 if t%4000<150 else 0
+    leds.vgw_led_set(C.byref(s),11,255,0,t)
+    assert leds.vgw_led_sample(C.byref(s),t)==expected
+  assert s.intro_seen and not s.intro_active
 
 
 @pytest.mark.parametrize('state,slot,code', [(99, 0, 0), (1, 2, 0), (5, 0, 0), (5, 0, 10), (2, 0, 1)])

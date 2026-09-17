@@ -3,7 +3,7 @@
 This supersedes earlier component-only status, without superseding physical
 release gates or claiming vehicle validation.
 
-Final clean validation: **1590 passed, zero failures/skips**; lint, ARM/native
+Initial integrated validation: **1590 passed, zero failures/skips**; lint, ARM/native
 crypto/MCUboot, all three full board links and 19 selected GCC analyses passed.
 See [hashed validation evidence](evidence/volt-gateway/complete-board-20260916.json).
 This is distinct from the [actual RAM-only hardware probe](evidence/volt-gateway/ram-probe-20260916.json).
@@ -120,9 +120,12 @@ directly without flash or option-byte changes; no readout protection was bypasse
 
 ## Release boundaries
 
-No production signing/pairing keys have been created by the agent. Deployment
-requires owner-controlled keys, first-image signing, verified divider/routing,
-and validation of the new USB recovery/timing on this board. Hardware loader
+The owner subsequently generated the encrypted signing key locally and
+authorized local scripts to unlock it from an ignored, untracked, mode-0600
+`.env`. The agent generated the separate routine pairing material. Both remain
+in the ignored private directory; an encrypted, decrypt-verified backup exists
+outside this checkout on the host (not yet a separate-machine backup).
+Hardware loader
 write protection is not enabled: update API bounds are not hardware protection.
 No physical CAN peer is available; modeled recovery is not physical recovery.
 
@@ -130,7 +133,8 @@ Shared-bus CAN IDs and Tres safety compatibility remain independent gates.
 The bench provisioning tool does not select IDs. The adaptive transfer model
 is distinct from the driver's conservative 100-frame/s maximum, two-frame burst
 and 50% observed-window stop thresholds; it is not deployed adaptive control.
-No Panda was flashed. Production comma, Tres and driving software were untouched.
+The initial integration report preceded flashing; see subsequent bench evidence
+for device changes. Production comma, Tres and driving software were untouched.
 
 USB/CPU/peripheral simulation does not establish electrical behavior, physical
 power-loss recovery, silicon timing, installed wiring or automotive certification.
@@ -146,7 +150,10 @@ encrypted owner key once. Enter its passphrase only at the terminal prompt:
 
 The resulting private directory must be backed up encrypted off-device with
 decryption material kept separately. Do not send its contents or passphrase to
-chat. The agent has not generated production secrets or selected a passphrase.
+chat. The owner selected the signing-key passphrase. This bench workflow uses it
+only on this development host; it is not included in command arguments or Git.
+Interactive, nonpersistent entry on the comma is owner-permitted, but is not
+needed or implemented here; see the security document for that exposure tradeoff.
 
 The now-measured revision-C board supports the explicit `8862` divider choice.
 For USB-commanded bench discovery, `provisioning --swcan-controller 3

@@ -21,9 +21,19 @@ bool vgw_white_watchdog_start(vgw_white_watchdog *s, const vgw_white_mmio *io, u
   io->write32(io->ctx,KR,0xccccU); /* Start first: configuration stalls still reset. */
   s->started=true;
   io->write32(io->ctx,KR,0x5555U);
+  /* ROM/handoff may leave an LSI-domain update in flight. RM0430 requires
+   * PVU/RVU clear before changing PR/RLR, not only after the writes. */
+  if (!wait_bits(io,SR,3U,0)) return false;
   io->write32(io->ctx,PR,3U); /* /32 */
   io->write32(io->ctx,RLR,1999U);
-  if (!wait_bits(io,SR,3U,0) || io->read32(io->ctx,PR)!=3U || io->read32(io->ctx,RLR)!=1999U) return false;
+  /* Bound synchronization of both the status and actual readback. A single
+   * early SR==0 sample need not establish the requested values are visible. */
+  bool configured=false;
+  for (unsigned i=0;i<POLLS;i++) {
+    if (!(io->read32(io->ctx,SR)&3U) && io->read32(io->ctx,PR)==3U &&
+        io->read32(io->ctx,RLR)==1999U) { configured=true; break; }
+  }
+  if (!configured) return false;
   io->write32(io->ctx,KR,0xaaaaU);
   s->failed=false;
   return true;

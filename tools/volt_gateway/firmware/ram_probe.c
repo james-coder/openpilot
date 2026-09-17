@@ -25,6 +25,10 @@ unsigned vgw_ram_probe_report(uint8_t out[64]) {
   return 48;
 }
 void vgw_loader_main(void) {
+#ifdef VGW_PROBE_RECOVERY
+  extern void vgw_usb_recovery_window(void);
+  vgw_usb_recovery_window();
+#endif
   const vgw_white_mmio *io=vgw_white_physical_mmio();
   vgw_white_identity identity;
   bool identified=vgw_white_identify(io,&identity);
@@ -55,6 +59,9 @@ void vgw_loader_main(void) {
   if (!vgw_white_usb_init(&startup,false)) vgw_white_physical_reset();
   stage(6);
   uint32_t start=vgw_white_startup_now(&startup);
+  vgw_status_led indicator;
+  vgw_led_init(&indicator,start);
+  vgw_led_set(&indicator,VGW_LED_PROBE,255,0,start);
   for (;;) {
     uint32_t now=vgw_white_startup_now(&startup);
     silent.elapsed_ms=now;
@@ -62,7 +69,8 @@ void vgw_loader_main(void) {
     if (!vgw_white_safety_sample(&safety,now,&sampled,&allowed)) { stage(70); vgw_white_physical_reset(); }
     if (!vgw_white_usb_poll()) { stage(71); vgw_white_physical_reset(); }
     if ((uint32_t)(now-start)>=120000U) { stage(72); vgw_white_physical_reset(); }
-    /* RGB exercise without enabling a CAN transceiver. */
-    vgw_white_led(io,(uint8_t)(1U<<((now/800U)%3U)));
+    /* Same tested one-shot/gapped renderer as firmware, then blue idle.
+     * The probe has no selected application slot and enables no CAN PHY. */
+    vgw_white_led(io,vgw_led_sample(&indicator,now));
   }
 }

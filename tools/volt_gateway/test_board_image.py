@@ -9,7 +9,7 @@ from Crypto.PublicKey import ECC
 from elftools.elf.elffile import ELFFile
 import pytest
 from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_CODE, UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE
-from unicorn.arm_const import UC_CPU_ARM_CORTEX_M4, UC_ARM_REG_SP, UC_ARM_REG_PC, UC_ARM_REG_LR, UC_ARM_REG_R0
+from unicorn.arm_const import UC_CPU_ARM_CORTEX_M4, UC_ARM_REG_SP, UC_ARM_REG_PC, UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2
 
 from openpilot.tools.volt_gateway import bench_image, board_build, boot_image, provisioning, target_crypto
 from openpilot.tools.volt_gateway.test_white_can import BASES
@@ -104,7 +104,7 @@ def run(images,slot,*,confirmed=False):
     return struct.unpack('<I',cpu.mem_read(a,4))[0]
   def put(a,v):
     cpu.mem_write(a,struct.pack('<I',v))
-  put(0xe0042000,0x10000463)
+  put(0xe0042000,0x10006463)  # actual labeled Panda DBGMCU_IDCODE readback
   cpu.mem_write(0x1fff7a22,struct.pack('<H',1024))
   for a,v in [(0x40023800,3),(0x40023874,3),(0x40007004,0x4000),(0x50060804,1),(0x40023c10,0x80000000)]:
     put(a,v)
@@ -116,6 +116,11 @@ def run(images,slot,*,confirmed=False):
   entered=[]
   complete=[]
   watchdog=[]
+  # Independent LSI-domain visibility, including a ROM-inherited prescaler.
+  # These are bounded fault/timing scenarios, not cycle-accurate silicon.
+  iwdg_values={0x40003004:6,0x40003008:4095}
+  iwdg_pending={}
+  iwdg_busy=[3]
   usb_window=[True]
   def runtime_init(machine,address,size,data):
     usb_window[0]=False
@@ -144,7 +149,19 @@ def run(images,slot,*,confirmed=False):
   a=app['vgw_white_runtime_step']&~1
   cpu.hook_add(UC_HOOK_CODE,running,begin=a,end=a)
   def on_read(machine,access,a,size,value,data):
-    if a==0x40000024 and usb_window[0]:
+    if a==0x4000300c:
+      put(a,3 if iwdg_busy[0] else 0)
+      iwdg_busy[0]=max(0,iwdg_busy[0]-1)
+    elif a in iwdg_values:
+      if a in iwdg_pending:
+        requested,remaining=iwdg_pending[a]
+        if remaining:
+          iwdg_pending[a]=(requested,remaining-1)
+        else:
+          iwdg_values[a]=requested
+          del iwdg_pending[a]
+      put(a,iwdg_values[a])
+    elif a==0x40000024 and usb_window[0]:
       put(a,read(a)+1)
     elif a==0x50000010:
       put(a,0x80000000)  # AHB idle, bounded reset/flush completion
@@ -175,6 +192,9 @@ def run(images,slot,*,confirmed=False):
         guard_hooks.clear()
   unlock=[]
   def on_write(machine,access,a,size,value,data):
+    if a in iwdg_values:
+      assert not iwdg_busy[0], 'watchdog written while LSI update busy'
+      iwdg_pending[a]=(value,3)
     if a==0x50000014:
       put(a,read(a)&~value)
     if a in (0x40020018,0x40020418,0x40020818):
@@ -245,6 +265,14 @@ def test_actual_usb_setup_bulk_bounds_and_no_legacy_write(images):
   serial=setup(0x80,6,0x0303,length=50)
   assert serial[2:].decode('utf-16-le')==b'test-device!'.hex()
   assert setup(0xc0,0xd6)==b'voltgw-v1'
+  assert not any(name.startswith('vgw_debug_') for name in symbols)
+  cpu.mem_write(0x2001c400,b'KEEP')
+  cpu.mem_write(0x2001f000,struct.pack('<4sIII',b'VGM1',1,0x2001c400,0x12345678))
+  cpu.reg_write(UC_ARM_REG_R0,0x2001f000)
+  cpu.reg_write(UC_ARM_REG_R1,16)
+  cpu.reg_write(UC_ARM_REG_R2,1)
+  call('usb_cb_ep2_out')
+  assert cpu.mem_read(0x2001c400,4)==b'KEEP'  # DEBUG wire command has no authority in production
   assert setup(0xc0,0xc1)==b'\1'
   # Windows requests up to 255 bytes of BOS, whose actual size is exactly
   # one 64-byte packet. A terminating ZLP is mandatory; without it the real

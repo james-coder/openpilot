@@ -90,7 +90,7 @@ def build(checkout: Path,archive: Path,output: Path,*,usb_repository: Path | Non
                       '-Wl,-Map='+str(output/f'{name}.map'),*map(str,objects),str(entry),'-o',str(binary)],
                      check=True,capture_output=True,text=True)
       symbols=subprocess.check_output(['nm','--defined-only',str(binary)],text=True)
-      forbidden=('vgw_test_','vgw_emu_','vgw_boot_emu_','vgw_guard_test','mbedtls_ecdsa_sign')
+      forbidden=('vgw_test_','vgw_emu_','vgw_boot_emu_','vgw_debug_','vgw_guard_test','mbedtls_ecdsa_sign')
       if any(n in symbols for n in forbidden):
         raise ValueError('test/private-signing code in board image')
       report['images'][name]={'sha256':hashlib.sha256(binary.read_bytes()).hexdigest(),

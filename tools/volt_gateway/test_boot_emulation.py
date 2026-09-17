@@ -37,7 +37,7 @@ def test_actual_thumb_probe_and_confirmation(elf, key, slot):
   assert trial['probe'] == 0xa0 + slot
   assert trial['confirmed'] == 1
   assert trial['status'] == [1, slot, 0]
-  assert trial['led_rgb'] == 2
+  assert trial['led_rgb'] == 4
   reboot = execute(elf, key, trial['flash'])
   assert reboot['selected'] == slot
   assert reboot['probe'] == 0xa0 + slot
@@ -49,7 +49,7 @@ def test_arm_trial_reverts_without_confirmation(elf, key):
   trial = execute(elf, key, flash)
   assert trial['selected'] == 1 and trial['probe'] == 0xa1
   assert trial['status'] == [2, 1, 0]
-  assert trial['led_rgb'] == 4
+  assert trial['led_rgb'] == 2
   reboot = execute(elf, key, trial['flash'])
   assert reboot['selected'] == 0 and reboot['probe'] == 0xa0
   assert reboot['flash'][SLOTS[0]:SLOTS[1]] == a

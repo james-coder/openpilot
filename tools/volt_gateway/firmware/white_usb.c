@@ -19,6 +19,16 @@ static bool failed,owned,window,recover;
 static vgw_white_startup *startup;
 static vgw_recovery_link link;
 static uint8_t queue[16][8],head,tail,count;
+#ifdef DEBUG
+#include "debug_memory.h"
+static uint8_t debug_reply[16];
+static bool debug_pending;
+uint32_t vgw_debug_read32(uint32_t address) { return *(volatile uint32_t *)(uintptr_t)address; }
+void vgw_debug_write32(uint32_t address,uint32_t value) {
+  *(volatile uint32_t *)(uintptr_t)address=value;
+  __asm__ volatile("dsb" ::: "memory");
+}
+#endif
 int puts(const char *s) { (void)s; return 0; }
 void puth(unsigned int i) { (void)i; }
 void hexdump(const void *p,int n) { (void)p; (void)n; }
@@ -42,11 +52,15 @@ int usb_cb_control_msg(USB_Setup_TypeDef *p,uint8_t *out,int hardwired) {
   if (!hardwired || !p || !out) return 0;
 #ifdef VGW_RAM_PROBE
   extern unsigned vgw_ram_probe_report(uint8_t out[64]);
-  if (p->b.bmRequestType==0xc0 && p->b.bRequest==0xd0) return (int)vgw_ram_probe_report(out);
+  if (!window && p->b.bmRequestType==0xc0 && p->b.bRequest==0xd0) return (int)vgw_ram_probe_report(out);
 #endif
   if (p->b.bmRequestType==0xc0 && p->b.bRequest==0xd6) {
 #ifdef VGW_RAM_PROBE
-    const char *version="voltgw-RAM-PROBE-v1";
+#ifdef DEBUG
+    const char *version="voltgw-DEBUG-MEM-v1";
+#else
+    const char *version=window ? "voltgw-RAM-RECOVERY-v1" : "voltgw-RAM-PROBE-v1";
+#endif
 #else
     const char *version=window ? "voltgw-recovery-v1" : "voltgw-v1";
 #endif
@@ -60,20 +74,33 @@ int usb_cb_control_msg(USB_Setup_TypeDef *p,uint8_t *out,int hardwired) {
   return 0;
 }
 int usb_cb_ep1_in(uint8_t *out,int maximum,int hardwired) {
+#ifdef DEBUG
+  if (!hardwired || !out || maximum<16 || !debug_pending || window || failed) return 0;
+  memcpy(out,debug_reply,16); debug_pending=false; return 16;
+#else
   if (!hardwired || !out || maximum<8 || !count || window || failed) return 0;
   memcpy(out,queue[head],8); head=(uint8_t)((head+1U)%16U); count--; return 8;
+#endif
 }
 void usb_cb_ep2_out(uint8_t *data,int length,int hardwired) {
+#ifdef DEBUG
+  if (!hardwired || window || failed || debug_pending || length<0) return;
+  vgw_debug_memory(data,(size_t)length,debug_reply); debug_pending=true;
+#else
   if (!hardwired || window || failed || length<=0 || length>64 || (length&7)) return;
   uint32_t now=vgw_white_startup_now(startup);
   for (int off=0;off<length;off+=8)
     (void)vgw_recovery_link_feed(&link,0,false,false,data+off,8,now);
+#endif
 }
 void usb_cb_ep3_out(uint8_t *data,int length,int hardwired) { (void)data; (void)length; (void)hardwired; }
 bool vgw_white_usb_init(vgw_white_startup *s,bool recovery_window) {
   if (!s || !s->ready || (recovery_window && s->watchdog.started)) return false;
   startup=s; failed=false; owned=false; recover=false; window=recovery_window;
   head=tail=count=0;
+#ifdef DEBUG
+  debug_pending=false;
+#endif
   if (!vgw_recovery_link_init(&link,0)) return false;
   RCC->AHB1ENR|=7U;
   /* Preserve all CAN/ESP control pins. Only USB PA11/12 AF10 and USB power

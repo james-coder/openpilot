@@ -33,9 +33,9 @@ sequence. Fault-clearing does not replay an interrupted introduction.
 
 | Pattern | Meaning |
 | --- | --- |
-| Green, one short pulse every four seconds | Confirmed slot A selected |
-| Green, two short pulses every four seconds | Confirmed slot B selected |
-| Blue, one/two short pulses every four seconds | Unconfirmed trial in A/B |
+| Blue, one short pulse every four seconds | Confirmed slot A selected |
+| Blue, two short pulses every four seconds | Confirmed slot B selected |
+| Green, one/two short pulses every four seconds | Unconfirmed trial in A/B |
 | Green/blue, three short pulses | Corresponding state but slot unknown; not normal production operation |
 | Alternating blue/green, 500 ms each | Update receiving: a new chunk was accepted within 1.5 seconds |
 | Short blue pulse every two seconds | Update waiting for new data; duplicates do not count as progress |
@@ -48,8 +48,19 @@ sequence. Fault-clearing does not replay an interrupted introduction.
 
 Short pulses are 150 ms on/150 ms off. Fault codes have a long dark gap between
 groups, even at nine pulses. Count *within one group*, not across cycles.
-Green means verified/confirmed image metadata, **not** a complete health check,
+The confirmed-slot pattern means verified/confirmed image metadata, **not** a complete health check,
 CAN-transmission permission or proof that the gateway is safe to use on a car.
+
+The temporary SRAM-only probe now uses this same renderer, with a probe-specific
+state: R/G/B once with the same off intervals, followed by one short blue pulse
+every four seconds. It does not claim a selected application slot. The earlier
+probe's separate `now/800` color-cycling loop was a human-interface regression
+and has been removed. A 130-second waveform test verifies no repeated RGB cycle.
+This regression escaped because production-renderer tests did not exercise the
+probe's separate LED loop. The probe now calls the shared renderer rather than
+maintaining a second implementation. The test checks every millisecond, including
+off intervals and repeated status updates. It is software waveform evidence,
+not optical inspection of the physical LEDs or vehicle-safety validation.
 
 | Red pulses | Category | Current source |
 | --- | --- | --- |

@@ -60,3 +60,7 @@ Private evidence is under
 No CAN TX command was issued. This verifies flash contents and USB boot/capability,
 not physical HVAC operation or OBD-connected recovery. Existing regression suites
 passed 88 tests before deployment; no new experiment-specific test suite was added.
+An immediately following status session timed out during HELLO; a subsequent
+read-only retry succeeded without reset/replug. It reported idle, zero attempts,
+no vehicle inputs, TX not inhibited, and interlock not ready (expected with OBD
+disconnected). The transient HELLO timeout's cause is not established.

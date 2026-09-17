@@ -77,6 +77,14 @@ class Car:
 
     self.params = Params()
 
+    self.gateway_mailbox = None
+    if not REPLAY and os.environ.get('VOLTGW_OBJECT_PARKED_TRIAL') == '1':
+      try:
+        from openpilot.selfdrive.car.volt_gateway_mailbox import GatewayMailbox
+        self.gateway_mailbox = GatewayMailbox()
+      except Exception:
+        cloudlog.exception('Optional gateway mailbox unavailable')
+
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 
     is_release = self.params.get_bool("IsReleaseBranch")
@@ -304,6 +312,21 @@ class Car:
       self.controls_update(CS, self.sm['carControl'])
 
     self.initialized_prev = initialized
+    if self.gateway_mailbox is not None:
+      try:
+        config = self.CP.safetyConfigs[0]
+        safe = (initialized and not self.CP.passive and self.CP.carFingerprint == 'CHEVROLET_VOLT' and
+                config.safetyModel == car.CarParams.SafetyModel.gm and (config.safetyParam & 69) == 68 and
+                CS.canValid and str(CS.gearShifter) == 'park' and abs(CS.vEgo) < .01 and
+                self.sm.all_checks(['carControl', 'pandaStates']) and not self.sm['carControl'].enabled and
+                len(self.sm['pandaStates']) == 1 and not self.sm['pandaStates'][0].controlsAllowed)
+        gateway_frames = self.gateway_mailbox.step(safe)
+        if gateway_frames:
+          self.pm.send('sendcan', can_list_to_can_capnp(gateway_frames, msgtype='sendcan', valid=True))
+      except Exception:
+        # Optional gateway failure never disables the driving process or its watchdog.
+        self.gateway_mailbox = None
+        cloudlog.exception('Optional gateway mailbox disabled')
     self.CS_prev = CS
 
   def params_thread(self, evt):

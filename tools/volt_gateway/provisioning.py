@@ -19,6 +19,26 @@ from openpilot.tools.volt_gateway.operator import bounded_read, private_director
 LAYOUT = hashlib.sha256(b'VOLTGW-F413-v1:flash=1024K;ram=128K;loader=0:128K;provision=128K:128K;'+
                         b'A=256K:384K;B=640K:384K;header=512;trailer=64;direct-xip-revert').digest()
 
+OBJECT_REQUEST_ID = 0x6F0
+OBJECT_RESPONSE_ID = 0x6F1
+
+
+def object_trial_record(device: bytes, pairing: bytes, public: bytes, *, divider: int):
+  """Explicit parked-trial profile, never the CLI default; no vehicle actuation.
+
+  Physical CAN2 is Object, CAN3 is SWCAN. Preserve identity/secret/key across
+  the bench migration but bind sessions to a different policy hash.
+  """
+  record, credentials = passive_record(device, pairing, public, swcan=3, divider=divider)
+  record = bytearray(record)
+  mapping = bytes([3, 3, 2, 0, 0]) + struct.pack('>HHI', OBJECT_REQUEST_ID, OBJECT_RESPONSE_ID, divider)
+  policy = hashlib.sha256(b'VOLTGW-POLICY-v1:Object-parked-trial;no-vehicle-TX;'+mapping).digest()
+  record[52:84] = policy
+  record[239:252] = mapping
+  record[252:] = struct.pack('>I', zlib.crc32(record[:252]))
+  credentials['policy'] = policy.hex()
+  return bytes(record), credentials
+
 
 def passive_record(device: bytes, pairing: bytes, public: bytes, *, swcan: int, divider: int):
   if len(device)!=12 or not any(device) or len(pairing)!=32 or not any(pairing):

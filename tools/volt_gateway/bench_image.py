@@ -66,16 +66,20 @@ def payload(raw: bytes, start: int, capacity: int) -> bytes:
   return bytes(result)
 
 
-def assemble(loader: bytes, applications: tuple[bytes,bytes], record: bytes, key) -> bytes:
+def assemble(loader: bytes, applications: tuple[bytes,bytes], record: bytes, key, *, object_parked_trial=False) -> bytes:
   if len(record)!=256 or record[:8]!=b'VGWCFG1\0' or zlib.crc32(record[:252])!=int.from_bytes(record[252:],'big'):
     raise ValueError('provisioning CRC/layout')
   public=key.public_key().export_key(format='DER')
   if record[148:239]!=public or not key.has_private() or record[20:52]!=provisioning.LAYOUT:
     raise ValueError('signer/provisioning/layout mismatch')
-  expected,_=provisioning.passive_record(record[8:20],record[116:148],public,
-    swcan=record[239],divider=int.from_bytes(record[248:252],'big'))
+  if object_parked_trial:
+    expected,_=provisioning.object_trial_record(record[8:20],record[116:148],public,
+      divider=int.from_bytes(record[248:252],'big'))
+  else:
+    expected,_=provisioning.passive_record(record[8:20],record[116:148],public,
+      swcan=record[239],divider=int.from_bytes(record[248:252],'big'))
   if record!=expected:
-    raise ValueError('first bench image must use canonical all-CAN-listen-only provisioning')
+    raise ValueError('bench image must use the explicitly selected canonical provisioning profile')
   if not 472<=len(loader)<=0x20000 or len(applications)!=2:
     raise ValueError('loader/application bounds')
   sp,entry=struct.unpack_from('<II',loader)

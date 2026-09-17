@@ -1,4 +1,21 @@
-# CAN-ID selection — no IDs approved
+# CAN-ID selection — two IDs selected for a bounded parked trial
+
+## Owner-approved trial, 2026-09-17 UTC
+
+Selected standard IDs: `0x6F0` host request, `0x6F1` White response, Object bus
+only (Tres logical bus 1 / White physical CAN2). Owner approved these candidates
+after reviewing the evidence below. This supersedes the earlier deferred trial
+decision, not the remaining production coverage gaps. No third ID is enabled.
+
+The trial is an authenticated status exchange, not vehicle control. Primary TX
+requires explicit GM safety flag 64, ASCM+EV configuration, fresh stationary
+wheel-speed evidence, controls disallowed, Classic standard DLC8 framing and a
+10 ms minimum TX interval. Host additionally requires Park and a finite 60 s /
+512-frame budget. White uses its existing fixed-ID, bounded response path;
+vehicle-side write rules remain empty. Both IDs have low arbitration priority,
+but still occupy bus time when transmitting. Removal of the trial environment
+opt-in and restart returns the host to no gateway TX permission. White's saved
+CAN-silent full readback is the bench rollback.
 
 ## Additional screening, 2026-09-17 UTC
 

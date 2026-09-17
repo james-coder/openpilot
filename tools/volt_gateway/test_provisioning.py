@@ -5,8 +5,19 @@ from Crypto.PublicKey import ECC
 import pytest
 
 from openpilot.tools.volt_gateway.provisioning import passive_record, LAYOUT
+from openpilot.tools.volt_gateway.provisioning import object_trial_record
 from openpilot.tools.volt_gateway.release import reject_secret
 from openpilot.tools.volt_gateway.authority import AuthorityError
+
+
+def test_object_trial_exact_mapping_and_policy_separation():
+  public = ECC.generate(curve='P-256').public_key().export_key(format='DER')
+  old, old_keys = passive_record(b'device-test!', b'p'*32, public, swcan=3, divider=8862)
+  new, keys = object_trial_record(b'device-test!', b'p'*32, public, divider=8862)
+  assert new[:52] == old[:52] and new[84:239] == old[84:239]
+  assert keys['pairing'] == old_keys['pairing'] and keys['policy'] != old_keys['policy']
+  assert new[239:248] == bytes.fromhex('03 03 02 00 00 06 f0 06 f1')
+  assert struct.unpack('>I', new[252:])[0] == zlib.crc32(new[:252])
 
 
 @pytest.mark.parametrize('swcan',[2,3])

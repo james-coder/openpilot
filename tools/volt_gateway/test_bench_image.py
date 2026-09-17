@@ -55,3 +55,18 @@ def test_wrong_signer_slot_or_loader_rejected():
     bench_image.assemble(loader,apps[::-1],record,key)
   with pytest.raises(ValueError):
     bench_image.assemble(b'\0'*512,apps,record,key)
+
+
+def test_object_profile_requires_explicit_selection_and_exact_ids():
+  key, old, loader, apps = fixtures()
+  record, _ = provisioning.object_trial_record(old[8:20], old[116:148], key.public_key().export_key(format='DER'), divider=8862)
+  with pytest.raises(ValueError):
+    bench_image.assemble(loader, apps, record, key)
+  image = bench_image.assemble(loader, apps, record, key, object_parked_trial=True)
+  assert image[0x20000:0x20100] == record
+  for offset in (239, 240, 241, 242, 243, 244, 245, 246, 247):
+    changed = bytearray(record)
+    changed[offset] ^= 1
+    changed[252:] = struct.pack('>I', zlib.crc32(changed[:252]))
+    with pytest.raises(ValueError):
+      bench_image.assemble(loader, apps, bytes(changed), key, object_parked_trial=True)

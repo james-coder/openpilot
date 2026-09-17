@@ -1,5 +1,36 @@
 # Parked HVAC experiment, 2026-09-17
 
+## Configurable USB candidate 1: ODI event
+
+After installing the configurable SWCAN image, the owner explicitly requested
+one `0x10AC0099` extended DLC4 frame, payload `000e0700`, while watching the
+screen/LED. Fresh Park/RUN/zero-speed inputs were present (ages80/76/16ms).
+Authenticated opcode21 accepted it; state reached done, attempts1. SWCAN TX
+counter rose0 to1; RX rose from0x67e6 to0x6bba; overflow,
+malformed, arbitration-loss, TX-error, and ESR fields remained zero.
+During five seconds afterward, the subscribed stream returned two
+`0x10AD6080` frames containing `0a07070200000000`, at MCU times156305000 and
+156335000us. No subscribed `0x10B02099` recirc-state report was captured in the
+two-second before/five-second after windows. Host observation drops were zero.
+Those clear messages do not prove causation or recirculation movement. Awaiting
+owner observation; no second candidate or repeat was sent.
+
+Owner then reported candidate 1 made the infotainment display show recirc while
+the physical button still indicated outside air. This supports display/event
+behavior, not successful recirculation actuation.
+
+## Candidate 2: attempted three-second action pair
+
+Owner requested candidate 2. Fresh interlock inputs were37/14/51ms old. The
+first `0x10AD6080` DLC8 `0a0707022b000000` request was accepted (attempts2),
+but the state had faulted before the planned release at three seconds. The host
+therefore did **not** send `0a07070200000000`. Subsequent SWCAN counters still
+showed transmitted1 (the candidate1 frame only), malformed0, overflow0,
+arbitration_lost0, tx_errors0, ESR0. This does not confirm successful wire
+transmission of candidate2. The fault reason is not distinguished by the current
+status record; do not infer bus collision, timeout, or vehicle rejection from it.
+No automatic reset or retry was performed.
+
 ## Latest physical result: first completed TX pair, hvac05
 
 On September17, with OBD/USB connected and fresh Park/RUN/zero-speed evidence,

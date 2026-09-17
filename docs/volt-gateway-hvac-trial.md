@@ -95,3 +95,18 @@ overflow is not yet conclusively localized or the fix vehicle-verified.
 Candidate build `hvac-trial-20260917-02` and signed private `bench-hvac02`
 prepared against the exact hvac01 readback. Deployment still requires entry
 into the installed cold recovery loader; preparation is not a successful flash.
+
+## hvac02 physical deployment
+
+With OBD disconnected as confirmed by the user, the armed USB recovery listener
+and automatic DFU watcher captured ROM enumeration. Full live predecessor
+matched hvac01, then hvac02 programmed successfully. Full1MiB readback SHA256:
+`4a5c71d7379eacbe1b60eaeb46eb2a3e72e91248a5a7f8773532a13c82e49021`.
+Evidence: private `flashing/370022000651363038363036-20260916/hvac02`.
+The first automatic USB reattach was too early; subsequent software reattach
+succeeded without another physical replug. Running slot A build was checked
+against the prepared ELF identity and matched exactly:
+`240e6b7f86fb5d3cb7ef1eb2af50344b09b3b424e214c31d5fbe005345cf4849`.
+Indicators running/error none; capabilities127; experimental TX policy1;
+HVAC idle/attempts0/interlock false on USB only. This confirms installation
+of the startup fix plus bounded HVAC TX support, not successful vehicle TX.

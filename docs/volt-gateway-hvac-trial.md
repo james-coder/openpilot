@@ -69,6 +69,39 @@ arbitration_lost/tx_errors/ESR remained zero (SWCAN error-accounting limitations
 still apply). No resets, flashes, retries, or subscriptions were used. Physical
 HVAC effects await owner observation.
 
+Owner reported no visible effect from either candidate3 value. Both had confirmed
+TX completion, so that particular guessed address/payload combination produced
+no observed result; it does not disprove the entire0x22D family.
+
+## Follow-up source research
+
+- A Foxwell GM NT530 coverage matrix explicitly lists **Chevrolet / Volt / 2017 /
+  HVAC Control Module / Control Functions / Air Recirculation Functions**. This
+  is a materially stronger lead toward diagnostic actuator control than another
+  guessed broadcast. It is a vendor capability claim, not a capture or command
+  definition; request IDs, services, parameters and prerequisites remain unknown.
+  Source: https://assets.bucketcdn.com/Producten/Foxwell/Foxwell-NT530-GM/Foxwell-NT530-GM-functielijst.pdf
+- OVMS `va_ac_preheat.cpp` controls remote preconditioning, not an independently
+  selectable recirc command. Do not substitute its preheat/BCM-override commands.
+  Source: https://github.com/openvehicles/Open-Vehicle-Monitoring-System-3/blob/master/vehicle/OVMS.V3/components/vehicle_voltampera/src/va_ac_preheat.cpp
+- An author's2007 Holden conversion report supplies an actual HVAC control
+  frame at0x100E2080, but only A/C on/off—not recirc—and on another architecture.
+  This is not evidence to transmit that frame on the2017 Volt.
+  Source: https://pcmhacking.net/forums/viewtopic.php?p=137969
+- Brenden McGraw-Hobbs's Gen1 button/LIN worksheet contains decoded temperature,
+  fan and defrost actions and10400baud/even-parity notes, but no recirc entry in
+  the retrieved sheet. Not verified for the2017 panel.
+  Source: https://docs.google.com/spreadsheets/d/1jGWf839HgI7lP6Ki1gRvGqcJc6cptSvAaYpQ5SxeIF8/edit
+- The separate2017 Volt reverse-engineering project reports no successful cabin
+  temperature setting via replay and does not publish recirc control. It does
+  not prove that such control is impossible.
+  Source: https://github.com/lululombard/Chevrolet-Volt-Hacking
+
+No transmissions, reset, device configuration changes or new verified recirc
+command resulted from this research pass. Most decisive next evidence would be
+a capture of the listed HVAC diagnostic recirculation function, including entry,
+commands, responses, keepalive and return-to-normal—not just its visible result.
+
 ## Latest physical result: first completed TX pair, hvac05
 
 On September17, with OBD/USB connected and fresh Park/RUN/zero-speed evidence,

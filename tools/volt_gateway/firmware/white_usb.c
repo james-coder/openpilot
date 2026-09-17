@@ -52,6 +52,9 @@ static void vgw_usb_probe_setup(const USB_Setup_TypeDef *p) {
 }
 #endif
 #include "drivers/usb.h"
+#ifdef VGW_BOARD_USB
+#include "usb_recovery_intent.h"
+#endif
 
 void usb_cb_enumeration_complete(void) { owned=true; }
 int usb_cb_control_msg(USB_Setup_TypeDef *p,uint8_t *out,int hardwired) {
@@ -73,6 +76,11 @@ int usb_cb_control_msg(USB_Setup_TypeDef *p,uint8_t *out,int hardwired) {
     size_t n=strlen(version); memcpy(out,version,n); return (int)n;
   }
   if (p->b.bmRequestType==0xc0 && p->b.bRequest==0xc1) { out[0]=1; return 1; }
+#ifdef VGW_BOARD_USB
+  if (p->b.bmRequestType==0xc0 && p->b.bRequest==0xd8 &&
+      p->b.wValue.w==0 && p->b.wIndex.w==0 && p->b.wLength.w==16 && startup)
+    return (int)vgw_usb_recovery_report(&startup->watchdog.io,out);
+#endif
   /* Bounded, non-secret local observation only. In particular this does not
    * open/refresh a session, which would hide an idle/expiry indication bug. */
   if (!window && indicator_valid && p->b.bmRequestType==0xc0 && p->b.bRequest==0xd7 &&

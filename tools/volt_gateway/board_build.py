@@ -28,7 +28,7 @@ def linker(origin,length):
   return template.replace('/* NEVER FLASH: reset mechanics harness, not a complete trusted loader. */',
                           '/* Board composition: release gates still apply. */').replace(
                             'ORIGIN = 0x08000000, LENGTH = 256K',f'ORIGIN = {origin:#x}, LENGTH = {length}').replace(
-                              '__bss_end <= __stack_top - 8192','__bss_end <= 0x2001bfe0')
+                              '__bss_end <= __stack_top - 8192','__bss_end <= 0x2001bfc0')
 
 
 def build(checkout: Path,archive: Path,output: Path,*,usb_repository: Path | None=None,hvac_experiment=False):

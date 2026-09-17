@@ -21,6 +21,24 @@ OBD-connected recovery/program/readback/return test.
 
 ## Completed USB-only software reflash proof
 
+### Prepared follow-up, not deployed
+
+Candidate `hvac-trial-20260917-06` restores historical revC USB client-switch
+setup (PA13 high/PB2 low) on direct ROM entry. The existing direct path skips
+`vgw_white_usb_init`, which normally performs that setup. This is a concrete
+initialization omission, **not a proven root cause** of the OBD-dependent reset;
+the cold-window path already performs it and also failed with OBD attached.
+No claim that this candidate alone fixes every observed recovery failure.
+
+It adds fixed non-secret SRAM breadcrumbs at0x2001bfc0, with linker reservation,
+and read-only USB request0xD8 (`device_cli recovery-diagnostics`): request,
+intent written, loader entry, consumed, client ready, PHY quiesced, ROM branch.
+The last stage survives software reset; reset/CFSR fields are current register
+values, not a historical fault dump. No arbitrary memory access is exposed.
+27 focused native/host tests and two whole-linked-ARM recovery tests passed;
+loader/A/B builds succeeded. Real OBD-connected recovery remains unvalidated.
+This work was paused when the owner requested the already-installed HVAC trial.
+
 Subsequent OBD-connected attempt **failed before programming**. Fresh HVAC
 status showed seen/safe masks7 and input ages84/22/60ms (Park/RUN/zero-speed
 inputs). Authenticated software recovery was accepted, but ROM DFU did not

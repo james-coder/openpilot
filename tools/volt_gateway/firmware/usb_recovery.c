@@ -10,9 +10,12 @@ __attribute__((naked,noreturn)) static void enter_rom(uint32_t stack __attribute
 /* Local USB cold-start recovery only; never reachable through CAN messages. */
 void vgw_usb_recovery_window(void) {
   const vgw_white_mmio *io=vgw_white_physical_mmio();
+  if (vgw_usb_recovery_present(io)) vgw_usb_recovery_trace(io,3);
   if (!vgw_white_startup_usb_only(&recovery_startup,io) ||
       !vgw_white_clock_usb_only(&recovery_clock,&recovery_startup)) vgw_white_physical_reset();
   bool requested=vgw_usb_recovery_take(io);
+  if (requested) vgw_usb_recovery_trace(io,4);
+  if (!vgw_usb_recovery_client(io)) vgw_white_physical_reset();
   bool direct=requested;
   /* A software request enters ROM directly after reset, before watchdog/CAN
    * startup. No ten-second enumeration race and no inherited running IWDG. */
@@ -25,6 +28,7 @@ void vgw_usb_recovery_window(void) {
   }
   if (!direct) vgw_white_usb_stop();
   if (!requested) return;
+  vgw_usb_recovery_trace(io,5);
   /* Exact historical White ROM entry, not a request-supplied address. The
    * read-only vector check is necessary but not hardware validation. */
   const uint32_t *rom=(const uint32_t *)0x1fff0000U;
@@ -32,6 +36,7 @@ void vgw_usb_recovery_window(void) {
   bool address=(pc>=0x1fff0001U && pc<0x1fff7800U) || (pc>=0x1ff00001U && pc<0x1ff0f000U);
   if ((sp&7) || sp<=0x20000000U || sp>0x20020000U || !(pc&1U) || !address) vgw_white_physical_reset();
   if (!vgw_white_quiesce(io)) vgw_white_physical_reset();
+  vgw_usb_recovery_trace(io,6);
   /* Return the clock tree to reset-like HSI before the ROM takes ownership. */
   io->write32(io->ctx,0x40023800U,io->read32(io->ctx,0x40023800U)|1U);
   io->write32(io->ctx,0x40023808U,0);
@@ -45,5 +50,6 @@ void vgw_usb_recovery_window(void) {
     io->write32(io->ctx,0xe000e280U+4*i,0xffffffffU);
   }
   io->write32(io->ctx,0xe000ed08U,0x1fff0000U);
+  vgw_usb_recovery_trace(io,7);
   enter_rom(sp,pc);
 }

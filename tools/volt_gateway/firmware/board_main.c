@@ -35,6 +35,7 @@ static uint64_t live_now(void) {
 static bool request_usb_recovery(void *ctx) {
   (void)ctx;
   if (usb_recovery_at) return false;
+  vgw_usb_recovery_trace(vgw_white_physical_mmio(),1);
   usb_recovery_at=live_now()+250U;
   return true;
 }
@@ -45,6 +46,7 @@ static bool usb_recovery_pending(void) { return usb_recovery_at!=0; }
 static __attribute__((noinline)) void service_usb_recovery(const vgw_white_mmio *io) {
   if (usb_recovery_at && live_now()>=usb_recovery_at) {
     if (!vgw_usb_recovery_mark(io)) vgw_white_physical_reset();
+    vgw_usb_recovery_trace(io,2);
     vgw_white_physical_reset();
   }
 }

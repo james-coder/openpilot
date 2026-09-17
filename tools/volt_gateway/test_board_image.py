@@ -415,6 +415,11 @@ def run(images,slot,*,confirmed=False,busy_traffic=False,rom_recovery=False):
     assert read(0x40020414)&0xc000==0  # SWCAN PHY asleep
     assert read(0x40020814)&0x2002==0x2002  # CAN1/CAN2 PHY disabled
     assert read(0x40020014)&1==1  # CAN3 differential PHY disabled
+    assert read(0x40020014)&(1<<13)  # USB client switch must not depend on enumeration
+    assert read(0x40020414)&4==0
+    assert read(0x40020000)&(3<<26)==1<<26
+    assert read(0x40020400)&(3<<4)==1<<4
+    assert read(0x2001bfc4)==7  # fixed ROM branch reached
     assert read(0x40023820)&(7<<25)==7<<25
     assert cpu.reg_read(UC_ARM_REG_SP)==0x2001f000
     assert read(0xe000ed08)==0x1fff0000

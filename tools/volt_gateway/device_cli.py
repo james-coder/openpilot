@@ -20,6 +20,18 @@ LED_STATES=('boot','running','trial','recovery','update','fault','update_wait','
             'update_commit','update_ready','update_erase','probe','rx_degraded')
 LED_ERRORS=('none','no_image','image_policy','storage','configuration','can','watchdog','crypto','internal','update_aborted')
 PEER_STATES=('disabled','local_usb_owner','awaiting_authenticated_peer','authenticated','stale')
+RECOVERY_PHASES=('unavailable','requested','intent_written','loader_entered',
+                 'intent_consumed','usb_client_ready','phys_quiesced','rom_branch')
+
+
+def recovery_diagnostics(data):
+  if len(data)!=16:
+    raise ProtocolError('recovery diagnostics unsupported or malformed')
+  version,phase,reset,cfsr=struct.unpack('>4I',data)
+  if version!=1 or phase>=len(RECOVERY_PHASES):
+    raise ProtocolError('incompatible recovery diagnostics')
+  return {'phase':RECOVERY_PHASES[phase],'phase_code':phase,'current_reset_flags':hex(reset),
+          'current_cfsr':hex(cfsr),'note':'persistent last-attempt stage; registers are current, not a saved fault dump'}
 
 
 def hvac_status(data):
@@ -145,7 +157,7 @@ def main():
   parser=argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--pairing',type=Path,required=True)
   parser.add_argument('command',choices=['info','status','indicators','buses','utilization','rx-health','clear-ids','observe','ids','capture','rules','subscribe',
-                                        'hvac-trial-status','hvac-button-trial','parked-gateway-reboot','usb-recovery'])
+                                        'hvac-trial-status','hvac-button-trial','parked-gateway-reboot','usb-recovery','recovery-diagnostics'])
   parser.add_argument('--bus',type=int,choices=[0,1,2,3],default=3,help='HSCAN CAN1=0, CAN2=1, CAN3=2; SWCAN=3 regardless of mux')
   parser.add_argument('--seconds',type=int,default=30)
   parser.add_argument('--id',type=lambda x:int(x,0))
@@ -158,6 +170,9 @@ def main():
     parser.error('valid --id required')
   keys=credentials(args.pairing)
   with UsbTransport(keys['device'].hex()) as transport:
+    if args.command=='recovery-diagnostics':
+      print(json.dumps(recovery_diagnostics(bytes(transport.handle.controlRead(0xc0,0xd8,0,0,16,timeout=1000)))))
+      return
     if args.command=='indicators':
       print(json.dumps(indicators(bytes(transport.handle.controlRead(0xc0,0xd7,0,0,7,timeout=1000)))))
       return  # Do not open a session just to inspect its closed/expired state.

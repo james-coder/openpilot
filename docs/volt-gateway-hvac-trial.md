@@ -64,3 +64,20 @@ zero attempts, interlock false as expected without the vehicle connected.
 All three bus reports showed zero RX/TX/errors/overflows/software drops.
 Only read-only queries were issued; op17 was not sent. Physical HVAC actuation
 and in-vehicle behavior remain unverified. No production Tres change was made.
+
+## First vehicle connection: trial blocked, no actuation
+
+After reconnecting OBD, Windows still enumerated the Panda but WSL required
+software USB reattachment. Authenticated queries reported `rx_degraded` and
+one Powertrain hardware FIFO overflow, already present at the first sample.
+Its occurrence time/cause is unknown; it must not be attributed to the connector
+or boot without further evidence. Over the following ~20s the count remained1.
+Object/SWCAN hardware overflows, all software drops, and all TX counters were0.
+RX increased on all three buses. Queue peaks were24/22/2, maximum ages5/6/6ms.
+HVAC status remained idle/attempts0/interlock false. Host did not issue op17.
+
+The existing global TX-inhibit latch also prevents the physical safety gate
+from granting permission. Installed application has no software reboot or
+clear-latch operation; authenticated session close does not reset the device.
+No intentional crash, malformed command, or bypass was attempted. This trial
+does not establish whether the captured action controls recirculation.

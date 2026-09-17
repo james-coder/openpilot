@@ -62,7 +62,8 @@ def context_value(pid, data):
 
 
 class GmDiagnosticScanner:
-  def __init__(self):
+  def __init__(self, queries=CONTEXT_QUERIES):
+    self.queries = queries
     self.active = False
     self.revision = 0
     self.report = None
@@ -131,10 +132,10 @@ class GmDiagnosticScanner:
 
   def _next(self, now):
     self._stage += 1
-    if self._stage >= len(CONTEXT_QUERIES):
+    if self._stage >= len(self.queries):
       self._finish()
       return
-    service, pid = CONTEXT_QUERIES[self._stage]
+    service, pid = self.queries[self._stage]
     self._key = f'{service:02X}:{pid:02X}'
     self.status['context'][self._key] = {'state': 'timeout', 'error': 'No response; not assumed unsupported'}
     self.status.update(progress=self._stage + 1, message=f'Reading {"freeze frame" if service == 2 else "parked snapshot"}: {PIDS[pid][0]}')
@@ -146,7 +147,7 @@ class GmDiagnosticScanner:
     result = self.status['context'][self._key]
     if result['state'] != 'timeout':
       return
-    service, pid = CONTEXT_QUERIES[self._stage]
+    service, pid = self.queries[self._stage]
     if len(data) != 8 or not 1 <= data[0] <= 7:
       return
     reply = data[1:1 + data[0]]
@@ -180,7 +181,7 @@ class GmDiagnosticScanner:
     success = any(m['state'] == 'ok' or m['codes'] for m in modules.values()) or any(r['state'] == 'ok' for r in self.status['context'].values())
     # A broadcast cannot establish a complete inventory of the vehicle.
     self.status.update(state='partial' if success else 'error', message='GM scan finished; see coverage and unread items below.',
-                       progress=len(CONTEXT_QUERIES) + 1)
+                       progress=len(self.queries) + 1)
     if success:
       self.report = copy.deepcopy(self.status)
     self.revision += 1

@@ -73,7 +73,7 @@ class PrimeState:
     from openpilot.selfdrive.ui.ui_state import ui_state, device
     while self._running:
       if not ui_state.started and device._awake:
-        self._poller.poll(self._fetch_prime_status, int(ui_state.sm['deviceState'].networkType))
+        self._poller.poll(self._fetch_prime_status, ui_state.sm['deviceState'].networkType.raw)
 
       for _ in range(int(self.FETCH_INTERVAL / self.SLEEP_INTERVAL)):
         if not self._running:

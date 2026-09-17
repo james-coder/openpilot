@@ -22,6 +22,10 @@ def logging(started: bool, params: Params, CP: car.CarParams) -> bool:
   run = (not CP.notCar) or not params.get_bool("DisableLogging")
   return started and run
 
+def volt_trip_logging(started: bool, params: Params, CP: car.CarParams) -> bool:
+  from opendbc.car.gm.values import CAR
+  return logging(started, params, CP) and CP.carFingerprint == CAR.CHEVROLET_VOLT and not CP.passive
+
 def ublox_available() -> bool:
   return os.path.exists('/dev/ttyHS0') and not os.path.exists('/persist/comma/use-quectel-gps')
 
@@ -68,6 +72,7 @@ procs = [
   DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
 
   NativeProcess("loggerd", "system/loggerd", ["./loggerd"], logging),
+  PythonProcess("gmtripd", "selfdrive.car.gm_trip_monitor", volt_trip_logging),
   NativeProcess("encoderd", "system/loggerd", ["./encoderd"], only_onroad),
   NativeProcess("stream_encoderd", "system/loggerd", ["./encoderd", "--stream"], notcar),
   PythonProcess("logmessaged", "system.logmessaged", always_run),

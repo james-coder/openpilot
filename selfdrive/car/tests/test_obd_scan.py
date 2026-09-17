@@ -264,6 +264,7 @@ class TestObdController:
 
     CP = CarInterface.get_params(CAR.CHEVROLET_VOLT, defaultdict(dict), [], False, False, False)
     assert CP.safetyConfigs[0].safetyParam & 8
+    assert CP.safetyConfigs[0].safetyParam & 32
     self.controller = ObdScanController(CP, self.params)
     self.CS = car.CarState.new_message(canValid=True, gearShifter='park', vEgo=0.)
     self.sm['carControl'] = car.CarControl.new_message(enabled=False)

@@ -96,3 +96,33 @@ def test_gm_panel_uses_separate_saved_report_and_firmware_gate(layout):
   assert not layout._faulted
   layout._request()
   assert layout._params.put.call_args.args[1]['command'] == 'scan_gm'
+
+
+def test_egr_only_results_remain_visible_and_cancellable(layout):
+  from openpilot.selfdrive.ui.layouts.settings.gm_diagnostics import GmDiagnosticsLayout
+  from openpilot.selfdrive.car.tests.test_gm_egr import simulate
+  layout.__class__ = GmDiagnosticsLayout
+  report = simulate()[0].report
+  report.update(state='scanning', updated_mono=100., modules={}, context={}, emissions={})
+  panel.ui_state.sm['pandaStates'][0].safetyParam = 60
+  layout._params.get.side_effect = lambda key: report if key == 'GmScanStatus' else None
+  layout._update_state()
+  assert layout._active and layout._report == report and not layout._faulted
+  layout._request()
+  assert layout._params.put.call_args.args[1]['command'] == 'cancel'
+
+
+def test_egr_log_panel_requires_existing_egr_flag_and_queues_bounded_log(layout):
+  from openpilot.selfdrive.ui.layouts.settings.gm_diagnostics import GmEgrLogLayout
+  layout.__class__ = GmEgrLogLayout
+  panel.ui_state.sm['pandaStates'][0].safetyParam = 28
+  layout._update_state()
+  assert layout._reason
+  panel.ui_state.sm['pandaStates'][0].safetyParam = 60
+  layout._last_poll = 0.
+  layout._update_state()
+  assert not layout._reason and not layout._faulted
+  layout._request()
+  assert layout._params.put.call_args.args[1]['command'] == 'log_egr'
+  layout._request()
+  assert layout._params.put.call_args.args[1]['command'] == 'cancel'

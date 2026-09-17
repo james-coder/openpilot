@@ -23,12 +23,12 @@ PEER_STATES=('disabled','local_usb_owner','awaiting_authenticated_peer','authent
 
 
 def hvac_status(data):
-  if not ((len(data)==4 and data[0]==1) or (len(data)==21 and data[0]==2)) or data[1]>5:
+  if not ((len(data)==4 and data[0]==1) or (len(data)==21 and data[0] in (2,3))) or data[1]>5:
     raise ProtocolError('invalid HVAC trial status')
   result={'state':('idle','press_pending','release_wait','release_pending','done','fault')[data[1]],
           'attempts':data[2],'interlock_ready':bool(data[3]),
           'note':'CAN completion is not proof of recirculation actuation'}
-  if data[0]==2:
+  if data[0] in (2,3):
     result.update(seen_mask=data[4],safe_mask=data[5],sampler_ready=bool(data[6]),power_valid=bool(data[7]),
                   stable=bool(data[8]),tx_inhibited=bool(data[9]),session_enabled=bool(data[10]),
                   voltage_mv=int.from_bytes(data[11:15],'big'),
@@ -145,7 +145,7 @@ def main():
   parser=argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--pairing',type=Path,required=True)
   parser.add_argument('command',choices=['info','status','indicators','buses','utilization','rx-health','clear-ids','observe','ids','capture','rules','subscribe',
-                                        'hvac-trial-status','hvac-button-trial','parked-gateway-reboot'])
+                                        'hvac-trial-status','hvac-button-trial','parked-gateway-reboot','usb-recovery'])
   parser.add_argument('--bus',type=int,choices=[0,1,2,3],default=3,help='HSCAN CAN1=0, CAN2=1, CAN3=2; SWCAN=3 regardless of mux')
   parser.add_argument('--seconds',type=int,default=30)
   parser.add_argument('--id',type=lambda x:int(x,0))
@@ -214,13 +214,20 @@ def main():
           print('Vehicle-side TX policy: no permitted messages.')
         else:
           raise ProtocolError('unexpected write policy')
+      elif args.command=='usb-recovery':
+        info=device.command(1)
+        if len(info)!=46 or info[0]!=1 or not int.from_bytes(info[2:6],'big')&128:
+          raise ProtocolError('software USB recovery not supported by installed firmware')
+        device.command(20)
+        reboot_requested=True
+        print('Authenticated USB recovery requested. CAN transceivers are quiesced on reset; no flash writes requested.')
       elif args.command in ('hvac-trial-status','hvac-button-trial','parked-gateway-reboot'):
         info=device.command(1)
         if len(info)!=46 or info[0]!=1 or not int.from_bytes(info[2:6],'big')&64:
           raise ProtocolError('experimental HVAC capability absent')
         status=device.command(18)
         if args.command=='parked-gateway-reboot':
-          if len(status)!=21 or status[0]!=2:
+          if len(status)!=21 or status[0] not in (2,3):
             raise ProtocolError('parked reboot not supported by this firmware')
           device.command(19)
           reboot_requested=True

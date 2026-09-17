@@ -3,6 +3,7 @@
 #include "status_led.h"
 #include "boot_trace.h"
 #include <string.h>
+#include "usb_recovery_intent.h"
 #if defined(VGW_HVAC_EXPERIMENT) && defined(VGW_APPLICATION_SLOT)
 #include "hvac_trial.h"
 static vgw_hvac_trial hvac;
@@ -26,6 +27,32 @@ static vgw_status_led led;
 static uint8_t public_key[91], target[44];
 static uint32_t divider;
 static uint8_t powertrain;
+#if defined(VGW_APPLICATION_SLOT) && defined(VGW_BOARD_USB)
+static uint64_t usb_recovery_at;
+static uint64_t live_now(void) {
+  return runtime.can.elapsed_ms+(uint32_t)(vgw_white_startup_now(&runtime.startup)-runtime.can.previous_ms);
+}
+static bool request_usb_recovery(void *ctx) {
+  (void)ctx;
+  if (usb_recovery_at) return false;
+  usb_recovery_at=live_now()+250U;
+  return true;
+}
+static void attach_usb_recovery(void) {
+  vgw_application_set_local_recovery(&application,request_usb_recovery,NULL);
+}
+static bool usb_recovery_pending(void) { return usb_recovery_at!=0; }
+static __attribute__((noinline)) void service_usb_recovery(const vgw_white_mmio *io) {
+  if (usb_recovery_at && live_now()>=usb_recovery_at) {
+    if (!vgw_usb_recovery_mark(io)) vgw_white_physical_reset();
+    vgw_white_physical_reset();
+  }
+}
+#else
+static void attach_usb_recovery(void) { }
+static bool usb_recovery_pending(void) { return false; }
+static void service_usb_recovery(const vgw_white_mmio *io) { (void)io; }
+#endif
 #if defined(VGW_HVAC_EXPERIMENT) && defined(VGW_APPLICATION_SLOT)
 static uint64_t hvac_now(void) {
   /* CAN elapsed_ms is the poll-entry epoch; RX callbacks can carry newer
@@ -36,7 +63,7 @@ static size_t hvac_command(void *ctx,uint8_t op,uint64_t now,uint8_t *out) {
   (void)ctx;
   now=hvac_now();
   /* USB-only first experiment; no production Tres changes required. */
-  bool enabled=runtime.local_control && recovery.active && now<application.lease_until &&
+  bool enabled=!usb_recovery_pending() && runtime.local_control && recovery.active && now<application.lease_until &&
     recovery.update.state!=VGW_UPDATE_RECEIVING;
   vgw_hvac_trial_step(&hvac,now,enabled);
   bool ok=op==18;
@@ -45,7 +72,7 @@ static size_t hvac_command(void *ctx,uint8_t op,uint64_t now,uint8_t *out) {
     restart_at=now+250U; ok=true;
   }
   out[0]=ok ? 0 : 1;
-  out[1]=2; out[2]=hvac.state; out[3]=hvac.attempts; out[4]=hvac.allowed;
+  out[1]=3; out[2]=hvac.state; out[3]=hvac.attempts; out[4]=hvac.allowed;
   out[5]=safety.seen;
   out[6]=(uint8_t)(safety.safe[0]|(safety.safe[1]<<1)|(safety.safe[2]<<2));
   out[7]=safety.ready; out[8]=safety.power_valid; out[9]=safety.stable;
@@ -201,6 +228,7 @@ void vgw_loader_main(void) {
   vgw_hvac_trial_init(&hvac,&safety);
 #endif
   hvac_attach();
+  attach_usb_recovery();
 #ifdef VGW_APPLICATION_SLOT
   /* Confirm only after the complete mandatory application/control stack has
    * initialized, not merely after reaching the application reset vector. */
@@ -233,13 +261,14 @@ void vgw_loader_main(void) {
           !vgw_application_init(&application,&runtime,&recovery) || !vgw_recovery_link_init(&runtime.recovery,request)) fatal();
       runtime.local_control=true;
       hvac_attach();
+      attach_usb_recovery();
       application.local_send=vgw_white_usb_telemetry_send;
     }
 #endif
     vgw_boot_trace(13);
     if (!vgw_white_runtime_step(&runtime,vgw_application_step,&application)) fatal();
 #if defined(VGW_HVAC_EXPERIMENT) && defined(VGW_APPLICATION_SLOT)
-    vgw_hvac_trial_step(&hvac,hvac_now(),runtime.local_control && recovery.active &&
+    vgw_hvac_trial_step(&hvac,hvac_now(),!usb_recovery_pending() && runtime.local_control && recovery.active &&
       runtime.can.elapsed_ms<application.lease_until && recovery.update.state!=VGW_UPDATE_RECEIVING);
     if (restart_at && hvac_now()>=restart_at) {
       restart_at=0;
@@ -251,7 +280,8 @@ void vgw_loader_main(void) {
     vgw_boot_trace(14);
     if (runtime.local_control && !vgw_white_usb_dispatch(&recovery,runtime.can.elapsed_ms)) fatal();
 #endif
-    vgw_application_telemetry(&application);
+    service_usb_recovery(io);
+    if (!usb_recovery_pending()) vgw_application_telemetry(&application);
     uint8_t status[3];
     if (!vgw_update_led(&recovery.update,runtime.can.elapsed_ms,status)) vgw_boot_get_status(status);
     vgw_led_rx_health(status,runtime.can.tx_inhibited);

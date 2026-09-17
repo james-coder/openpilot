@@ -20,9 +20,12 @@ typedef struct {
   /* Optional board-owned authenticated experiment. NULL in normal/loader builds. */
   size_t (*experiment)(void *,uint8_t,uint64_t,uint8_t *);
   void *experiment_context;
+  bool (*local_recovery)(void *);
+  void *local_recovery_context;
 } vgw_application;
 size_t vgw_application_size(void);
 bool vgw_application_init(vgw_application *,vgw_white_runtime *,vgw_recovery_service *);
+void vgw_application_set_local_recovery(vgw_application *,bool (*)(void *),void *);
 size_t vgw_application_command(void *,uint8_t,const uint8_t *,size_t,uint64_t,uint8_t[128]);
 void vgw_application_reset(void *);
 void vgw_application_indication(vgw_application *,const vgw_status_led *,uint8_t);

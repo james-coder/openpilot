@@ -1,6 +1,7 @@
 #include "white_usb.h"
 #include "white_clock.h"
 #include "white_platform.h"
+#include "usb_recovery_intent.h"
 static vgw_white_startup recovery_startup;
 static vgw_white_clock recovery_clock;
 __attribute__((naked,noreturn)) static void enter_rom(uint32_t stack __attribute__((unused)),uint32_t entry __attribute__((unused))) {
@@ -10,16 +11,19 @@ __attribute__((naked,noreturn)) static void enter_rom(uint32_t stack __attribute
 void vgw_usb_recovery_window(void) {
   const vgw_white_mmio *io=vgw_white_physical_mmio();
   if (!vgw_white_startup_usb_only(&recovery_startup,io) ||
-      !vgw_white_clock_usb_only(&recovery_clock,&recovery_startup) ||
-      !vgw_white_usb_init(&recovery_startup,true)) vgw_white_physical_reset();
+      !vgw_white_clock_usb_only(&recovery_clock,&recovery_startup)) vgw_white_physical_reset();
+  bool requested=vgw_usb_recovery_take(io);
+  bool direct=requested;
+  /* A software request enters ROM directly after reset, before watchdog/CAN
+   * startup. No ten-second enumeration race and no inherited running IWDG. */
+  if (!requested && !vgw_white_usb_init(&recovery_startup,true)) vgw_white_physical_reset();
   uint32_t start=vgw_white_startup_now(&recovery_startup);
-  bool requested=false;
-  for (unsigned budget=0;budget<50000000U;budget++) {
+  for (unsigned budget=0;!requested && budget<50000000U;budget++) {
     if (!vgw_white_usb_poll()) break;
     if (vgw_white_usb_recovery_requested()) { requested=true; break; }
     if ((uint32_t)(vgw_white_startup_now(&recovery_startup)-start)>=10000U) break;
   }
-  vgw_white_usb_stop();
+  if (!direct) vgw_white_usb_stop();
   if (!requested) return;
   /* Exact historical White ROM entry, not a request-supplied address. The
    * read-only vector check is necessary but not hardware validation. */

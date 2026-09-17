@@ -63,7 +63,38 @@ def test_busy_buses_through_entire_confirmed_cold_boot(images, slot):
   run(images, slot, confirmed=True, busy_traffic=True)
 
 
-def run(images,slot,*,confirmed=False,busy_traffic=False):
+def test_software_recovery_enters_rom_before_can_watchdog_or_usb_window(images):
+  run(images,0,rom_recovery=True)
+
+
+def test_actual_application_recovery_without_vehicle_or_update_power(images):
+  cpu,symbols=run(images,0,confirmed=True)
+  def read(address):
+    return struct.unpack('<I',cpu.mem_read(address,4))[0]
+  def call(name,arg=0):
+    cpu.reg_write(UC_ARM_REG_SP,0x2001e000)
+    cpu.reg_write(UC_ARM_REG_LR,0x2001fff1)
+    cpu.reg_write(UC_ARM_REG_R0,arg)
+    cpu.emu_start(symbols[name]|1,0x2001fff0,timeout=2_000_000,count=2_000_000)
+    assert cpu.reg_read(UC_ARM_REG_PC)==0x2001fff0
+    return cpu.reg_read(UC_ARM_REG_R0)
+  assert call('request_usb_recovery')==1
+  assert call('request_usb_recovery')==0
+  assert read(0x2001bfe0)==0
+  mmio=call('vgw_white_physical_mmio')
+  call('service_usb_recovery',mmio)
+  assert read(0x2001bfe0)==0  # acknowledgement grace period precedes reset
+  cpu.mem_write(0x40000024,struct.pack('<I',read(0x40000024)+251))
+  with pytest.raises(AssertionError,match='unexpected board reset'):
+    call('service_usb_recovery',mmio)
+  assert read(0x2001bfe0)==0x56524732
+  assert read(0x2001bfe4)==0x56524732^0xffffffff
+  assert read(0x40020414)&0xc000==0
+  assert read(0x40020814)&0x2002==0x2002
+  assert read(0x40020014)&1==1
+
+
+def run(images,slot,*,confirmed=False,busy_traffic=False,rom_recovery=False):
   loader_start,loader,ls=binary(images/'NOT_RELEASED-loader.elf')
   start,application,app=binary(images/f'NOT_RELEASED-{"A" if slot==0 else "B"}.elf')
   key=ECC.generate(curve='P-256')  # ephemeral emulator fixture only
@@ -102,7 +133,7 @@ def run(images,slot,*,confirmed=False,busy_traffic=False):
   cpu=Uc(UC_ARCH_ARM,UC_MODE_THUMB|UC_MODE_MCLASS)
   cpu.ctl_set_cpu_model(UC_CPU_ARM_CORTEX_M4)
   for base,size in [(0x08000000,0x100000),(0x20000000,0x20000),(0x40000000,0x100000),
-                    (0x50000000,0x20000),(0x50060000,0x1000),(0x1fff7000,0x1000),(0xe000e000,0x2000),(0xe0042000,0x1000)]:
+                    (0x50000000,0x20000),(0x50060000,0x1000),(0x1fff0000,0x8000),(0xe000e000,0x2000),(0xe0042000,0x1000)]:
     cpu.mem_map(base,size)
   cpu.mem_write(0x08000000,bytes(flash))
   cpu.mem_write(0x20000000,b'\xa5'*0x20000)
@@ -115,6 +146,12 @@ def run(images,slot,*,confirmed=False,busy_traffic=False):
   cpu.mem_write(0x1fff7a22,struct.pack('<H',1024))
   for a,v in [(0x40023800,3),(0x40023874,3),(0x40007004,0x4000),(0x50060804,1),(0x40023c10,0x80000000)]:
     put(a,v)
+  if rom_recovery:
+    put(0x2001bfe0,0x56524732)
+    put(0x2001bfe4,0x56524732^0xffffffff)
+    put(0x40023874,1<<28)
+    put(0x1fff0000,0x2001f000)
+    put(0x1fff0004,0x1fff0101)
   for b in (BASES[0],BASES[2]):
     put(b+0x200,0x2a1c0e01)
   queue=[]
@@ -128,6 +165,15 @@ def run(images,slot,*,confirmed=False,busy_traffic=False):
   mutations=[]
   entered=[]
   complete=[]
+  if rom_recovery:
+    def reached_rom(machine,address,size,data):
+      complete.append('ROM')
+      cpu.emu_stop()
+    cpu.hook_add(UC_HOOK_CODE,reached_rom,begin=0x1fff0100,end=0x1fff0100)
+    def unexpected_usb_init(*args):
+      raise AssertionError('software recovery must not wait for cold USB enumeration')
+    usb_init=ls['vgw_white_usb_init']&~1
+    cpu.hook_add(UC_HOOK_CODE,unexpected_usb_init,begin=usb_init,end=usb_init)
   watchdog=[]
   # Independent LSI-domain visibility, including a ROM-inherited prescaler.
   # These are bounded fault/timing scenarios, not cycle-accurate silicon.
@@ -363,6 +409,16 @@ def run(images,slot,*,confirmed=False,busy_traffic=False):
     raise AssertionError(f'whole board execution failed at PC={cpu.reg_read(UC_ARM_REG_PC):#x}, '+
                          f'phase={read(0x2001c804):#x}') from error
   assert complete, f'whole board instruction/time limit: PC={cpu.reg_read(UC_ARM_REG_PC):#x}'
+  if rom_recovery:
+    assert complete==['ROM'] and not watchdog and not mutations and not can_instances
+    assert read(0x2001bfe0)==read(0x2001bfe4)==0
+    assert read(0x40020414)&0xc000==0  # SWCAN PHY asleep
+    assert read(0x40020814)&0x2002==0x2002  # CAN1/CAN2 PHY disabled
+    assert read(0x40020014)&1==1  # CAN3 differential PHY disabled
+    assert read(0x40023820)&(7<<25)==7<<25
+    assert cpu.reg_read(UC_ARM_REG_SP)==0x2001f000
+    assert read(0xe000ed08)==0x1fff0000
+    return cpu,ls
   if busy_traffic:
     assert traffic['offered'] > 1000
     check_rx_loss()

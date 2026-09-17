@@ -1,4 +1,4 @@
-"""Exact labeled White Panda bench migration. Requires OBD disconnected.
+"""Exact labeled White Panda local ROM-DFU migration.
 
 ROM DFU only; no reset, option-byte change, erase-all or other-device matching.
 Full live readback must equal the preserved predecessor before programming.
@@ -41,7 +41,10 @@ def main():
   parser.add_argument('--prepared', type=Path, required=True)
   parser.add_argument('--before', type=Path, required=True)
   parser.add_argument('--evidence', type=Path, required=True)
-  parser.add_argument('--obd-disconnected', action='store_true', required=True)
+  connection=parser.add_mutually_exclusive_group(required=True)
+  connection.add_argument('--obd-disconnected', action='store_true')
+  connection.add_argument('--parked-obd-connected', action='store_true',
+                          help='operator-verified parked vehicle; loader quiesces CAN before ROM entry')
   args = parser.parse_args()
   before = bounded_read(args.before, 1048576, private=True)
   image = bounded_read(args.prepared/'factory-flash.bin', 1048576, private=True)

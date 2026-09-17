@@ -64,6 +64,29 @@ def test_authenticated_observe_capture_pagination(service_library,native,bundle,
   assert r.slot.erases==r.slot.writes==0
 
 
+def test_usb_recovery_authenticated_local_only_independent_of_can_health(service_library,native,bundle,built):
+  r,app,lib,hw,state=setup(service_library,native,bundle,built)
+  calls=[]
+  callback_type=C.CFUNCTYPE(C.c_bool,C.c_void_p)
+  callback=callback_type(lambda _: calls.append('recovery') is None)
+  r.lib.vgw_application_set_local_recovery.argtypes=[C.c_void_p,callback_type,C.c_void_p]
+  assert r.command(20)==b'\1'  # absent callback
+  r.lib.vgw_application_set_local_recovery(app,callback,None)
+  assert int.from_bytes(r.command(1)[3:7],'big')&128
+  state.local_control=False
+  assert r.command(20)==b'\1' and not calls  # CAN cannot invoke ROM recovery
+  state.local_control=True
+  state.can.tx_inhibited=True
+  assert r.command(20,b'x')==b'\1' and not calls
+  request=r.client.request(20,b'')
+  invalid=request[:-1]+bytes([request[-1]^1])
+  assert r.wire(invalid) is None and not calls
+  reply=r.wire(request)
+  assert r.client.accept(reply)==b'\0' and calls==['recovery']
+  assert r.wire(request)==reply and calls==['recovery']  # exact retry is not another reset
+  assert r.slot.erases==r.slot.writes==0
+
+
 def test_rx_health_capability_and_separate_counters(service_library,native,bundle,built):
   r,app,lib,hw,state=setup(service_library,native,bundle,built)
   assert int.from_bytes(r.command(1)[3:7],'big')&0x20

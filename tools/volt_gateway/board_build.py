@@ -20,7 +20,7 @@ from openpilot.tools.volt_gateway import target_crypto, mcuboot_port, usb_histor
 BOARD=('board_main','board_memory','board_storage','crypto_cooperative','application','authority','update','observe','status_led','hvac_trial',
        'white_runtime','white_startup','white_watchdog','white_clock','white_rng','white_board','white_can',
        'white_platform','white_flash','white_safety','recovery_link','recovery_transport','recovery_service',
-       'recovery_runtime','recovery_flash')
+       'recovery_runtime','recovery_flash','usb_recovery_intent')
 
 
 def linker(origin,length):
@@ -28,7 +28,7 @@ def linker(origin,length):
   return template.replace('/* NEVER FLASH: reset mechanics harness, not a complete trusted loader. */',
                           '/* Board composition: release gates still apply. */').replace(
                             'ORIGIN = 0x08000000, LENGTH = 256K',f'ORIGIN = {origin:#x}, LENGTH = {length}').replace(
-                              '__bss_end <= __stack_top - 8192','__bss_end <= 0x2001c000')
+                              '__bss_end <= __stack_top - 8192','__bss_end <= 0x2001bfe0')
 
 
 def build(checkout: Path,archive: Path,output: Path,*,usb_repository: Path | None=None,hvac_experiment=False):

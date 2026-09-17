@@ -78,6 +78,23 @@ busy-bus cold boots in both slots (241.66s). That suite builds the normal
 non-experimental application: it is a boot/USB regression check, not emulated
 or physical proof of the experimental raw-TX path. Total: 92 passing cases.
 
+## TX/session correction deployed, September 17
+
+Owner confirmed the White Panda disconnected from OBD and requested flashing.
+Authenticated USB software recovery entered exact-device ROM DFU without a
+physical replug. Full live predecessor matched the saved usb-swcan-01 readback.
+Programmed correction and verified the complete 1 MiB against the signed image:
+`d84ea1d9c32cc36040f750fef9895b484b3e527c102ed010e4eeffb136f524a9`.
+Evidence: private `flashing/370022000651363038363036-20260917/usb-swcan-tx-fix-01`.
+
+Application booted slot A, running/error none, capabilities 511. Running identity
+`eb866d426415b236ddb81ef1f340401ecc2f8e6d335d15e5c1753668b2a004a5`
+matches `build_identity` extracted from the prepared slot-A ELF. Status v4
+decoded successfully: idle, attempts 0, session enabled, TX not inhibited,
+failure none, saved TSR/ESR zero. No vehicle inputs/interlock not ready is
+expected with OBD disconnected. No CAN TX was requested. This verifies physical
+deployment and USB operation, not in-vehicle TX fault recovery or HVAC control.
+
 ## Physical USB-only deployment, September 17
 
 After the owner disconnected OBD, flashed labeled serial

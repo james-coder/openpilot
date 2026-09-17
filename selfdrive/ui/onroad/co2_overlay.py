@@ -1,4 +1,4 @@
-"""Optional, read-only Aranet4 on-road display.
+"""Optional, read-only Aranet4 display shared by on-road and parked home views.
 
 The render thread only reads a cached scalar. All filesystem work is done by a
 daemon worker and failure of the cabin sensor never affects the driving UI.
@@ -48,22 +48,31 @@ def latest_co2(root: Path = ROOT, now: float | None = None) -> tuple[int, float]
 
 
 class Co2Overlay(Widget):
+  _shared_latest: tuple[int, float] | None = None
+  _reader_thread: threading.Thread | None = None
+
   def __init__(self):
     super().__init__()
     self._font = gui_app.font(FontWeight.SEMI_BOLD)
-    self._latest: tuple[int, float] | None = None
     self._badge: rl.Rectangle | None = None
-    try:
-      threading.Thread(target=self._poll, name='co2-ui-reader', daemon=True).start()
-    except RuntimeError:
-      pass  # Optional display; no dependency on thread creation.
+    if self.__class__._reader_thread is None or not self.__class__._reader_thread.is_alive():
+      try:
+        worker = threading.Thread(target=self._poll, name='co2-ui-reader', daemon=True)
+        worker.start()
+        self.__class__._reader_thread = worker
+      except RuntimeError:
+        pass  # Optional display; no dependency on thread creation.
+
+  @property
+  def _latest(self) -> tuple[int, float] | None:
+    return self.__class__._shared_latest
 
   def _poll(self):
     while True:
       try:
-        self._latest = latest_co2()
+        self.__class__._shared_latest = latest_co2()
       except Exception:
-        self._latest = None  # A malformed optional source must not kill the UI.
+        self.__class__._shared_latest = None  # A malformed optional source must not kill the UI.
       time.sleep(POLL_SECONDS)
 
   def _render(self, rect: rl.Rectangle):
@@ -78,7 +87,7 @@ class Co2Overlay(Widget):
     y = rect.y + rect.height - UI_CONFIG.border_size - text_size.y - 20
     # On RHD cars the driver-monitoring icon occupies the bottom-right corner.
     from openpilot.selfdrive.ui.ui_state import ui_state
-    if ui_state.sm['driverMonitoringState'].isRHD:
+    if ui_state.started and ui_state.sm['driverMonitoringState'].isRHD:
       y -= UI_CONFIG.button_size + 20
     backing = rl.Rectangle(x - 12, y - 8, text_size.x + 28, text_size.y + 16)
     self._badge = backing

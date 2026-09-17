@@ -7,6 +7,7 @@ import pyray as rl
 
 from openpilot.selfdrive.ui.onroad import co2_overlay
 from openpilot.selfdrive.ui.onroad import augmented_road_view
+from openpilot.selfdrive.ui.layouts import home
 from openpilot.selfdrive.ui.layouts.settings import aranet as aranet_screen
 
 
@@ -75,7 +76,7 @@ def test_badge_uses_max_font_size_and_lower_right_and_hides_when_stale(monkeypat
   monkeypatch.setattr(co2_overlay.rl, 'draw_text_ex', lambda font, text, pos, size, *a: draws.append(('text', text, pos, size)))
   monkeypatch.setattr(co2_overlay, 'time', SimpleNamespace(time=lambda: 1000.))
   from openpilot.selfdrive.ui import ui_state as ui_state_module
-  monkeypatch.setattr(ui_state_module, 'ui_state', SimpleNamespace(sm={'driverMonitoringState': SimpleNamespace(isRHD=False)}))
+  monkeypatch.setattr(ui_state_module, 'ui_state', SimpleNamespace(started=False, sm={'driverMonitoringState': SimpleNamespace(isRHD=False)}))
   overlay = SimpleNamespace(_latest=(1159, 1240.), _font=object(), _badge=None)
   co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
   assert draws[-1][1] == 'CO₂ 1159 ppm'
@@ -96,10 +97,12 @@ def test_badge_moves_above_right_hand_drive_monitor_and_can_be_hidden(monkeypatc
   monkeypatch.setattr(co2_overlay, 'time', SimpleNamespace(time=lambda: 1000.))
   from openpilot.selfdrive.ui import ui_state as ui_state_module
   state = SimpleNamespace(isRHD=False)
-  monkeypatch.setattr(ui_state_module, 'ui_state', SimpleNamespace(sm={'driverMonitoringState': state}))
+  fake_ui = SimpleNamespace(started=False, sm={'driverMonitoringState': state})
+  monkeypatch.setattr(ui_state_module, 'ui_state', fake_ui)
   overlay = SimpleNamespace(_latest=(1159, 1240.), _font=object(), _badge=None)
   co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
   state.isRHD = True
+  fake_ui.started = True
   co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
   assert draws[0] - draws[1] == co2_overlay.UI_CONFIG.button_size + 20
   co2_overlay.Co2Overlay.hide(overlay)
@@ -120,3 +123,13 @@ def test_badge_tap_uses_existing_graph_without_opening_while_engaged(monkeypatch
   monkeypatch.setattr(aranet_screen, 'graph_allowed', lambda: False)
   augmented_road_view.AugmentedRoadView._handle_mouse_press(view, rl.Vector2(1900, 980))
   assert opened == []
+
+
+def test_parked_home_badge_opens_same_settings_graph(monkeypatch):
+  opened = []
+  monkeypatch.setattr(home.gui_app, 'push_widget', opened.append)
+  monkeypatch.setattr(aranet_screen, 'AranetLayout', lambda: 'existing Aranet graph')
+  view = SimpleNamespace(current_state=home.HomeLayoutState.HOME,
+                         _co2_overlay=SimpleNamespace(hit_test=lambda pos: True))
+  home.HomeLayout._handle_mouse_release(view, rl.Vector2(1900, 980))
+  assert opened == ['existing Aranet graph']

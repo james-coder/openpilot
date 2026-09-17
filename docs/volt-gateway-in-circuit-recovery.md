@@ -21,6 +21,15 @@ OBD-connected recovery/program/readback/return test.
 
 ## Completed USB-only software reflash proof
 
+Subsequent OBD-connected attempt **failed before programming**. Fresh HVAC
+status showed seen/safe masks7 and input ages84/22/60ms (Park/RUN/zero-speed
+inputs). Authenticated software recovery was accepted, but ROM DFU did not
+enumerate within60s; the application returned. No flash evidence directory was
+created and no erase/program command ran. Returned application reported slotA,
+error none, reset flags503316483 (`0x1e000003`). Those flags alone do not locate
+the failure or prove an electrical cause. Keep in-circuit deployment validation
+open; do not generalize the successful USB-only test to attached vehicle CAN.
+
 With OBD still disconnected and no USB replug, authenticated opcode20 entered
 ROM DFU, the host read and matched the predecessor, actually erased/programmed
 the four reviewed regions, verified all 1 MiB, and booted the application.

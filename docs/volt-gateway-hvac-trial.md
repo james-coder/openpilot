@@ -1,5 +1,22 @@
 # Parked HVAC experiment, 2026-09-17
 
+## Latest physical result: first completed TX pair, hvac05
+
+On September17, with OBD/USB connected and fresh Park/RUN/zero-speed evidence,
+one authenticated op17 was accepted. State progressed press_pending →
+release_wait → done, attempts1. SWCAN transmitted counter increased0→2;
+RX increased97632→98628. Malformed, overflow, arbitration-loss, TX-error and
+ESR fields remained0 in the before/after samples. No additional trial requested.
+Subscriptions to `0x10B02099` and `0x10AD6080` produced no observations in the
+two-second pre-trial / approximately four-second post-trial window. Therefore
+CAN transmission completed, but HVAC acceptance, recirc LED change, and physical
+flap movement remain unconfirmed pending user observation. No success claim for
+recirculation control follows from the CAN TX counter.
+
+Installed hvac05 includes the later separation of the cabin-action interlock
+from flash-programming voltage/dwell requirements described below. The original
+12.5–15.5V/five-second cabin gate in the initial design is no longer applicable.
+
 Experimental, not validated recirculation control. Repeated manual recirc
 presses correlated with extended SWCAN `0x10AD6080`, DLC8,
 `0a0707022b000000`, then `0a07070200000000`. The same action accompanied ON

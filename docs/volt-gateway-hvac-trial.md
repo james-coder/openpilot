@@ -31,6 +31,28 @@ transmission of candidate2. The fault reason is not distinguished by the current
 status record; do not infer bus collision, timeout, or vehicle rejection from it.
 No automatic reset or retry was performed.
 
+### Owner-requested retry after USB power cycle
+
+Owner rebooted the White Panda and requested candidate2 again. Initial state
+idle/attempts0, fresh interlock, SWCAN TX0. The first payload
+`0a0707022b000000` completed successfully: state done, TX1. Approximately three
+seconds after acceptance, with the interlock still ready, the host requested
+`0a07070200000000`. That request was accepted, but state faulted and TX remained1.
+Thus only the first frame has confirmed completion; the clear frame does not.
+RX rose8458 to9180, malformed/overflow/arbitration_lost/tx_errors/ESR remained0.
+No capture subscriptions were active in this retry; user-visible effect awaits
+owner observation. No further automatic retry/reset was performed. The repeated
+fault still lacks a diagnostic reason; aggregate zero error counters do not
+establish that this was a bus error or exclude a local interlock/deadline fault.
+
+Owner reported no screen/LED effect from candidate2 and requested candidate1
+again. The fault was still latched. Authenticated parked software reboot
+succeeded with OBD connected, without unplugging or flashing; USB reattached.
+One candidate1 frame (`0x10AC0099`, DLC4, `000e0700`) then completed: idle to
+done, attempts0 to1, TX0 to1, RX5469 to5641, malformed/overflow/arbitration_lost/
+tx_errors/ESR all zero. Owner-visible result pending. This verifies another
+successful candidate1 transmission, not the cause of the intermittent fault.
+
 ## Latest physical result: first completed TX pair, hvac05
 
 On September17, with OBD/USB connected and fresh Park/RUN/zero-speed evidence,

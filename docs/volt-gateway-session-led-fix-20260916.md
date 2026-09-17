@@ -95,6 +95,20 @@ backhaul disabled and an empty vehicle TX policy.
 
 Evidence: external `usb-led-session01.json`, SHA-256
 `ef0c3e714714115edba73085e3853a130a5c3b648659dda14df57b3fd2cf7b2c`.
-The separate USB cold power cycle was requested after these checks and is not
-claimed complete here. Vehicle/harness receive testing and installed Tres/comma
-CAN-backhaul integration remain separate, unresolved gates.
+## Physical cold-boot result
+
+The owner unplugged/replugged USB with the vehicle connector disconnected.
+The recovery listener had exited; no recovery command intercepted this boot.
+The new application returned normally with uptime 37,064 ms, build identity
+`a0218b9313cbe02957836746e3920c48708516a68978753fc6a3dfa662262515`,
+and the same interface 1.1 / CAN-silent mapping and empty write policy.
+Pre-session and post-close snapshots reported running A, no error, disabled
+CAN peer and a completed startup color test. The post-close RGB sample was
+blue. All first seven bus-status counters on buses 0/1/3 were zero.
+
+Evidence: external `usb-led-session01-coldboot.json`, SHA-256
+`eb21b487b6e18d807cd1cdfb5fc227a203349e3813a96e51f7d076de030a40c4`.
+This completes the USB cold-boot check for this image, not electrical/vehicle
+validation. Vehicle/harness receive testing and installed Tres/comma CAN-backhaul
+integration remain separate, unresolved gates. The reachable comma was inspected
+read-only at commit `a457bd9`; it was not pulled, restarted or flashed.

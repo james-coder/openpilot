@@ -3,7 +3,7 @@
 #include "recovery_service.h"
 #include "white_runtime.h"
 #include "status_led.h"
-/* No vehicle TX operations. Read-only decoded telemetry remains untrusted and
+/* Default builds have no vehicle TX operations. Decoded telemetry remains untrusted and
  * may never feed actuation without a separate authenticated safety design. */
 typedef struct {
   vgw_white_runtime *runtime;
@@ -17,6 +17,9 @@ typedef struct {
   void *local_context;
   uint8_t indication[5];
   bool indication_valid, can_peer_seen;
+  /* Optional board-owned authenticated experiment. NULL in normal/loader builds. */
+  size_t (*experiment)(void *,uint8_t,uint64_t,uint8_t *);
+  void *experiment_context;
 } vgw_application;
 size_t vgw_application_size(void);
 bool vgw_application_init(vgw_application *,vgw_white_runtime *,vgw_recovery_service *);

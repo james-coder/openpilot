@@ -47,7 +47,11 @@ static RAM bool active(const vgw_white_can *s,unsigned c) { return c==s->config.
 static RAM uint32_t timing(const vgw_white_can *s,unsigned c) {
   /* 24MHz / (8 quanta *6)=500k; /90=33.333k. 87.5% sample point. */
   return (5U<<16) | (c==s->config.swcan_controller ? 89U : 5U) |
-    (c==s->config.backhaul_controller ? 0U : 0x80000000U);
+    (c==s->config.backhaul_controller
+#ifdef VGW_HVAC_EXPERIMENT
+     || (c==3 && c==s->config.swcan_controller)
+#endif
+     ? 0U : 0x80000000U);
 }
 static bool wait(const vgw_white_can *s,uint32_t a,uint32_t mask,uint32_t expect) {
   uint32_t start=rd(s,0x40000024U);

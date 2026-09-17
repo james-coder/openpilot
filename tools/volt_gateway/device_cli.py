@@ -130,7 +130,8 @@ def main():
   resource.setrlimit(resource.RLIMIT_CORE,(0,0))
   parser=argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--pairing',type=Path,required=True)
-  parser.add_argument('command',choices=['info','status','indicators','buses','utilization','rx-health','clear-ids','observe','ids','capture','rules','subscribe'])
+  parser.add_argument('command',choices=['info','status','indicators','buses','utilization','rx-health','clear-ids','observe','ids','capture','rules','subscribe',
+                                        'hvac-trial-status','hvac-button-trial'])
   parser.add_argument('--bus',type=int,choices=[0,1,2,3],default=3,help='HSCAN CAN1=0, CAN2=1, CAN3=2; SWCAN=3 regardless of mux')
   parser.add_argument('--seconds',type=int,default=30)
   parser.add_argument('--id',type=lambda x:int(x,0))
@@ -191,9 +192,37 @@ def main():
         for record in pages(device,13 if args.command=='capture' else 7,args.bus):
           print(json.dumps(record))
       elif args.command=='rules':
-        if device.command(14)!=b'\0':
+        policy=device.command(14)
+        if policy==b'\1':
+          print('Experimental USB-only parked HVAC button pair; no arbitrary vehicle TX.')
+        elif policy==b'\0':
+          print('Vehicle-side TX policy: no permitted messages.')
+        else:
           raise ProtocolError('unexpected write policy')
-        print('Vehicle-side TX policy: no permitted messages.')
+      elif args.command in ('hvac-trial-status','hvac-button-trial'):
+        info=device.command(1)
+        if len(info)!=46 or info[0]!=1 or not int.from_bytes(info[2:6],'big')&64:
+          raise ProtocolError('experimental HVAC capability absent')
+        status=device.command(18)
+        if args.command=='hvac-button-trial':
+          # Explicit CLI operation only; never auto-run on connect or retry with
+          # a new sequence. The firmware independently enforces all interlocks.
+          if len(status)!=4 or status[0]!=1 or not status[3]:
+            raise ProtocolError('physical safety/session interlock not ready; no TX requested')
+          device.command(17)
+          deadline=time.monotonic()+4
+          while time.monotonic()<deadline:
+            time.sleep(0.1)
+            status=device.command(18)
+            if len(status)!=4 or status[0]!=1:
+              raise ProtocolError('invalid HVAC trial status')
+            if status[1] in (4,5):
+              break
+        if len(status)!=4 or status[0]!=1 or status[1]>5:
+          raise ProtocolError('invalid HVAC trial status')
+        print(json.dumps({'state':('idle','press_pending','release_wait','release_pending','done','fault')[status[1]],
+                          'attempts':status[2],'interlock_ready':bool(status[3]),
+                          'note':'CAN completion is not proof of recirculation actuation'}))
       else:
         device.command(8,bytes([0,args.bus,int(args.extended)])+args.id.to_bytes(4,'big')+args.max_hz.to_bytes(2,'big'))
         end=time.monotonic()+args.seconds

@@ -17,7 +17,7 @@ import gcc_arm_none_eabi
 
 from openpilot.tools.volt_gateway import target_crypto, mcuboot_port, usb_history, crypto_scheduling
 
-BOARD=('board_main','board_memory','board_storage','crypto_cooperative','application','authority','update','observe','status_led',
+BOARD=('board_main','board_memory','board_storage','crypto_cooperative','application','authority','update','observe','status_led','hvac_trial',
        'white_runtime','white_startup','white_watchdog','white_clock','white_rng','white_board','white_can',
        'white_platform','white_flash','white_safety','recovery_link','recovery_transport','recovery_service',
        'recovery_runtime','recovery_flash')
@@ -31,12 +31,12 @@ def linker(origin,length):
                               '__bss_end <= __stack_top - 8192','__bss_end <= 0x2001c000')
 
 
-def build(checkout: Path,archive: Path,output: Path,*,usb_repository: Path | None=None):
+def build(checkout: Path,archive: Path,output: Path,*,usb_repository: Path | None=None,hvac_experiment=False):
   output.mkdir(parents=True,exist_ok=False,mode=0o700)
   gcc=Path(gcc_arm_none_eabi.__file__).parent/'toolchain/bin/arm-none-eabi-gcc'
   own=Path(__file__).parent/'firmware'
   report={'production_ready':False,'flashed':False,'mcuboot_commit':mcuboot_port.COMMIT,
-          'mbedtls_sha256':target_crypto.ARCHIVE_SHA256,'images':{},
+          'mbedtls_sha256':target_crypto.ARCHIVE_SHA256,'images':{},'hvac_experiment':hvac_experiment,
           'gates':['protected USB recovery','verified physical provisioning','whole-image hardware validation']}
   with tempfile.TemporaryDirectory(prefix='voltgw-board-') as temp:
     root=Path(temp)
@@ -75,11 +75,19 @@ def build(checkout: Path,archive: Path,output: Path,*,usb_repository: Path | Non
       script.write_text(linker(origin,length))
       entry=output/f'{name}-main.o'
       extra=[] if slot is None else [f'-DVGW_APPLICATION_SLOT={slot}']
+      link_objects=objects
+      if hvac_experiment and slot is not None:
+        extra+=['-DVGW_HVAC_EXPERIMENT']
+        can_object=output/f'{name}-hvac-can.o'
+        subprocess.run([str(gcc),*flags,'-DVGW_HVAC_EXPERIMENT','-c',str(own/'white_can.c'),'-o',str(can_object)],
+                       check=True,capture_output=True,text=True)
+        link_objects=[can_object if obj.name.endswith('-white_can.o') else obj for obj in objects]
       identity=hashlib.sha256(name.encode()+mcuboot_port.COMMIT.encode()+target_crypto.ARCHIVE_SHA256.encode())
       for path in sorted(own.rglob('*')):
         if path.is_file() and path.suffix in ('.h','.c','.S','.ld'):
           identity.update(str(path.relative_to(own)).encode()+b'\0'+path.read_bytes())
       identity.update(b'USB' if usb is not None else b'NO-USB')
+      identity.update(b'HVAC-EXPERIMENT' if hvac_experiment and slot is not None else b'NO-HVAC-TX')
       identity.update(Path(__file__).read_bytes())
       identity.update(Path(crypto_scheduling.__file__).read_bytes())
       if usb is not None:
@@ -90,7 +98,7 @@ def build(checkout: Path,archive: Path,output: Path,*,usb_repository: Path | Non
       binary=output/f'NOT_RELEASED-{name}.elf'
       subprocess.run([str(gcc),*flags,'-nostdlib','-T',str(script),'-Wl,--no-undefined,--gc-sections,--build-id=none',
                       '-Wl,--wrap=mbedtls_ecdsa_verify,--wrap=mbedtls_ecdsa_read_signature',
-                      '-Wl,-Map='+str(output/f'{name}.map'),*map(str,objects),str(entry),'-o',str(binary)],
+                      '-Wl,-Map='+str(output/f'{name}.map'),*map(str,link_objects),str(entry),'-o',str(binary)],
                      check=True,capture_output=True,text=True)
       symbols=subprocess.check_output(['nm','--defined-only',str(binary)],text=True)
       forbidden=('vgw_test_','vgw_emu_','vgw_boot_emu_','vgw_debug_','vgw_guard_test','mbedtls_ecdsa_sign')
@@ -109,9 +117,11 @@ def main():
   parser.add_argument('--archive',type=Path,default=target_crypto.archive_path())
   parser.add_argument('--output',type=Path,required=True)
   parser.add_argument('--usb-repository',type=Path)
+  parser.add_argument('--hvac-experiment',action='store_true',help='USB-only bounded parked HVAC trial; application slots only')
   args=parser.parse_args()
   try:
-    print(json.dumps(build(args.checkout,args.archive,args.output,usb_repository=args.usb_repository),indent=2))
+    print(json.dumps(build(args.checkout,args.archive,args.output,usb_repository=args.usb_repository,
+                           hvac_experiment=args.hvac_experiment),indent=2))
   except subprocess.CalledProcessError as error:
     print(error.stderr)
     raise

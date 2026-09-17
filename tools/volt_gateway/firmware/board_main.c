@@ -3,6 +3,10 @@
 #include "status_led.h"
 #include "boot_trace.h"
 #include <string.h>
+#if defined(VGW_HVAC_EXPERIMENT) && defined(VGW_APPLICATION_SLOT)
+#include "hvac_trial.h"
+static vgw_hvac_trial hvac;
+#endif
 #ifdef VGW_BOARD_USB
 #include "white_usb.h"
 void vgw_usb_recovery_window(void);
@@ -21,6 +25,23 @@ static vgw_status_led led;
 static uint8_t public_key[91], target[44];
 static uint32_t divider;
 static uint8_t powertrain;
+#if defined(VGW_HVAC_EXPERIMENT) && defined(VGW_APPLICATION_SLOT)
+static size_t hvac_command(void *ctx,uint8_t op,uint64_t now,uint8_t *out) {
+  (void)ctx;
+  /* USB-only first experiment; no production Tres changes required. */
+  bool enabled=runtime.local_control && recovery.active && now<application.lease_until &&
+    recovery.update.state!=VGW_UPDATE_RECEIVING;
+  vgw_hvac_trial_step(&hvac,now,enabled);
+  out[0]=(op==18 || (enabled && vgw_hvac_trial_start(&hvac,now))) ? 0 : 1;
+  out[1]=1; out[2]=hvac.state; out[3]=hvac.attempts; out[4]=hvac.allowed;
+  return 5;
+}
+static void hvac_attach(void) {
+  application.experiment=hvac_command;
+}
+#else
+static void hvac_attach(void) { }
+#endif
 /* F413 CMSIS IRQ numbers: CAN1_RX0=20, CAN2_RX0=64, CAN3_RX0=75.
  * These handlers only stage raw RX. Never protocol, crypto, flash or TX. */
 __attribute__((section(".ramfunc.vgw_can_irq"))) void vgw_can1_rx0(void) { vgw_white_can_rx_irq(&runtime.can,1); }
@@ -154,6 +175,10 @@ void vgw_loader_main(void) {
       !vgw_recovery_service_init(&recovery,&provision,&updater,vgw_crypto_verify,vgw_crypto_authority_hash,
         vgw_crypto_hmac,vgw_crypto_sha256,entropy,&storage.crypto,&runtime.rng,inactive) ||
       !vgw_application_init(&application,&runtime,&recovery)) fatal();
+#if defined(VGW_HVAC_EXPERIMENT) && defined(VGW_APPLICATION_SLOT)
+  vgw_hvac_trial_init(&hvac,&safety);
+#endif
+  hvac_attach();
 #ifdef VGW_APPLICATION_SLOT
   /* Confirm only after the complete mandatory application/control stack has
    * initialized, not merely after reaching the application reset vector. */
@@ -185,11 +210,16 @@ void vgw_loader_main(void) {
           vgw_crypto_hmac,vgw_crypto_sha256,entropy,&storage.crypto,&runtime.rng,inactive) ||
           !vgw_application_init(&application,&runtime,&recovery) || !vgw_recovery_link_init(&runtime.recovery,request)) fatal();
       runtime.local_control=true;
+      hvac_attach();
       application.local_send=vgw_white_usb_telemetry_send;
     }
 #endif
     vgw_boot_trace(13);
     if (!vgw_white_runtime_step(&runtime,vgw_application_step,&application)) fatal();
+#if defined(VGW_HVAC_EXPERIMENT) && defined(VGW_APPLICATION_SLOT)
+    vgw_hvac_trial_step(&hvac,runtime.can.elapsed_ms,runtime.local_control && recovery.active &&
+      runtime.can.elapsed_ms<application.lease_until && recovery.update.state!=VGW_UPDATE_RECEIVING);
+#endif
 #ifdef VGW_BOARD_USB
     vgw_boot_trace(14);
     if (runtime.local_control && !vgw_white_usb_dispatch(&recovery,runtime.can.elapsed_ms)) fatal();

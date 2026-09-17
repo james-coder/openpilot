@@ -57,7 +57,7 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
   switch (op) {
     case 1: /* INFO: capabilities, firmware build, fixed mapping, protocol */
       if (!n) {
-        ok=true; out[1]=1; out[2]=1; put32(out+3,0x0000003fU);
+        ok=true; out[1]=1; out[2]=1; put32(out+3,0x0000003fU|(s->experiment ? 0x40U : 0U));
         for (unsigned i=0;i<32;i++) out[7+i]=s->session->provision.build[i];
         out[39]=s->runtime->can.config.swcan_controller;
         out[40]=s->runtime->can.config.hscan_mask;
@@ -119,7 +119,7 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
         put16(out+1,index); out[3]=(uint8_t)count; ok=true;
       } break;
     case 14: /* Write policy is intentionally empty. No generic TX rule engine. */
-      if (!n) { ok=true; out[1]=0; length=2; } break;
+      if (!n) { ok=true; out[1]=s->experiment ? 1 : 0; length=2; } break;
     case 15: /* Versioned snapshot of the actual renderer, not inferred health.
               * Link: disabled/local USB/awaiting/authenticated/stale. */
       if (!n && vgw_application_indicator_snapshot(s,out+1)) { ok=true; length=8; } break;
@@ -130,6 +130,10 @@ size_t vgw_application_command(void *ctx,uint8_t op,const uint8_t *p,size_t n,ui
         put32(out+1,v->software_drops); put32(out+5,v->irq_calls);
         put32(out+9,v->queue_peak); put32(out+13,v->max_queue_age_ms);
         ok=true; length=17;
+      } break;
+    case 17: case 18:
+      if (!n && s->session->active && s->experiment) {
+        return s->experiment(s->experiment_context,op,now,out);
       } break;
     default: break;
   }

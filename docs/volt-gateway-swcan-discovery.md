@@ -89,3 +89,67 @@ behavior must still be retested after a USB-only bench flash. The earlier focuse
 run had 20 passes and 14 dependency-related skips; only the full configured run
 closes the off-device gate. This fix does not change the already deployed comma
 startup fix or grant the White/Tres any new CAN transmit permissions.
+
+## Object02 physical survey
+
+After flashing Object02, a complete 20-second USB-controlled SWCAN observation
+returned the climate targets: `0x10734099`, DLC6, approximately 2 Hz, and
+`0x10814099`, DLC4, approximately 0.4 Hz. Also observed `0x106D4099`, DLC3,
+once in the window. Exact left/right radar status IDs were not in this survey;
+zero-length extended frames with source fields B9/5B were present, which does
+not prove radar status semantics or sensor operation.
+
+At approximately 105 seconds uptime, physical CAN counters showed primary
+282,176 frames, Object 111,395, SWCAN 18,032. All three had zero malformed,
+hardware-overflow, software-drop, TX-error and ESR counts; firmware reported
+running/slot A/no error. Maximum RX queue ages: 5/6/5 ms respectively, peaks
+24/23/2. These are this session's measurements, not a general reliability claim.
+USB remains control owner; no Panda-to-Panda exchange was attempted in that
+mode. Two-minute read-only subscriptions to the three climate IDs were started
+for owner recirculation-button correlation, saving raw observations privately
+under diagnostics as `hvac-live-20260917-01.jsonl`. No recirculation bit has yet
+been established and no vehicle control frames were transmitted.
+
+### Recirculation correlation, second recording
+
+Owner reported four or five spaced recirculation toggles, ending in outside-air
+mode. `hvac-live-20260917-02.jsonl` captured five clean payload transitions on
+extended SWCAN `0x10814099` (DLC4): `a0742400` -> `a0745000` at +18.14 s,
+back to `a0742400` at +27.71 s, `a0745000` at +38.34 s,
+`a0742400` at +51.91 s, and `a0745000` at +62.93 s. Times are host observation
+times relative to this recording's first frame, not physical button timestamps.
+Bytes 0, 1 and 3 stayed constant across these transitions. Byte 2 (zero-based)
+is a strong recirculation-related candidate: 0x50 coincides with the reported
+final outside-air state; 0x24 is the alternating state, provisionally recirc.
+Multiple bits differ (XOR 0x74), so this is NOT yet a single-bit definition.
+It is not established whether this reports requested or actual flap state;
+independent labelled repetitions and other HVAC settings remain needed. No
+replay/control message is authorized or inferred from this status correlation.
+`0x10734099` stayed `200000b40000`; `0x106D4099` changed slowly, not in the
+same five-switch pattern. Five-minute recording remains active for confirmation.
+
+Independent owner-labelled confirmation in the same recording: explicit ON
+corresponded to `a0742400` at host epoch 1789620727.688; explicit LED OFF /
+outside-air corresponded to `a0745000` at 1789620742.880. Thus the observed
+payload states track the recirculation selection in this configuration. This
+still does not identify physical flap feedback, isolate individual bits from
+other HVAC settings, or establish a writable command.
+
+### Important interpretation correction and TX lead
+
+Inspection of the larger local DBC explicitly labels byte 2 of family 0x40A
+`AirCndCmptLdEst` (estimated compressor load), scale 0.392157 percent. Therefore
+the repeatable 0x24/0x50 pattern may be an indirect compressor-load response to
+recirc. The earlier wording "recirc-selection feedback" overstates what has
+been established. Preserve it as an owner-labelled correlation, not a verified
+recirculation decoder or evidence of novelty. This generic DBC's applicability
+to this exact Volt signal is itself not proven.
+
+A separate concrete command lead exists: DBC `Remote_Climate_Control_Req_LS`,
+family 0x22D, DLC5, `RmClmCtrlRcrcSetReq` Motorola start bit 3 / length 3.
+The same frame includes AC, fan, distribution, temperatures, defog and sync
+requests. The DBC supplies no value table for recirc or leave-unchanged values.
+On-wire priority/source, applicability, value encoding and update semantics
+remain unverified. Do not fill other fields with guessed zeros or replay the
+0x10814099 status frame as a command. Installed firmware still has no permitted
+vehicle-side TX rule; a narrow tested semantic rule is required before TX.

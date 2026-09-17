@@ -40,3 +40,23 @@ Build output:
 Implementation/build does not mean deployment. The previously installed hvac05
 image lacks opcode 21. No physical TX or flashing was performed for this change.
 OBD-connected ROM recovery remains an unresolved physical issue.
+
+## Physical USB-only deployment, September 17
+
+After the owner disconnected OBD, flashed labeled serial
+`370022000651363038363036` using authenticated software USB recovery, without a
+USB replug. The initial attempt stopped before programming because the new
+evidence parent directory was absent; creating it allowed the existing installer
+to proceed. Live predecessor readback matched the saved hvac05 image. Complete
+1-MiB post-write readback matched SHA-256
+`3b6c9b0a9689b87c33a735f4c0389a9fb980455803c59e867145c0621300f50e`.
+
+Application enumerated and reported capabilities **511**, including configurable
+SWCAN TX (`0x100`), slot **A**, state **running**, error **none**, and completed boot
+LED introduction. Running build:
+`2cc6cfa6940b220018b178866863858d5534051c66229138de91f5d31abdf708`.
+Private evidence is under
+`/home/james/diagnostics/volt-gateway/flashing/370022000651363038363036-20260917/usb-swcan-01`.
+No CAN TX command was issued. This verifies flash contents and USB boot/capability,
+not physical HVAC operation or OBD-connected recovery. Existing regression suites
+passed 88 tests before deployment; no new experiment-specific test suite was added.

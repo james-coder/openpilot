@@ -47,3 +47,20 @@ Known-good rollback remains `bench-object02` and its full readback, SHA256
 `9b275b8dc8b3458a2565eb896366ca1cda4dff4d82d67aa51ea8aaa683afbb5c`.
 Flash and vehicle results must be recorded separately; preparation is not
 deployment. No signing or pairing secrets belong in this document or Git.
+
+## First physical flash and USB startup
+
+After the user disconnected OBD and cold-replugged USB, the exact-target
+recovery listener entered ROM DFU. The live full predecessor readback matched
+Object02. Programming completed and the full 1MiB readback matched SHA256
+`9d614e02c6662395f247b27f567a3d8b5e6ffc4e4ae2056d07a0be61cd6fa4a2`.
+Evidence: private `flashing/370022000651363038363036-20260916/hvac01`.
+
+The physical device booted slot A, running/error none, build
+`f2199cef62a2d9a725f6672e4850474f674c2df34a7815e84371b0bcdf7af9e2`.
+Authenticated INFO reported capabilities127, SWCAN3/HSCAN-mask3/backhaul2;
+LIST_RULES reported experimental policy1. HVAC status was version1, idle,
+zero attempts, interlock false as expected without the vehicle connected.
+All three bus reports showed zero RX/TX/errors/overflows/software drops.
+Only read-only queries were issued; op17 was not sent. Physical HVAC actuation
+and in-vehicle behavior remain unverified. No production Tres change was made.

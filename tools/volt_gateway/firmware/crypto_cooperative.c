@@ -3,6 +3,13 @@
 static bool (*pump)(void *);
 static void *context;
 static bool busy;
+/* Called only by the pinned modular-inverse loop in board builds. The
+ * callback drains passive RX and services the watchdog; it must never enter
+ * a command dispatcher, flash operation, or crypto allocator. No arithmetic
+ * state is shared with it. Failure must not resume successful verification. */
+void vgw_crypto_service_slice(void) {
+  if (!pump || !pump(context)) vgw_crypto_panic(1);
+}
 bool vgw_crypto_cooperative_init(bool (*service)(void *),void *ctx) {
   if (!service || !ctx || busy || pump) return false;
   pump=service; context=ctx;

@@ -26,10 +26,16 @@ def archive():
   return path
 
 
-@pytest.fixture(scope='module')
-def native(archive, tmp_path_factory):
-  path = target_crypto.build(archive, tmp_path_factory.mktemp('native-crypto') / 'build', native=True)
+@pytest.fixture(scope='module', params=[False, True], ids=['upstream', 'cooperative'])
+def native(archive, tmp_path_factory, request):
+  path = target_crypto.build(archive, tmp_path_factory.mktemp('native-crypto') / 'build', native=True, cooperative=request.param)
   lib = C.CDLL(str(path))
+  if request.param:
+    callback = C.CFUNCTYPE(C.c_bool, C.c_void_p)
+    lib._service = callback(lambda _: True)
+    lib.vgw_crypto_cooperative_init.argtypes = [callback, C.c_void_p]
+    lib.vgw_crypto_cooperative_init.restype = C.c_bool
+    assert lib.vgw_crypto_cooperative_init(lib._service, C.c_void_p(1))
   p, n, b = C.c_void_p, C.c_size_t, C.c_bool
   for name, result, args in (
     ('vgw_crypto_size', n, []), ('vgw_crypto_init', b, [p, p, n]), ('vgw_crypto_free', None, [p]),
@@ -154,6 +160,46 @@ assert not l.vgw_crypto_sha256(b"abc", 3, out)
 assert out.raw == bytes(32)
 '''
   subprocess.run([sys.executable, '-c', code, native._name], check=True, timeout=10)
+
+
+def test_cooperative_mid_inverse_service_failure_cannot_accept(native):
+  if not hasattr(native, '_service'):
+    return  # upstream reference build has no cooperative service
+  key = ECC.generate(curve='P-256')
+  body = b'a'*122
+  signature = DSS.new(key, 'fips-186-3', encoding='binary').sign(SHA256.new(IMAGE_DOMAIN+body))
+  code = '''
+import ctypes as C, sys
+l=C.CDLL(sys.argv[1])
+l.vgw_crypto_size.restype=C.c_size_t
+l.vgw_crypto_init.argtypes=[C.c_void_p,C.c_void_p,C.c_size_t]
+l.vgw_crypto_init.restype=C.c_bool
+l.vgw_crypto_verify.argtypes=[C.c_void_p,C.c_bool,C.c_void_p,C.c_size_t,C.c_void_p]
+l.vgw_crypto_verify.restype=C.c_bool
+callback=C.CFUNCTYPE(C.c_bool,C.c_void_p)
+calls=0
+def service(_):
+  global calls
+  calls+=1
+  if calls==3:
+    print('service rejected inside inverse',flush=True)
+    return False
+  return True
+cb=callback(service)
+l.vgw_crypto_cooperative_init.argtypes=[callback,C.c_void_p]
+l.vgw_crypto_cooperative_init.restype=C.c_bool
+assert l.vgw_crypto_cooperative_init(cb,C.c_void_p(1))
+ctx=C.create_string_buffer(l.vgw_crypto_size())
+assert l.vgw_crypto_init(ctx,bytes.fromhex(sys.argv[2]),65)
+l.vgw_crypto_verify(ctx,True,b'a'*122,122,bytes.fromhex(sys.argv[3]))
+raise AssertionError('fatal service failure returned instead of waiting for watchdog')
+'''
+  # Native execution has no hardware watchdog. The target's fatal loop must
+  # not return a successful verification; subprocess.run kills/reaps on timeout.
+  with pytest.raises(subprocess.TimeoutExpired) as result:
+    subprocess.run([sys.executable, '-c', code, native._name, sec1(key).hex(), signature.hex()],
+                   check=True, capture_output=True, timeout=2)
+  assert b'service rejected inside inverse' in result.value.stdout
 
 
 @pytest.fixture(scope='module')

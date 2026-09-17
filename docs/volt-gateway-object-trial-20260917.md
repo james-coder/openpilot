@@ -143,3 +143,99 @@ ACCEPT, custom drops scoped solely to `ppp+`/`wwan+`, Wi-Fi `wlan0` address
 192.168.98.187. No firewall service failure observed; previous boot journal was
 not persistent. No firewall rules were changed and no definitive outage cause
 was established. SSH recovered before deployment.
+
+## First connected trial: startup RX loss blocks responses
+
+The first two bounded CAN probes timed out during HELLO, before authentication.
+The comma's existing log publications showed one `0x6F0`, bus 1, DLC 8 request
+and its successful bus-129 TX echo; no `0x6F1` reply was observed. Subsequent
+parked checks showed normal GM safety parameter 124, controls disallowed, no
+selfdrive alert and no failed required processes. This does not validate driving.
+
+USB inspection confirmed the installed White application build
+`ab7d5606a3e22ec84d62b187da71a4fbaa303dbbdeb7f80454f1f33e71156b18`,
+slot A, protocol 1.1 and the intended bus mapping. Its indicator reported
+`rx_degraded`. Hardware FIFO overflow and CAN TX/error counters were zero, but
+software queues had dropped 2,719 primary and 257 Object frames. Queue peaks
+were 64; maximum recorded queue ages were 165 ms and 132 ms respectively.
+Four later samples over about ten seconds showed those drop counts unchanged
+while RX continued. A subsequent reboot again produced startup losses
+(2,748 primary / 328 Object), with no hardware FIFO overflow. This supports
+startup scheduling loss rather than sustained runtime overload in these samples.
+
+Source inspection establishes that software RX loss latches `tx_inhibited`;
+that is a concrete reason this White cannot answer the CAN probe. Do not clear
+the latch or weaken the guard to make the test pass. USB enumeration separately
+latches local control until reboot, so a CAN retry while USB owns it is invalid.
+
+`profile_board_crypto.py` runs the actual board ELF's crypto instructions
+off-device with ephemeral test keys and a returning cooperative-service stub.
+One run found 526 callbacks during signature verification, but a maximum gap
+of 5,051,016 executed Thumb code bytes between callbacks. Key initialization
+executed 302,034 code bytes without a callback. These are NOT target cycles or
+wall-clock measurements, and this probe does NOT emulate CAN. They identify
+crypto scheduling as a strong candidate for the startup gap, not proof of the
+exact physical blocking phase. The upstream restart budget is already set to 1;
+that setting alone is not a worst-case scheduling guarantee.
+
+Next gate: reproduce CAN arrivals across the full startup/verification path,
+identify and bound service gaps, and test the scheduling correction without
+discarding overflow protection. Previous boot/crypto tests did not establish
+loss-free cold startup on an already busy vehicle bus. No firmware was changed
+during this investigation with OBD connected. Darkness alone does not establish
+missing OBD power; the power-source question remains unresolved.
+
+## Off-device startup scheduling correction
+
+Three scheduling gaps were identified and addressed in the candidate:
+
+* `flash_area_read` now invokes the passive boot service between MCUboot reads.
+  The image-hash path did not call the configured watchdog macro; merely defining
+  that macro did not establish receive servicing throughout hashing.
+* The hash-pinned Mbed TLS 3.6.7 modular-inverse loop receives a small build-time
+  scheduling patch: invoke a passive service hook every eight iterations. Loop
+  bounds and arithmetic are unchanged. The patch refuses an unexpected or
+  already-patched source; before/after hashes enter the build report and patch
+  source enters the firmware build identity. No private-key operations are added.
+* Each cooperative service drains up to eight ordinary RX batches (one 64-frame
+  queue capacity per bus), stopping when software queues are empty. IRQs remain
+  enabled. This is bounded, not an unlimited drain under flood conditions.
+
+The callback never dispatches commands, invokes crypto, or writes flash. Failed
+service inside the inverse enters the existing fatal/watchdog path; it cannot
+return successful verification. Buffer sizes, overflow/TX-inhibit latches,
+signature requirements and primary Panda safety remain unchanged.
+
+The instruction probe measured a reduction from roughly 5.05 million to 0.417
+million executed Thumb code bytes in the longest verification service gap for
+the tested ephemeral signature (about 12x). This remains a scheduling proxy,
+not silicon timing. Different signatures and hardware timings require coverage.
+
+The extended board test injects traffic independently of polling callbacks,
+executes the linked RX IRQ handlers with preserved CPU context, models three
+hardware FIFO slots and checks hardware/software losses both before handoff and
+after application startup. Synthetic offered rates are 3,000 / 1,000 / 100 frames
+per modeled second, with a stated code-execution-to-time stress scale. It does
+not model NVIC latency, ISR execution time or flash wait states. The old image
+fails this scenario in boot; physical cold-bus startup remains a release gate.
+
+Preliminary targeted checks: 271 crypto tests passed, including both upstream
+and cooperatively patched native verification; 127 CAN/runtime/boot/recovery
+tests passed. A separate callback-failure check also passed (native fatal loop
+terminated/reaped by the test timeout, since native execution has no watchdog).
+Candidate board images built with no undefined symbols. Expanded busy-boot and
+complete regression results must be recorded before claiming readiness to flash.
+
+No device firmware, power state, CAN policy or connection was changed for this
+work. Candidate artifacts are under the diagnostics `builds/crypto-scheduling-*`
+directories, not in `/tmp`; temporary test builds contain only synthetic keys.
+
+Final targeted regression: **1,924 passed**, plus **2 busy cold-boot cases**
+(slots A/B; zero hardware/software receive losses before handoff and at runtime),
+plus **2 predecessor-preparation tests**. Ruff and diff whitespace checks passed.
+XML evidence is retained in `builds/crypto-scheduling-20260917-03/` as
+`regression.xml` and `busy-boot.xml`. The busy test initially retained FIFO state
+across modeled peripheral resets; correcting that model, not weakening firmware
+overflow checks, removed the spurious handoff overflow. Candidate signed image
+is privately prepared as `bench-object02`, and its exact-predecessor/region
+validation passed. No flash yet: owner must disconnect OBD and leave USB only.

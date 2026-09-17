@@ -3,13 +3,15 @@ import hashlib
 import os
 from pathlib import Path
 import struct
+import time
 import zlib
 
 from Crypto.PublicKey import ECC
 from elftools.elf.elffile import ELFFile
 import pytest
-from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_CODE, UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE
-from unicorn.arm_const import UC_CPU_ARM_CORTEX_M4, UC_ARM_REG_SP, UC_ARM_REG_PC, UC_ARM_REG_LR, UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2
+from unicorn import Uc, UC_ARCH_ARM, UC_MODE_THUMB, UC_MODE_MCLASS, UC_HOOK_CODE, UC_HOOK_BLOCK, UC_HOOK_MEM_READ, UC_HOOK_MEM_WRITE
+from unicorn.arm_const import (UC_CPU_ARM_CORTEX_M4, UC_ARM_REG_SP, UC_ARM_REG_PC, UC_ARM_REG_LR,
+                              UC_ARM_REG_R0, UC_ARM_REG_R1, UC_ARM_REG_R2, UC_ARM_REG_PRIMASK)
 
 from openpilot.tools.volt_gateway import bench_image, board_build, boot_image, provisioning, target_crypto
 from openpilot.tools.volt_gateway.test_white_can import BASES
@@ -56,7 +58,12 @@ def test_both_images_invalid_enters_actual_standalone_recovery(images):
   run(images,None)
 
 
-def run(images,slot,*,confirmed=False):
+@pytest.mark.parametrize('slot', [0, 1])
+def test_busy_buses_through_entire_confirmed_cold_boot(images, slot):
+  run(images, slot, confirmed=True, busy_traffic=True)
+
+
+def run(images,slot,*,confirmed=False,busy_traffic=False):
   loader_start,loader,ls=binary(images/'NOT_RELEASED-loader.elf')
   start,application,app=binary(images/f'NOT_RELEASED-{"A" if slot==0 else "B"}.elf')
   key=ECC.generate(curve='P-256')  # ephemeral emulator fixture only
@@ -111,6 +118,10 @@ def run(images,slot,*,confirmed=False):
   for b in (BASES[0],BASES[2]):
     put(b+0x200,0x2a1c0e01)
   queue=[]
+  queues={b: ([] if b != BASES[0] else queue) for b in BASES}
+  overflow=dict.fromkeys(BASES,0)
+  traffic={'bytes': 0, 'ms': 0, 'interrupt': False, 'in_irq': False, 'skip': False, 'offered': 0}
+  can_instances=set()
   rng=[0]
   busy=[0]
   guard_hooks=[]
@@ -124,13 +135,31 @@ def run(images,slot,*,confirmed=False):
   iwdg_pending={}
   iwdg_busy=[3]
   usb_window=[True]
+  def check_rx_loss():
+    assert can_instances
+    for pointer in can_instances:
+      # ARM ABI: pointer + 8-byte config, then three 72-byte stats records.
+      for i in range(3):
+        stats=struct.unpack('<18I',cpu.mem_read(pointer+12+72*i,72))
+        assert stats[2]==0, ('hardware FIFO loss', i, stats)
+        assert stats[14]==0, ('software RX loss during boot', i, stats)
   def runtime_init(machine,address,size,data):
     usb_window[0]=False
-  a=ls['vgw_white_runtime_init']&~1
-  cpu.hook_add(UC_HOOK_CODE,runtime_init,begin=a,end=a)
+    can_instances.clear()
+  for symbols in (ls,app):
+    a=symbols['vgw_white_runtime_init']&~1
+    cpu.hook_add(UC_HOOK_CODE,runtime_init,begin=a,end=a)
+  if busy_traffic:
+    def handoff_check(machine,address,size,data):
+      check_rx_loss()
+    a=ls['vgw_white_physical_handoff']&~1
+    cpu.hook_add(UC_HOOK_CODE,handoff_check,begin=a,end=a)
   def forbid(*args):
     raise AssertionError('flash accessed while busy in whole-image execution')
   def on_poll(machine,address,size,data):
+    can_instances.add(cpu.reg_read(UC_ARM_REG_R0))
+    if busy_traffic:
+      return
     t=read(0x40000024)+1
     put(0x40000024,t)
     if not confirmed and t%10==0 and not queue:
@@ -140,6 +169,15 @@ def run(images,slot,*,confirmed=False):
   for symbols in (ls,app):
     a=symbols['vgw_white_can_poll']&~1
     cpu.hook_add(UC_HOOK_CODE,on_poll,begin=a,end=a)
+  if busy_traffic:
+    def fatal_entry(machine,address,size,data):
+      raise AssertionError(f'boot fatal loop at {address:#x}, timer={read(0x40000024)}, '+
+                           f'traffic={traffic}, phase={read(0x2001c804):#x}')
+    for symbols in (ls,app):
+      for name in ('vgw_crypto_panic', 'fatal'):
+        if name in symbols:
+          a=symbols[name]&~1
+          cpu.hook_add(UC_HOOK_CODE,fatal_entry,begin=a,end=a)
   def app_init(machine,address,size,data):
     entered.append(True)
   a=app['vgw_application_init']&~1
@@ -157,6 +195,14 @@ def run(images,slot,*,confirmed=False):
   a=app['vgw_white_runtime_step']&~1
   cpu.hook_add(UC_HOOK_CODE,running,begin=a,end=a)
   def on_read(machine,access,a,size,value,data):
+    if busy_traffic:
+      for b in BASES:
+        if a == b+12:
+          put(a, len(queues[b]) | overflow[b])
+          return
+        if b+0x1b0 <= a <= b+0x1bc and queues[b]:
+          put(a, queues[b][0][(a-b-0x1b0)//4])
+          return
     if a==0x4000300c:
       put(a,3 if iwdg_busy[0] else 0)
       iwdg_busy[0]=max(0,iwdg_busy[0]-1)
@@ -200,6 +246,23 @@ def run(images,slot,*,confirmed=False):
         guard_hooks.clear()
   unlock=[]
   def on_write(machine,access,a,size,value,data):
+    if busy_traffic:
+      if a == 0x40023820:
+        # Peripheral reset during loader/application handoff clears pending
+        # FIFO contents, overflow flags and interrupt enables on real bxCAN.
+        # Do not carry a synthetic enabled receiver across that reset.
+        for i,b in enumerate(BASES):
+          if value & (1 << (25+i)):
+            queues[b].clear()
+            overflow[b]=0
+            put(b+12,0)
+            put(b+20,0)
+      for b in BASES:
+        if a == b+12:
+          if value & 32 and queues[b]:
+            queues[b].pop(0)
+          overflow[b] &= ~(value & 16)
+          return
     if a in iwdg_values:
       assert not iwdg_busy[0], 'watchdog written while LSI update busy'
       iwdg_pending[a]=(value,3)
@@ -225,7 +288,9 @@ def run(images,slot,*,confirmed=False):
     if a==0x40023c0c:
       put(a,read(a)&~value)
     if a==0xe000ed0c:
-      raise AssertionError(f'unexpected board reset at PC={cpu.reg_read(UC_ARM_REG_PC):#x}')
+      raise AssertionError(f'unexpected board reset at PC={cpu.reg_read(UC_ARM_REG_PC):#x}, '+
+                           f'timer={read(0x40000024)}, traffic={traffic}, '+
+                           f'stats={[struct.unpack("<54I",cpu.mem_read(p+12,216)) for p in can_instances]}')
   def flash_write(machine,access,a,size,value,data):
     assert off+0x08000000+boot_image.SLOT_SIZE-64<=a<off+0x08000000+boot_image.SLOT_SIZE
     assert size==1 and read(0x40023c10)==1
@@ -240,14 +305,67 @@ def run(images,slot,*,confirmed=False):
   cpu.hook_add(UC_HOOK_MEM_WRITE,on_write,begin=0x50000000,end=0x5001ffff)
   cpu.hook_add(UC_HOOK_MEM_WRITE,on_write,begin=0xe000ed0c,end=0xe000ed0c)
   cpu.hook_add(UC_HOOK_MEM_WRITE,flash_write,begin=0x08000000,end=0x080fffff)
+  def traffic_block(machine, address, size, data):
+    if traffic['in_irq'] or usb_window[0]:
+      return
+    if traffic['skip']:
+      traffic['skip']=False
+      return
+    # Synthetic execution-to-time stress scale, NOT target cycle timing.
+    # Arrivals continue during crypto, independent of cooperative callbacks.
+    traffic['bytes'] += size
+    if traffic['bytes'] >= 32000:
+      traffic['bytes'] -= 32000
+      traffic['ms'] += 1
+      put(0x40000024,read(0x40000024)+1)
+      for i,b in enumerate(BASES):
+        if read(b+20) != 2:
+          continue
+        count=(3,1,int(traffic['ms'] % 10 == 0))[i]
+        for _ in range(count):
+          traffic['offered'] += 1
+          if len(queues[b]) == 3:
+            overflow[b] = 16
+          else:
+            queues[b].append(((0x120+i)<<21,8,0,0))
+    if any(queues[b] for b in BASES) and not cpu.reg_read(UC_ARM_REG_PRIMASK) and any(queues[b] and read(b+20)==2 for b in BASES):
+      traffic['interrupt']=True
+      traffic['skip']=True
+      cpu.emu_stop()
+  if busy_traffic:
+    cpu.hook_add(UC_HOOK_BLOCK,traffic_block)
   sp,entry=struct.unpack_from('<II',loader)
   cpu.reg_write(UC_ARM_REG_SP,sp)
   try:
-    cpu.emu_start(entry,0,timeout=60_000_000,count=300_000_000)
+    # Explicitly execute the linked C IRQ handlers with register preservation.
+    # NVIC entry latency, flash wait states and IRQ execution time are not
+    # modeled; physical validation remains mandatory.
+    deadline=time.monotonic()+240
+    for _ in range(100000 if busy_traffic else 1):
+      assert time.monotonic()<deadline, f'busy boot wall-time bound: {traffic}, phase={read(0x2001c804):#x}'
+      cpu.emu_start(entry,0,timeout=60_000_000,count=300_000_000)
+      if not traffic['interrupt']:
+        break
+      traffic['interrupt']=False
+      traffic['in_irq']=True
+      saved=cpu.context_save()
+      symbols=app if read(0xe000ed08)==start else ls
+      for i,b in enumerate(BASES):
+        if queues[b] and read(b+20)==2:
+          cpu.reg_write(UC_ARM_REG_SP,(cpu.reg_read(UC_ARM_REG_SP)-128)&~7)
+          cpu.reg_write(UC_ARM_REG_LR,0x2001fff1)
+          cpu.emu_start(symbols[f'vgw_can{i+1}_rx0']|1,0x2001fff0,count=100000)
+          assert cpu.reg_read(UC_ARM_REG_PC)==0x2001fff0
+          cpu.context_restore(saved)
+      traffic['in_irq']=False
+      entry=cpu.reg_read(UC_ARM_REG_PC)|1
   except Exception as error:
     raise AssertionError(f'whole board execution failed at PC={cpu.reg_read(UC_ARM_REG_PC):#x}, '+
                          f'phase={read(0x2001c804):#x}') from error
   assert complete, f'whole board instruction/time limit: PC={cpu.reg_read(UC_ARM_REG_PC):#x}'
+  if busy_traffic:
+    assert traffic['offered'] > 1000
+    check_rx_loss()
   marker,phase,inverse,end=struct.unpack('<4I',cpu.mem_read(0x2001c800,16))
   assert (marker,end)==(0x56474231,0x31424756) and phase^inverse==0xffffffff
   assert phase==(13|((slot+1)<<16) if slot is not None else 13)

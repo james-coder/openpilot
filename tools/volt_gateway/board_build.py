@@ -15,7 +15,7 @@ import tempfile
 
 import gcc_arm_none_eabi
 
-from openpilot.tools.volt_gateway import target_crypto, mcuboot_port, usb_history
+from openpilot.tools.volt_gateway import target_crypto, mcuboot_port, usb_history, crypto_scheduling
 
 BOARD=('board_main','board_memory','board_storage','crypto_cooperative','application','authority','update','observe','status_led',
        'white_runtime','white_startup','white_watchdog','white_clock','white_rng','white_board','white_can',
@@ -44,6 +44,7 @@ def build(checkout: Path,archive: Path,output: Path,*,usb_repository: Path | Non
     if usb_repository is not None:
       usb=usb_history.extract(usb_repository,root/'usb')
     crypto=target_crypto.extract(archive,root)
+    report['crypto_scheduling_patch']=crypto_scheduling.patch(crypto)
     raw=subprocess.check_output(['git','-C',str(checkout),'archive',mcuboot_port.COMMIT,'boot/bootutil'])
     with tarfile.open(fileobj=io.BytesIO(raw)) as source:
       source.extractall(root,filter='data')
@@ -80,6 +81,7 @@ def build(checkout: Path,archive: Path,output: Path,*,usb_repository: Path | Non
           identity.update(str(path.relative_to(own)).encode()+b'\0'+path.read_bytes())
       identity.update(b'USB' if usb is not None else b'NO-USB')
       identity.update(Path(__file__).read_bytes())
+      identity.update(Path(crypto_scheduling.__file__).read_bytes())
       if usb is not None:
         identity.update(usb_history.COMMIT.encode())
         identity.update(Path(usb_history.__file__).read_bytes())

@@ -64,7 +64,13 @@ static bool pump(void *ctx) {
   vgw_board_storage *s=ctx;
   vgw_white_watchdog *w=&s->runtime->startup.watchdog;
   vgw_white_watchdog_progress(w,VGW_PROGRESS_SCHEDULER);
-  if (!vgw_white_can_poll(&s->runtime->can,passive,s)) return false;
+  /* Crypto slices can accumulate more than one ordinary main-loop batch.
+   * Drain at most one queue capacity per bus, stopping early when empty.
+   * IRQ producers remain enabled; no unbounded drain under a traffic flood. */
+  for (unsigned batch=0;batch<VGW_CAN_RX_DEPTH/8U;batch++) {
+    if (!vgw_white_can_poll(&s->runtime->can,passive,s)) return false;
+    if (!s->runtime->can.rx_count[0] && !s->runtime->can.rx_count[1] && !s->runtime->can.rx_count[2]) break;
+  }
   vgw_white_watchdog_progress(w,VGW_PROGRESS_RX|VGW_PROGRESS_PROTOCOL);
   uint64_t sampled; bool allowed;
   if (!vgw_white_clock_valid(&s->runtime->clock) ||

@@ -45,7 +45,9 @@ def extract(archive: Path, destination: Path):
   return destination / root
 
 
-def build(archive: Path, output: Path, *, native=False):
+def build(archive: Path, output: Path, *, native=False, cooperative=False):
+  if cooperative and not native:
+    raise ValueError('cooperative ARM verification uses the full board build')
   output.mkdir(parents=True, exist_ok=False)
   own = Path(__file__).parent / 'firmware'
   toolchain = Path(gcc_arm_none_eabi.__file__).parent / 'toolchain/bin'
@@ -67,8 +69,13 @@ def build(archive: Path, output: Path, *, native=False):
                             'synchronous verifier requires board scheduling/watchdog review']}
   with tempfile.TemporaryDirectory(prefix='voltgw-crypto-') as tmp:
     source = extract(archive, Path(tmp))
+    if cooperative:
+      from openpilot.tools.volt_gateway import crypto_scheduling
+      report['crypto_scheduling_patch'] = crypto_scheduling.patch(source)
     flags += ['-I', str(source / 'include')]
     sources = [source / 'library' / (name + '.c') for name in LIBRARIES] + [own / 'crypto.c']
+    if cooperative:
+      sources += [own / 'crypto_cooperative.c']
     if not native:
       flags += ['-DVGW_TARGET_CRYPTO']
       sources += [own / (name + '.c') for name in ('emu', 'authority', 'observe', 'update')]
@@ -84,6 +91,8 @@ def build(archive: Path, output: Path, *, native=False):
                                      'stack_usage': obj.with_suffix('.su').read_text()}
     binary = output / ('crypto.so' if native else 'NEVER_FLASH-target-crypto.elf')
     link = ['-shared'] if native else ['-nostdlib', '-T', str(own / 'emu.ld')]
+    if cooperative:
+      link += ['-Wl,--wrap=mbedtls_ecdsa_verify,--wrap=mbedtls_ecdsa_read_signature']
     subprocess.run([compiler, *flags, *link, '-Wl,--gc-sections,--build-id=none', '-Wl,-Map=' + str(output / 'link.map'),
                     *objects, '-o', str(binary)],
                    check=True, capture_output=True, text=True, timeout=60)

@@ -77,7 +77,11 @@ uint32_t flash_area_align(const struct flash_area *area) { (void)area; return 4;
 uint8_t flash_area_erased_val(const struct flash_area *area) { (void)area; return 255; }
 int flash_area_read(const struct flash_area *area, uint32_t off, void *out, uint32_t size) {
   if (!out || !valid(area, off, size) || !io.read(io.context, area->fa_off + off, out, size)) return error();
-  return 0;
+  /* MCUboot's image hash loop does not invoke our watchdog macro. Service
+   * passive RX between its bounded flash chunks as well as crypto slices.
+   * The service callback must not reenter bootutil or dispatch commands. */
+  vgw_boot_service();
+  return failed ? -1 : 0;
 }
 int flash_area_write(const struct flash_area *area, uint32_t off, const void *data, uint32_t size) {
   /* Bootutil writes trailer flags/magic only. No image-payload write API here. */

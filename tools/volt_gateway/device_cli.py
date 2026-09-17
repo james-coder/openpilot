@@ -11,7 +11,7 @@ import resource
 import struct
 import time
 
-from openpilot.tools.volt_gateway.operator import bounded_read
+from openpilot.tools.volt_gateway.host_files import bounded_read
 from openpilot.tools.volt_gateway.protocol import ProtocolError
 from openpilot.tools.volt_gateway.recovery_client import RecoveryClient, HELLO_REQUEST
 from openpilot.tools.volt_gateway.usb_transport import UsbTransport

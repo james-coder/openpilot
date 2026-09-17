@@ -1,6 +1,6 @@
 """Experimental, bounded wire codecs. Not production firmware or a CAN driver.
 
-No arbitration IDs are assigned here. ISO-TP flow-control scheduling belongs to
+Object parked-trial transport IDs are explicit below. ISO-TP flow-control scheduling belongs to
 the simulator, not this reassembler. Streaming frames are untrusted observations.
 """
 
@@ -13,6 +13,7 @@ import struct
 import zlib
 
 MAX_PDU = 512
+OBJECT_REQUEST_ID, OBJECT_RESPONSE_ID = 0x6F0, 0x6F1
 MAJOR, MINOR = 1, 0
 HEADER = struct.Struct("!4sBBBB8sQII")
 TAG_SIZE = 16

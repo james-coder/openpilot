@@ -91,3 +91,12 @@ First broad validator: 1,678 tests passed, all build/analyzer steps passed, but
 the overall result intentionally failed source-consistency because host tools
 were still being edited during the run. A stable-source rerun is recorded
 separately; do not call the first report an overall pass.
+
+Stable-source rerun completed: **1,679 passed, zero failed/skipped**, all target
+builds, static analyzers, lint and source-consistency checks passed. Report:
+`/home/james/diagnostics/volt-gateway/builds/validation-object-trial-20260917-02/report.json`,
+SHA-256 `e0e8833307e12242d8d9a4b1105ae742da08f348264fbad1459d0ede1b5e9a4e`.
+`production_ready` remains false: actual CAN transport and primary deployment
+have not yet been validated. Root implementation commit `18a3e656d`, primary
+safety/opt-in commit `276a7f69`, both pushed. Existing unrelated diagnostic edits
+remain unstaged and were not swept into these commits.

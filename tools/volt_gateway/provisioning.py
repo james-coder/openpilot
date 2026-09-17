@@ -15,13 +15,10 @@ import zlib
 
 from openpilot.tools.volt_gateway.authority import public_key
 from openpilot.tools.volt_gateway.operator import bounded_read, private_directory, write_new
+from openpilot.tools.volt_gateway.protocol import OBJECT_REQUEST_ID, OBJECT_RESPONSE_ID
 
 LAYOUT = hashlib.sha256(b'VOLTGW-F413-v1:flash=1024K;ram=128K;loader=0:128K;provision=128K:128K;'+
                         b'A=256K:384K;B=640K:384K;header=512;trailer=64;direct-xip-revert').digest()
-
-OBJECT_REQUEST_ID = 0x6F0
-OBJECT_RESPONSE_ID = 0x6F1
-
 
 def object_trial_record(device: bytes, pairing: bytes, public: bytes, *, divider: int):
   """Explicit parked-trial profile, never the CLI default; no vehicle actuation.

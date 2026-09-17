@@ -6,8 +6,7 @@ Both primary firmware and its live safety parameter must explicitly permit it.
 from collections import deque
 import time
 
-from openpilot.tools.volt_gateway.protocol import ProtocolError
-from openpilot.tools.volt_gateway.provisioning import OBJECT_REQUEST_ID, OBJECT_RESPONSE_ID
+from openpilot.tools.volt_gateway.protocol import ProtocolError, OBJECT_REQUEST_ID, OBJECT_RESPONSE_ID
 from openpilot.tools.volt_gateway.telemetry import TelemetryReceiver
 from openpilot.tools.volt_gateway.usb_transport import UsbTransport
 

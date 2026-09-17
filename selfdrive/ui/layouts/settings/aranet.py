@@ -11,6 +11,15 @@ from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
 
 
+def graph_allowed():
+  """The full-screen history may cover the road view only while parked."""
+  if not ui_state.started:
+    return True
+  state = ui_state.sm['carState']
+  return (ui_state.sm.recv_frame['carState'] >= ui_state.started_frame and state.canValid and
+          str(state.gearShifter) == 'park' and abs(state.vEgo) < .1 and not ui_state.engaged)
+
+
 def status_lines(message, width, measure):
   lines, line = [], ''
   for word in str(message).split():
@@ -35,7 +44,7 @@ def status_lines(message, width, measure):
 
 
 class AranetLayout(Widget):
-  def __init__(self):
+  def __init__(self, allow_parked_onroad=False):
     super().__init__()
     self.font = gui_app.font(FontWeight.MEDIUM)
     self.hours = 24
@@ -43,6 +52,7 @@ class AranetLayout(Widget):
     self.poll = 0
     self.message = ''
     self.buttons = []
+    self.allow_parked_onroad = allow_parked_onroad
 
   def _handle_mouse_release(self, pos):
     for rect, action in self.buttons:
@@ -50,6 +60,8 @@ class AranetLayout(Widget):
         if action == 'Close':
           gui_app.pop_widget()
         elif action == 'Pause / Resume':
+          if ui_state.started:
+            return
           try:
             ROOT.mkdir(exist_ok=True)
             path = ROOT / 'paused'
@@ -67,7 +79,7 @@ class AranetLayout(Widget):
     rl.draw_text_ex(self.font, value, rl.Vector2(x, y), size, 0, color)
 
   def _render(self, r):
-    if ui_state.started:
+    if ui_state.started and (not self.allow_parked_onroad or not graph_allowed()):
       gui_app.pop_widget()
       return
     now = time.time()  # noqa: TID251 -- persisted history uses wall time across reboots
@@ -83,8 +95,9 @@ class AranetLayout(Widget):
         self.message = 'Collector unavailable; history retained'
     rl.draw_rectangle_rec(r, rl.Color(8, 14, 24, 255))
     self.buttons = []
-    for i, label in enumerate(['2', '24', '168', '720', 'Pause / Resume', 'Close']):
-      button = rl.Rectangle(r.x+25+i*(r.width-50)/6, r.y+20, (r.width-65)/6, 65)
+    labels = ['2', '24', '168', '720'] + ([] if ui_state.started else ['Pause / Resume']) + ['Close']
+    for i, label in enumerate(labels):
+      button = rl.Rectangle(r.x+25+i*(r.width-50)/len(labels), r.y+20, (r.width-65)/len(labels), 65)
       self.buttons.append((button, label))
       rl.draw_rectangle_rounded(button, .15, 6, rl.Color(45, 62, 80, 255))
       self.text({'2': '2 hours', '24': '24 hours', '168': '7 days', '720': '30 days'}.get(label, label), button.x+12, button.y+18, 27)

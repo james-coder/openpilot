@@ -3,8 +3,9 @@
 ## Scope and deployment gate
 
 This candidate addresses observed HSCAN hardware FIFO overflows in the parked
-startup comparison. It has not been flashed or physically validated. Neither
-the production Tres nor the installed White firmware is changed by these edits.
+startup comparison. It subsequently passed the USB-only bench flash/check below;
+receive behavior under physical CAN traffic remains unvalidated. The production
+Tres is unchanged.
 Transport IDs and vehicle-side transmit permissions remain separately gated.
 
 ## Design
@@ -85,3 +86,31 @@ Earlier run 01 exposed a freestanding ARM link failure from an unavailable
 division without that dependency. Run 02 was superseded/interrupted while the
 requested degraded LED indication was added. Neither is a passing release gate.
 Only the unchanged-source final run above validates this candidate.
+
+## USB-only bench deployment, 2026-09-17 UTC
+
+The owner explicitly disconnected the labeled White Panda from the vehicle and
+left laptop USB connected. Its exact cold-recovery personality was checked on
+Windows before the fixed ROM handoff, then ROM serial `365236793036` was attached
+to WSL. No option-byte, OTP or readout-protection changes were made.
+
+All source hashes still matched final validation. The previous full 1 MiB flash
+was read and matched `after-bench-led-session01.bin` before programming. Only
+reviewed loader/application regions changed; provisioning and other regions
+matched the assembled image without writes. Entire post-program flash matched:
+`fd5c046b75aac2b48e5f3a1bd1499d92258b41028a7405161453f96c3d6fd273`.
+
+Following the ROM jump and normal USB re-enumeration, paired queries reported
+build `9ff7298e6f810c0d1470c47441ecff65eec04a38959aba589329836868a8638d`,
+capabilities `0x3f`, mapping SWCAN=3/HSCAN mask=3/backhaul=0 and an empty TX policy.
+Six samples over more than 20 seconds showed increasing uptime, unchanged reset
+flags, running slot A with no LED fault, and zero RX/TX/error/overflow/software
+drop counters on logical buses 0/1/3. Authenticated session closure did not cause
+a fault. With OBD disconnected, zero IRQ calls and queue occupancy are expected;
+this does not exercise physical CAN interrupt servicing.
+
+Readbacks, programming logs and `usb-rx-irq01.json` are preserved under
+`/home/james/diagnostics/volt-gateway/flashing/370022000651363038363036-20260916/`.
+Signed factory images remain private because they contain provisioning material.
+Next gate: parked receive-only comparison with hardware and software loss counters.
+A post-flash physical cold power-cycle has not yet been validated.

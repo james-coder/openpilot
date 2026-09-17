@@ -18,6 +18,18 @@ group has lower arbitration priority and is preferred on that criterion alone.
 
 ## Earlier evidence
 
+### Diagnostic-range review
+
+The public mirror of GM's February 2010 GMW3110, sections 4.4.3–4.4.5, lists
+normal enhanced diagnostic request/responses in `0x240–0x25F`, `0x540–0x55F`,
+`0x640–0x65F`, optional emissions responses `0x5E8–0x5EF`, and OBD
+`0x7DF–0x7EF`, with functional/wake IDs `0x100–0x102`. It explicitly does not
+reserve all of `0x6xx` merely because some USDT responses use that prefix.
+Thus `0x6F0–0x6F2` do not intersect those listed normal diagnostic ranges.
+This narrows one concern; it does not establish absence of OEM normal traffic,
+newer assignments or programming traffic for this installation. IDs remain
+deferred. [GM specification mirror](https://studylib.net/doc/26162849/gmw3110-2010).
+
 2026-09-16 additional evidence: full driving rlogs were copied and compared with
 stationary traffic. Object-bus estimates were 22.0–23.6% during three highway
 minutes with openpilot active and radar-reported targets, versus 24.1% stationary.

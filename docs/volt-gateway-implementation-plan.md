@@ -1,5 +1,29 @@
 # Volt gateway implementation status and gates
 
+## Current status — 2026-09-17 UTC (supersedes historical status below)
+
+The labeled White Panda has been backed up, identified as F413 revision 0x1000
+with 1 MiB flash, flashed and USB-verified. CAN2 Object HSCAN and CAN3 SWCAN
+reception work simultaneously through the vehicle splitter. The IRQ queue
+candidate passed 1,669 off-device tests and a parked active-traffic capture with
+zero reported hardware/software queue loss. See [RX evidence](volt-gateway-rx-queues.md).
+
+A subsequent SWCAN survey exposed a separate observer timestamp-ordering bug;
+its correction is under off-device validation. See [survey, DBC matches and
+target leads](volt-gateway-swcan-discovery.md). Do not confuse hardware reception
+health with a fully validated observation/forwarding pipeline.
+
+The White remains CAN-silent with USB control only. No gateway TX permission is
+installed on the Tres. Exact transport IDs remain unapproved pending the
+documented conflict/vehicle-state coverage gates. Next integrated milestones:
+correct/revalidate observation, repeat full ID survey, close ID-selection gates,
+then tightly scoped authenticated Object-CAN exchange and SWCAN subscription.
+The production comma received only the separately tested [Volt startup wait
+fix](volt-object-startup-wait.md), not gateway integration or new Panda firmware.
+
+Everything below is historical progression, not a claim that old blockers or
+"original firmware unchanged" statements describe the current device.
+
 ## Current integrated board status — 2026-09-16
 
 See [board integration](volt-gateway-board-integration.md): complete loader/A/B

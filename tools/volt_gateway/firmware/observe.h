@@ -44,6 +44,8 @@ typedef struct {
   uint32_t received[4], id_drops, capture_drops, invalid, sequence, issued_handles;
   uint16_t capture_count;
   uint8_t capture_mask, next_subscription;
+  /* Acquisition clocks are ordered per bus, independently of command time. */
+  uint64_t frame_last_us[4], observe_since[4], capture_since;
 } vgw_observer;
 
 size_t vgw_observer_size(void);

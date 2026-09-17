@@ -100,6 +100,28 @@ int main(void) {
   f.bus = 3;
   f.dlc = 9;
   assert(!vgw_observer_feed(&o, &f));
+  /* Independent bus queues may arrive out of global order, including frames
+   * older than the command that opened a capture. Do not cancel that capture. */
+  vgw_observer_init(&o);
+  assert(vgw_observe_start(&o,3,30,1000));
+  assert(vgw_capture_start(&o,8,30,1000));
+  f.dlc=8; f.flags=0; f.address=0x123;
+  f.bus=0; f.timestamp_us=1100;
+  assert(vgw_observer_feed(&o,&f));
+  f.bus=3; f.timestamp_us=900;
+  assert(vgw_observer_feed(&o,&f));
+  assert(o.capture_count==0 && !vgw_get_id(&o,0,&s));
+  assert(vgw_subscribe(&o,0,3,0x123,0,10));
+  assert(!vgw_next_observation(&o,1200,1000,&out,&handle));
+  f.timestamp_us=1050;
+  assert(vgw_observer_feed(&o,&f));
+  f.timestamp_us=1060;
+  assert(vgw_observer_feed(&o,&f));
+  assert(o.invalid==0 && o.capture_count==2);
+  assert(vgw_get_id(&o,0,&s) && s.count==2 && s.first_us==1050 && s.last.timestamp_us==1060);
+  assert(vgw_next_observation(&o,1300,1000,&out,&handle) && out.timestamp_us==1060);
+  assert(!vgw_next_observation(&o,1299,1000,&out,&handle)); /* real control-clock regression */
+  assert(o.invalid==1 && !o.subscriptions[0].used);
   printf("observer tests passed; host context bytes=%zu\n", sizeof(o));
   return 0;
 }

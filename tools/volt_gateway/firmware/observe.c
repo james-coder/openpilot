@@ -6,17 +6,18 @@ static bool identity(uint8_t bus, uint32_t address, uint8_t flags) {
   return bus < 4 && (flags & ~3U) == 0 && address <= ((flags & VGW_EXTENDED) ? 0x1FFFFFFFU : 0x7FFU);
 }
 
-static bool clock_ok(vgw_observer *o, uint64_t now) {
-  if (now < o->last_us || now >= (UINT64_C(1) << 63)) {
+static bool clock_check(vgw_observer *o, uint64_t now, uint64_t *previous) {
+  if (now < *previous || now >= (UINT64_C(1) << 63)) {
     o->invalid = increment(o->invalid);
     for (unsigned i = 0; i < 4; i++) o->observe_until[i] = 0;
     o->capture_until = 0;
     vgw_clear_subscriptions(o);
     return false;
   }
-  o->last_us = now;
+  *previous = now;
   return true;
 }
+static bool clock_ok(vgw_observer *o, uint64_t now) { return clock_check(o,now,&o->last_us); }
 
 size_t vgw_observer_size(void) { return sizeof(vgw_observer); }
 
@@ -28,6 +29,7 @@ void vgw_observer_init(vgw_observer *o) {
 bool vgw_observe_start(vgw_observer *o, uint8_t bus, uint32_t seconds, uint64_t now) {
   if (bus >= 4 || seconds == 0 || seconds > 3600 || !clock_ok(o, now)) return false;
   o->observe_until[bus] = now + (uint64_t)seconds * 1000000U;
+  o->observe_since[bus] = now;
   return true;
 }
 
@@ -48,6 +50,7 @@ bool vgw_capture_start(vgw_observer *o, uint8_t mask, uint32_t seconds, uint64_t
   o->capture_mask = mask;
   o->capture_count = 0;
   o->capture_until = now + (uint64_t)seconds * 1000000U;
+  o->capture_since = now;
   return true;
 }
 
@@ -112,7 +115,9 @@ bool vgw_observer_feed(vgw_observer *o, const vgw_frame *input) {
     o->invalid = increment(o->invalid);
     return false;
   }
-  if (!clock_ok(o, input->timestamp_us)) return false;
+  /* RX queues preserve order within each bus, not across buses. A frame can
+   * also predate the latest command/telemetry tick without a clock fault. */
+  if (!clock_check(o, input->timestamp_us, &o->frame_last_us[input->bus])) return false;
   vgw_frame f = {0};
   f.timestamp_us = input->timestamp_us;
   f.address = input->address;
@@ -122,8 +127,8 @@ bool vgw_observer_feed(vgw_observer *o, const vgw_frame *input) {
   f.sequence = o->sequence++;
   if (!(f.flags & VGW_RTR)) for (unsigned i = 0; i < f.dlc; i++) f.data[i] = input->data[i];
   o->received[f.bus] = increment(o->received[f.bus]);
-  if (f.timestamp_us < o->observe_until[f.bus]) statistics(o, &f);
-  if (f.timestamp_us < o->capture_until && (o->capture_mask & (1U << f.bus))) {
+  if (f.timestamp_us >= o->observe_since[f.bus] && f.timestamp_us < o->observe_until[f.bus]) statistics(o, &f);
+  if (f.timestamp_us >= o->capture_since && f.timestamp_us < o->capture_until && (o->capture_mask & (1U << f.bus))) {
     if (o->capture_count < VGW_CAPTURE) o->capture[o->capture_count++] = f;
     else o->capture_drops = increment(o->capture_drops);
   }

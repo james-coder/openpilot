@@ -52,12 +52,7 @@ class LongitudinalPlanner:
     from opendbc.car.gm.volt_longitudinal import personal_enabled, PROFILE
     profile_args = ({'stop_distance': PROFILE.stop_distance, 'comfort_brake': PROFILE.comfort_brake,
                      'jerk_scale': PROFILE.jerk_scale} if personal_enabled(CP) else {})
-    # Independent of the braking-approach PROFILE above: a data-derived steady-state
-    # following-distance fit, gated on its own Volt-only validity check. Empty dict
-    # (fully stock get_T_FOLLOW behavior, every car including Volt) until a validated fit
-    # has been written by tools/profiling/volt_following_fit.py.
-    from openpilot.selfdrive.car.volt_following import following_gap_kwargs
-    self.mpc = LongitudinalMpc(dt=dt, **profile_args, **following_gap_kwargs(CP))
+    self.mpc = LongitudinalMpc(dt=dt, **profile_args)
     from openpilot.selfdrive.car.volt_profile import runtime_bundle
     from opendbc.car.gm.volt_longitudinal import VoltFlags
     bundle = runtime_bundle(CP)

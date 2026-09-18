@@ -53,21 +53,48 @@ T_IDXS_LST = [index_function(idx, max_val=MAX_T, max_idx=N) for idx in range(N+1
 T_IDXS = np.array(T_IDXS_LST)
 FCW_IDXS = T_IDXS < 5.0
 T_DIFFS = np.diff(T_IDXS, prepend=[0.])
+# Simple, direct edits (no profile/data system, no personality-dependent branching) to
+# roughly halve the steady-state following gap at every speed -- comfort_brake is the
+# dominant term at highway speed, so it has to move too, not just t_follow/stop_distance.
+# 6.0 (vs. stock 2.5) was chosen deliberately conservative: it's higher than anything
+# steady-state-tested tonight (the reverted personality-profile system topped out at 4.8
+# for its aggressive tier) but well short of the ~13-14 that would be needed for a literal
+# 50% cut, specifically to stay closer to already-observed behavior. See
+# docs/2026-09-18-startup-and-longitudinal-incident.md for the full incident this followed;
+# the data-driven personality-profile system and cut-in relaxation feature previously built
+# on top of this file were moved to the experimental/following-distance-and-cutin branch.
+COMFORT_BRAKE = 6.0
+STOP_DISTANCE = 4.5
 CRUISE_MIN_ACCEL = -1.2
 CRUISE_MAX_ACCEL = 1.6
 MIN_X_LEAD_FACTOR = 0.5
 
-# Personality/gap math lives in gap_params.py so it stays importable/testable without
-# the ACADOS solver; re-exported here so existing `from long_mpc import get_T_FOLLOW`
-# call sites (e.g. test_following_distance.py) keep working unchanged.
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.gap_params import (  # noqa: E402
-  COMFORT_BRAKE, STOP_DISTANCE, get_jerk_factor, get_T_FOLLOW, get_stopped_equivalence_factor,
-  get_safe_obstacle_distance, resolve_gap_params,
-)
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.cutin_relaxation import (
-  CutinRelaxationState, update as cutin_update,
-)
+def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
+  if personality==log.LongitudinalPersonality.relaxed:
+    return 1.0
+  elif personality==log.LongitudinalPersonality.standard:
+    return 1.0
+  elif personality==log.LongitudinalPersonality.aggressive:
+    return 0.5
+  else:
+    raise NotImplementedError("Longitudinal personality not supported")
 
+
+def get_T_FOLLOW(personality=log.LongitudinalPersonality.standard):
+  if personality==log.LongitudinalPersonality.relaxed:
+    return 0.875
+  elif personality==log.LongitudinalPersonality.standard:
+    return 0.725
+  elif personality==log.LongitudinalPersonality.aggressive:
+    return 0.625
+  else:
+    raise NotImplementedError("Longitudinal personality not supported")
+
+def get_stopped_equivalence_factor(v_lead):
+  return (v_lead**2) / (2 * COMFORT_BRAKE)
+
+def get_safe_obstacle_distance(v_ego, t_follow, stop_distance=STOP_DISTANCE, comfort_brake=COMFORT_BRAKE):
+  return (v_ego**2) / (2 * comfort_brake) + t_follow * v_ego + stop_distance
 
 def gen_long_model():
   model = AcadosModel()
@@ -214,15 +241,11 @@ def gen_long_ocp():
 
 
 class LongitudinalMpc:
-  def __init__(self, dt=DT_MDL, stop_distance=STOP_DISTANCE, comfort_brake=COMFORT_BRAKE, jerk_scale=1., following_profile=None):
+  def __init__(self, dt=DT_MDL, stop_distance=STOP_DISTANCE, comfort_brake=COMFORT_BRAKE, jerk_scale=1.):
     self.dt = dt
     self.stop_distance = float(np.clip(stop_distance, 4.5, 8.))
-    self.comfort_brake = float(np.clip(comfort_brake, 1.5, 3.))
+    self.comfort_brake = float(np.clip(comfort_brake, 1.5, 6.))  # widened from stock's 3.0 -- see COMFORT_BRAKE comment above
     self.jerk_scale = float(np.clip(jerk_scale, .5, 3.))
-    # Independent of stop_trajectory/personal_curve below (the braking-approach system):
-    # an optional per-personality (t_follow, comfort_brake, stop_distance) override fitted
-    # from the driver's own steady-state following behavior. None means fully stock.
-    self.following_profile = following_profile
     self.personal_curve = None
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.reset()
@@ -260,9 +283,6 @@ class LongitudinalMpc:
     self.set_weights()
     self.personal_track = None
     self.personal_stable_time = self.personal_blend = 0.
-    self.cutin_state = CutinRelaxationState()
-    self._cutin_clock = 0.
-    self.last_cutin_track_id = -1
     if getattr(self, 'stop_trajectory', None) is not None:
       self.stop_trajectory.reset()
 
@@ -381,7 +401,7 @@ class LongitudinalMpc:
 
   def update(self, radarstate, v_cruise, personality=log.LongitudinalPersonality.standard, radar_age=float('inf'), measured_state=None,
              personal_active=True):
-    t_follow, comfort_brake, stop_distance = resolve_gap_params(personality, self.following_profile, self.stop_distance, self.comfort_brake)
+    t_follow = get_T_FOLLOW(personality)
     v_ego = self.x0[1]
     self.status = radarstate.leadOne.status or radarstate.leadTwo.status
 
@@ -400,7 +420,7 @@ class LongitudinalMpc:
     # TODO does this make sense when max_a is negative?
     v_upper = v_ego + (T_IDXS * CRUISE_MAX_ACCEL * 1.05)
     v_cruise_clipped = np.clip(v_cruise * np.ones(N+1), v_lower, v_upper)
-    cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, stop_distance, comfort_brake)
+    cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, self.stop_distance, self.comfort_brake)
 
     x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle])
     self.source = MPC_SOURCES[np.argmin(x_obstacles[0])]
@@ -416,27 +436,8 @@ class LongitudinalMpc:
     self.params[:,3] = np.copy(self.a_prev)
     self.params[:,4] = t_follow
     self.params[:,5] = LEAD_DANGER_FACTOR
-    self.params[:,6] = stop_distance
-    self.params[:,7] = comfort_brake
-    self._cutin_clock += self.dt
-    lead = radarstate.leadOne
-    self.cutin_state, relaxed_stop_distance, relaxed_comfort_brake = cutin_update(
-      self.cutin_state, self._cutin_clock, v_ego, lead.status, lead.cutinConfidence, lead.radarTrackId,
-      lead.dRel, t_follow, comfort_brake, stop_distance)
-    # t_follow is never touched by cutin_update -- see cutin_relaxation.py's module docstring
-    # for why that keeps this from directly weakening the danger-zone constraint, and why
-    # that's not the same as a guarantee nothing downstream (e.g. FCW, which reacts to this
-    # MPC's own solved trajectory) is ever indirectly affected.
-    if relaxed_stop_distance != stop_distance or relaxed_comfort_brake != comfort_brake:
-      self.params[:,6] = relaxed_stop_distance
-      self.params[:,7] = relaxed_comfort_brake
-      if self.last_cutin_track_id != self.cutin_state.active_track_id:
-        cloudlog.info('cut-in relaxation started: track=%s stop_distance=%.1f->%.1f comfort_brake=%.1f->%.1f',
-                      self.cutin_state.active_track_id, stop_distance, relaxed_stop_distance,
-                      comfort_brake, relaxed_comfort_brake)
-    elif self.last_cutin_track_id != -1:
-      cloudlog.info('cut-in relaxation ended: track=%s', self.last_cutin_track_id)
-    self.last_cutin_track_id = self.cutin_state.active_track_id
+    self.params[:,6] = self.stop_distance
+    self.params[:,7] = self.comfort_brake
     self.update_personal(radarstate, radar_age)
     if not personal_active:
       # Observe lead identity while disengaged, but do not start a stop clock.

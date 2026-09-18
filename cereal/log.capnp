@@ -714,13 +714,6 @@ struct RadarState @0x9a185389d6fdd05f {
     visionProbability @17 :Float32;
     measured @18 :Bool;
     observationMonoTime @19 :UInt64;
-    # Confidence [0-1] that this lead is a recently-validated lateral cut-in (an adjacent-lane
-    # track that was observed drifting into the path before becoming the selected lead), as
-    # opposed to e.g. the previous lead braking or a lead-selection swap between two in-path
-    # tracks. Computed in radard.py from pre-selection track history; 0 when there's no
-    # cut-in evidence or this isn't a fresh lead-selection transition. See
-    # selfdrive/controls/lib/longitudinal_mpc_lib/cutin_relaxation.py for how it's consumed.
-    cutinConfidence @20 :Float32;
 
     deprecated :group {
       aLead @5 :Float32;

@@ -284,18 +284,21 @@ class Car:
   def controls_update(self, CS: car.CarState, CC: car.CarControl):
     """control update loop, driven by carControl"""
 
+    if not self.initialized_prev:
+      # Initialize CarInterface, once controls are ready
+      # TODO: this can make us miss at least a few cycles when doing an ECU knockout
+      # Runs before the Volt staleness guard below on purpose: that guard can `return` early
+      # on the very first call if carControl happens to be stale/not-yet-valid at that exact
+      # moment, which would otherwise skip this one-time init for a cycle.
+      self.CI.init(self.CP, *self.can_callbacks)
+      # signal pandad to switch to car safety mode
+      self.params.put_bool("ControlsReady", True)
+
     from opendbc.car.gm.volt_longitudinal import supported as volt_supported
     if volt_supported(self.CP):
       now = self.can_log_mono_time if REPLAY else time.monotonic_ns()
       if not self.sm.valid['carControl'] or not 0 <= now-self.sm.logMonoTime['carControl'] <= 150_000_000:
         return  # Never re-stamp or re-transmit stale protection/actuator commands.
-
-    if not self.initialized_prev:
-      # Initialize CarInterface, once controls are ready
-      # TODO: this can make us miss at least a few cycles when doing an ECU knockout
-      self.CI.init(self.CP, *self.can_callbacks)
-      # signal pandad to switch to car safety mode
-      self.params.put_bool("ControlsReady", True)
 
     if self.sm.all_alive(['carControl']):
       # send car controls over can

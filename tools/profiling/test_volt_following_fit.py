@@ -19,7 +19,7 @@ def synthetic_samples(gap: GapParams, route, n_per_speed=40, speeds=(2., 5., 10.
   return samples
 
 
-TRUE_MIN = GapParams(t_follow=1.15, comfort_brake=COMFORT_BRAKE, stop_distance=4.7)
+TRUE_MIN = GapParams(t_follow=1.15, comfort_brake=COMFORT_BRAKE, stop_distance=5.7)  # >= the real 5.5m floor
 TRUE_MAX = GapParams(t_follow=1.6, comfort_brake=COMFORT_BRAKE, stop_distance=7.0)
 
 

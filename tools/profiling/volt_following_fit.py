@@ -28,7 +28,7 @@ import numpy as np
 
 from openpilot.tools.profiling.volt_braking import atomic_json
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.gap_params import COMFORT_BRAKE, get_T_FOLLOW, get_safe_obstacle_distance
-from opendbc.car.gm.volt_following import GapParams, VoltFollowingProfile, following_profile_valid
+from opendbc.car.gm.volt_following import GapParams, VoltFollowingProfile, following_profile_valid, STOP_DISTANCE_BOUNDS
 from cereal import log
 
 BIN_EDGES = [1, 2, 3, 4, 5, 7, 9, 12, 15, 20, 25, 30]
@@ -36,7 +36,12 @@ MIN_SAMPLES_PER_BIN = 20
 AGGRESSIVE_PADDING = 1.05  # +5% gap, the user's explicit safety margin above the raw observed minimum.
 MAX_HELDOUT_RMSE_M = 0.75
 T_FOLLOW_FIT_MARGIN = 0.20  # +/-20% of the corresponding stock personality value.
-STOP_DISTANCE_BOUNDS = (4.5, 8.0)
+# STOP_DISTANCE_BOUNDS imported from opendbc.car.gm.volt_following -- used to be a local
+# (4.5, 8.0) constant here, drifted from the real safety floor (5.5, 8.0) enforced by
+# following_profile_valid(). Harmless in practice (fit()'s own re-validation against the
+# real bound, and volt_following_apply.py's independent re-check, both already caught
+# anything this clip let through), but exactly the kind of duplicated-constant drift this
+# fork has already been bitten by twice -- import the real one instead of keeping a copy.
 
 
 def bin_samples(samples):

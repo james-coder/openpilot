@@ -54,7 +54,11 @@ def load_following_profile(path: Path = PROFILE_PATH) -> VoltFollowingProfile:
   which makes following_enabled() below false and leaves stock get_T_FOLLOW() untouched."""
   try:
     raw = path.read_text()
-  except OSError:
+  except (OSError, UnicodeDecodeError):
+    # UnicodeDecodeError is a ValueError subclass, not an OSError -- read_text() raises it
+    # on invalid-UTF8 bytes (disk corruption, a torn/non-atomic write, manual tampering).
+    # This is called unguarded from LongitudinalPlanner.__init__; missing this left the
+    # planner process crashing at construction on every restart until the file was fixed.
     raw = None
   profile = parse_following_profile(raw) if raw else None
   return profile if profile is not None else VoltFollowingProfile()

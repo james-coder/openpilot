@@ -313,3 +313,18 @@ class TestSummarizeMil:
     report = {'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': codes}}}}
     summary = summarize_mil(report)
     assert summary == 'MIL: P0000, P0001, P0002, P0003, P0004, P0005 +4 more'
+
+  def test_malformed_report_shapes_never_raise(self):
+    # a syntactically-valid-JSON-but-wrong-shape value (stale schema, hand-edited file, a
+    # bug elsewhere writing the wrong shape) must degrade to "" quietly, not crash
+    # selfdrived -- nothing calls this inside a try/except.
+    assert summarize_mil(5) == ''
+    assert summarize_mil('a string') == ''
+    assert summarize_mil(True) == ''
+    assert summarize_mil([1, 2, 3]) == ''
+    assert summarize_mil({'state': 'complete', 'ecus': 'not a dict'}) == ''
+    assert summarize_mil({'state': 'complete', 'ecus': {'7E8': 'not a dict'}}) == ''
+    assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'stored': 'not a dict'}}}) == ''
+    assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': 'P0401'}}}}) == ''
+    assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': [1, 2]}}}}) == ''
+    assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': None}}}}) == ''

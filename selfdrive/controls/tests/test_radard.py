@@ -7,7 +7,7 @@ from cereal import log
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.radard import (
   RadarD, Track, KalmanParams,
-  CUTIN_ADJACENCY_DECAY_TAU, CUTIN_MIN_TRACK_AGE_CYCLES, CUTIN_LOG_THRESHOLD,
+  CUTIN_ADJACENCY_DECAY_TAU, CUTIN_LATCH_DURATION, CUTIN_MIN_TRACK_AGE_CYCLES, CUTIN_LOG_THRESHOLD,
 )
 from openpilot.selfdrive.controls.tests.test_radar_memory import RadarInputs
 
@@ -128,12 +128,26 @@ class TestRadarDCutinWiring:
     rd.update(sm, sm.rr.as_reader())
 
     assert rd.radar_state.leadOne.radarTrackId == 7
-    assert rd.radar_state.leadOne.cutinConfidence > CUTIN_LOG_THRESHOLD
+    first_confidence = rd.radar_state.leadOne.cutinConfidence
+    assert first_confidence > CUTIN_LOG_THRESHOLD
 
-    # next cycle: same track remains leadOne -- no longer a fresh selection, confidence resets
+    # next cycle: same track remains leadOne -- no longer a *fresh* selection, but the
+    # confidence stays latched at the same value for a short window (see CUTIN_LATCH_DURATION)
+    # so a consumer that missed the single transition cycle (conflated pub/sub sockets only
+    # keep the latest message) still gets a chance to see it.
     sm.recv_frame['carState'] += 1
     rd.update(sm, sm.rr.as_reader())
     assert rd.radar_state.leadOne.radarTrackId == 7
+    assert rd.radar_state.leadOne.cutinConfidence == pytest.approx(first_confidence)
+
+    # once the latch window elapses, it drops back to 0 (no re-trigger, just stops repeating).
+    # RadarInputs' logMonoTime is static by default (fine for the other tests here, which
+    # don't care about elapsed wall time) -- advance it here since the latch's expiry is
+    # driven by real elapsed time, not cycle count.
+    for _ in range(int(CUTIN_LATCH_DURATION / DT_MDL) + 5):
+      sm.recv_frame['carState'] += 1
+      sm.logMonoTime['modelV2'] += int(DT_MDL * 1e9)
+      rd.update(sm, sm.rr.as_reader())
     assert rd.radar_state.leadOne.cutinConfidence == 0.
 
   def test_curved_road_suppresses_a_real_cutin_signature(self):
@@ -184,4 +198,66 @@ class TestRadarDCutinWiring:
     rd.update(sm, sm.rr.as_reader())
 
     assert rd.radar_state.leadOne.radarTrackId == 7
+    assert rd.radar_state.leadOne.cutinConfidence == 0.
+
+
+class TestCutinConfidenceLatch:
+  """Regression coverage for the fix this round's review caught: SubMaster sockets are
+  conflated (only the latest message survives), so a consumer that misses the single cycle
+  a fresh cut-in transition fires on would otherwise lose the signal entirely. The latch
+  re-publishes the same (track_id, confidence) for a short window so a lagging consumer
+  gets more than one chance to see it, without risking a double-trigger (cutin_relaxation.py
+  only reacts to lead_track_id actually *changing*, so repeating the same value is a no-op
+  once it's already been consumed once)."""
+
+  def _build_and_confirm_cutin(self, sm, rd, track_id=7):
+    build_cycles = CUTIN_MIN_TRACK_AGE_CYCLES + 20
+    for i in range(build_cycles):
+      sm.recv_frame['carState'] += 1
+      y = 3.0 + (0.2 - 3.0) * i / (build_cycles - 1)
+      sm.rr.points[0].dRel, sm.rr.points[0].yRel, sm.rr.points[0].vRel = 25., y, 0.
+      sm.model.leadsV3[0].prob = 0.
+      rd.update(sm, sm.rr.as_reader())
+    sm.recv_frame['carState'] += 1
+    sm.rr.points[0].dRel, sm.rr.points[0].yRel, sm.rr.points[0].vRel = 25., 0.15, 0.
+    sm.model.leadsV3[0].prob = 0.9
+    sm.model.leadsV3[0].x = [25. + 1.52]
+    sm.model.leadsV3[0].y = [-0.15]
+    sm.model.leadsV3[0].v = [15.]
+    rd.update(sm, sm.rr.as_reader())
+    assert rd.radar_state.leadOne.radarTrackId == track_id
+    assert rd.radar_state.leadOne.cutinConfidence > CUTIN_LOG_THRESHOLD
+
+  def test_latch_survives_several_missed_consumer_reads(self):
+    sm, rd = RadarInputs(), RadarD()
+    sm.rr.init('points', 1)
+    sm.rr.points[0].trackId = 7
+    sm.rr.points[0].measured = True
+    self._build_and_confirm_cutin(sm, rd)
+    confidence = rd.radar_state.leadOne.cutinConfidence
+
+    # simulate a consumer that only reads every 3rd radarState message -- as long as it reads
+    # any one of them within the latch window, it must still see the same confidence
+    for _ in range(3):
+      sm.recv_frame['carState'] += 1
+      rd.update(sm, sm.rr.as_reader())
+    assert rd.radar_state.leadOne.cutinConfidence == pytest.approx(confidence)
+
+  def test_a_different_track_selected_clears_the_latch_immediately(self):
+    sm, rd = RadarInputs(), RadarD()
+    sm.rr.init('points', 2)
+    sm.rr.points[0].trackId = 7
+    sm.rr.points[0].measured = True
+    sm.rr.points[1].trackId = 9
+    sm.rr.points[1].dRel, sm.rr.points[1].yRel, sm.rr.points[1].vRel, sm.rr.points[1].measured = 40., 0.0, 0., True
+    self._build_and_confirm_cutin(sm, rd)
+
+    # a different track becomes leadOne before the latch would naturally expire -- the stale
+    # latched confidence must not leak onto this unrelated selection
+    sm.recv_frame['carState'] += 1
+    sm.model.leadsV3[0].x = [40. + 1.52]
+    sm.model.leadsV3[0].y = [0.0]
+    sm.model.leadsV3[0].v = [15.]
+    rd.update(sm, sm.rr.as_reader())
+    assert rd.radar_state.leadOne.radarTrackId == 9
     assert rd.radar_state.leadOne.cutinConfidence == 0.

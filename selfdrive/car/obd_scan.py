@@ -39,22 +39,34 @@ def summarize_mil(report: dict | None) -> str:
   being silently treated as "no codes". Empty string (display nothing extra) whenever
   there's no scan on file yet, the saved scan didn't complete/partially complete, or it
   completed clean -- the menu-based scanner already covers everything else, this is only
-  the boot-time headline."""
-  if not report or report.get("state") not in ("complete", "partial"):
+  the boot-time headline.
+
+  Called unguarded from startup_master_alert() -> selfdrived's main loop, with nothing
+  upstream catching exceptions -- an uncaught error here crashes selfdrived outright. The
+  stored value is JSON deserialized from Params with no schema enforcement beyond "valid
+  JSON", so this must tolerate any syntactically-valid-but-wrong-shaped value (a stale
+  schema, hand-edited file, bug elsewhere writing the wrong shape) without raising, not
+  just the None/wrong-state cases the early return already covers."""
+  try:
+    if not isinstance(report, dict) or report.get("state") not in ("complete", "partial"):
+      return ""
+    codes = set()
+    for ecu in report.get("ecus", {}).values():
+      if not isinstance(ecu, dict):
+        continue
+      for service in ("stored", "pending", "permanent"):
+        result = ecu.get(service, {})
+        if isinstance(result, dict) and result.get("state") == "ok" and isinstance(result.get("codes"), list):
+          codes.update(c for c in result["codes"] if isinstance(c, str))
+    if not codes:
+      return ""
+    shown = sorted(codes)
+    text = "MIL: " + ", ".join(shown[:6])
+    if len(shown) > 6:
+      text += f" +{len(shown) - 6} more"
+    return text
+  except Exception:
     return ""
-  codes = set()
-  for ecu in report.get("ecus", {}).values():
-    for service in ("stored", "pending", "permanent"):
-      result = ecu.get(service, {})
-      if result.get("state") == "ok":
-        codes.update(result.get("codes", []))
-  if not codes:
-    return ""
-  shown = sorted(codes)
-  text = "MIL: " + ", ".join(shown[:6])
-  if len(shown) > 6:
-    text += f" +{len(shown) - 6} more"
-  return text
 
 
 def decode_reply(name: str, data: bytes) -> dict:

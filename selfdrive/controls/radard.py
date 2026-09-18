@@ -37,6 +37,7 @@ CUTIN_MIN_INWARD_VY = 0.15       # m/s, minimum filtered inward lateral speed to
 CUTIN_SATURATE_INWARD_VY = 0.7   # m/s, filtered inward lateral speed at/above this saturates
 CUTIN_MAX_YAW_RATE = 0.05        # rad/s, ego yaw rate above this suppresses confidence (curved-road gate)
 CUTIN_LOG_THRESHOLD = 0.5        # confidence above which a lead-selection transition is an accepted cut-in
+CUTIN_LATCH_DURATION = 1.0       # s, see RadarD._cutin_latch's docstring
 CUTIN_ADJACENCY_DECAY_TAU = 8.0  # s, decay time constant for "how recently was this track substantially
                                   # adjacent" -- recent evidence, not a lifetime-sticky peak (a car that
                                   # ran parallel long ago and has been in-path ever since shouldn't still
@@ -267,6 +268,18 @@ class RadarD:
     # transition -- the only time cutin_confidence() is worth evaluating (see update())
     self._prev_lead_track_id = [-1, -1]
 
+    # (track_id, confidence, expires_mono) per lead slot, or None. SubMaster sockets are
+    # conflated (only the latest message is kept) -- a consumer whose poll cadence lags
+    # radard's publish for even one cycle could otherwise miss the single message carrying
+    # a nonzero cutinConfidence entirely, since it's normally only set on the exact
+    # transition cycle. Re-publishing the same value for a short window after the
+    # transition, for as long as the same track stays selected, gives a lagging consumer a
+    # second (or third) chance to see it. Safe against double-triggering: the consumer
+    # (cutin_relaxation.py) only treats a *change* in lead_track_id as a new event, so
+    # repeating the same (track_id, confidence) for several cycles is a no-op once it's
+    # already been seen once.
+    self._cutin_latch: list[tuple[int, float, float] | None] = [None, None]
+
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
     self.current_time = 1e-9*max(sm.logMonoTime.values())
@@ -339,6 +352,14 @@ class RadarD:
           cloudlog.info(msg, track_id, accepted, confidence, evidence['track_age_cycles'], evidence['age_ok'],
                         evidence['recent_abs_yRel'], evidence['inward_vy'], straight_road, not_ego_lane_change,
                         evidence['dRel'], evidence['vRel'], self.v_ego)
+          if confidence > 0:
+            self._cutin_latch[i] = (track_id, confidence, self.current_time + CUTIN_LATCH_DURATION)
+        elif self._cutin_latch[i] is not None:
+          latched_track_id, latched_confidence, expires = self._cutin_latch[i]
+          if track_id == latched_track_id and self.current_time < expires:
+            confidence = latched_confidence
+          else:
+            self._cutin_latch[i] = None
         values['cutinConfidence'] = confidence
         self._prev_lead_track_id[i] = track_id
 

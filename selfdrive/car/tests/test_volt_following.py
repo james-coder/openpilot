@@ -44,6 +44,17 @@ def test_load_following_profile_falls_back_to_stock_default_when_file_missing(tm
   assert not profile.validated
 
 
+def test_load_following_profile_falls_back_on_invalid_utf8_bytes(tmp_path):
+  # UnicodeDecodeError is a ValueError subclass, not an OSError -- Path.read_text() raises
+  # it on invalid-UTF8 bytes (disk corruption, a torn non-atomic write, manual tampering).
+  # This is called unguarded from LongitudinalPlanner.__init__; catching only OSError left
+  # the planner process crashing at construction on every restart until the file was fixed.
+  path = tmp_path / 'profile.json'
+  path.write_bytes(b'\xff\xfe\x00\x81 not valid utf-8')
+  profile = load_following_profile(path)
+  assert not profile.validated
+
+
 def test_load_following_profile_falls_back_on_invalid_file_contents(tmp_path):
   broken = json.loads(VALID_JSON)
   broken['aggressive']['stop_distance'] = 100.0

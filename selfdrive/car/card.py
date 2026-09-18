@@ -170,7 +170,7 @@ class Car:
       else:
         self.params.remove('VoltLongitudinalActiveBundle')
       self.params.put("VoltLongitudinalProfile", f"{profile.version}:{mode}", block=True)
-      cloudlog.info("Volt longitudinal profile", version=profile.version, mode=mode, validated=profile.validated)
+      cloudlog.info("Volt longitudinal profile version=%s mode=%s validated=%s", profile.version, mode, profile.validated)
 
       from openpilot.selfdrive.car.volt_protection import BUNDLE_PATH as PROTECTION_PATH, read_bundle as read_protection, configure, ACTUATE
       from opendbc.car.gm.volt_protection import ProtectionGate

@@ -9,6 +9,9 @@ from openpilot.common.swaglog import cloudlog
 # WARNING: imports outside of constants will not trigger a rebuild
 from openpilot.selfdrive.modeld.constants import index_function
 from openpilot.selfdrive.controls.radard import _LEAD_ACCEL_TAU
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.cutin_relaxation import (
+  CutinRelaxationState, gap_targets, safe_obstacle_distance, update as cutin_update,
+)
 
 if __name__ == '__main__':  # generating code
   from acados.acados_template import AcadosModel, AcadosOcp, AcadosOcpSolver
@@ -97,7 +100,8 @@ def get_stopped_equivalence_factor(v_lead):
   return (v_lead**2) / (2 * COMFORT_BRAKE)
 
 def get_safe_obstacle_distance(v_ego, t_follow, stop_distance=STOP_DISTANCE, comfort_brake=COMFORT_BRAKE):
-  return (v_ego**2) / (2 * comfort_brake) + t_follow * v_ego + stop_distance
+  # formula lives in the ACADOS-free cutin_relaxation module so it is unit-testable here
+  return safe_obstacle_distance(v_ego, t_follow, stop_distance, comfort_brake)
 
 def gen_long_model():
   model = AcadosModel()
@@ -286,6 +290,9 @@ class LongitudinalMpc:
     self.set_weights()
     self.personal_track = None
     self.personal_stable_time = self.personal_blend = 0.
+    self.cutin_state = CutinRelaxationState()
+    self._cutin_clock = 0.
+    self.last_cutin_track_id = -1
     if getattr(self, 'stop_trajectory', None) is not None:
       self.stop_trajectory.reset()
 
@@ -423,7 +430,31 @@ class LongitudinalMpc:
     # TODO does this make sense when max_a is negative?
     v_upper = v_ego + (T_IDXS * CRUISE_MAX_ACCEL * 1.05)
     v_cruise_clipped = np.clip(v_cruise * np.ones(N+1), v_lower, v_upper)
-    cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow, self.stop_distance, self.comfort_brake)
+
+    # Cut-in relaxation resolves the EFFECTIVE (stop_distance, comfort_brake) pair BEFORE
+    # anything below consumes it. v2 applied it only to params[:,6]/[:,7] after the cruise
+    # obstacle had already been placed with the nominal pair, so the obstacle sat farther out
+    # than the comfort target and the cost accelerated ego 3-8 mph past v_cruise after every
+    # cut-in. gap_targets() derives the cruise obstacle, the cost target AND the danger-factor
+    # scale from this one pair; nothing in update() may use self.stop_distance/comfort_brake
+    # directly. t_follow is never touched by cutin_update.
+    self._cutin_clock += self.dt
+    lead = radarstate.leadOne
+    self.cutin_state, stop_distance, comfort_brake = cutin_update(
+      self.cutin_state, self._cutin_clock, v_ego, lead.status, lead.cutinConfidence, lead.radarTrackId,
+      lead.dRel, t_follow, self.comfort_brake, self.stop_distance)
+    targets = gap_targets(v_ego, v_cruise_clipped, t_follow, stop_distance, comfort_brake,
+                          BAKED_STOP_DISTANCE, BAKED_COMFORT_BRAKE, LEAD_DANGER_FACTOR)
+    if stop_distance != self.stop_distance or comfort_brake != self.comfort_brake:
+      if self.last_cutin_track_id != self.cutin_state.active_track_id:
+        cloudlog.info('cut-in relaxation started: track=%s stop_distance=%.1f->%.1f comfort_brake=%.1f->%.1f',
+                      self.cutin_state.active_track_id, self.stop_distance, stop_distance,
+                      self.comfort_brake, comfort_brake)
+    elif self.last_cutin_track_id != -1:
+      cloudlog.info('cut-in relaxation ended: track=%s', self.last_cutin_track_id)
+    self.last_cutin_track_id = self.cutin_state.active_track_id
+
+    cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + targets.cruise_gap
 
     x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle])
     self.source = MPC_SOURCES[np.argmin(x_obstacles[0])]
@@ -447,11 +478,11 @@ class LongitudinalMpc:
     # factor IS a live parameter, so scale it to keep the zone at exactly
     # LEAD_DANGER_FACTOR x the *current* comfort target, the same relationship stock has.
     # If c_generated_code is ever regenerated with the new constants, delete this scaling.
-    baked_safety = get_safe_obstacle_distance(v_ego, t_follow, BAKED_STOP_DISTANCE, BAKED_COMFORT_BRAKE)
-    comfort_now = get_safe_obstacle_distance(v_ego, t_follow, self.stop_distance, self.comfort_brake)
-    self.params[:,5] = LEAD_DANGER_FACTOR * min(1.0, comfort_now / max(baked_safety, 1e-3))
-    self.params[:,6] = self.stop_distance
-    self.params[:,7] = self.comfort_brake
+    # All three come from the same effective pair as the cruise obstacle above (see
+    # cutin_relaxation.gap_targets), so a cut-in relaxation moves the zone with the target.
+    self.params[:,5] = targets.danger_factor
+    self.params[:,6] = targets.stop_distance
+    self.params[:,7] = targets.comfort_brake
     self.update_personal(radarstate, radar_age)
     if not personal_active:
       # Observe lead identity while disengaged, but do not start a stop clock.

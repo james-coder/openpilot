@@ -25,6 +25,19 @@ V_EGO_STATIONARY = 4.   # no stationary object flag below this speed
 RADAR_TO_CENTER = 2.7   # (deprecated) RADAR is ~ 2.7m ahead from center of car
 RADAR_TO_CAMERA = 1.52  # RADAR is ~ 1.5m ahead from center of mesh frame
 
+# Cut-in confidence: was this track observed drifting in from an adjacent lane before it became
+# the selected lead, as opposed to e.g. the previous lead braking or a lead-selection swap
+# between two already-in-path tracks? See cutin_confidence() below and
+# selfdrive/controls/lib/longitudinal_mpc_lib/cutin_relaxation.py for how it's consumed.
+CUTIN_VY_FILTER_TAU = 0.5        # s, low-pass on the raw yRel finite difference -- not a raw 1-frame derivative
+CUTIN_MIN_TRACK_AGE_CYCLES = 20  # ~1.0s at DT_MDL=0.05s: must have history before it can count
+CUTIN_MIN_LATERAL_OFFSET = 1.2   # m, peak |yRel| must have exceeded this to have been "adjacent"
+CUTIN_OFFSET_SATURATE = 2.5      # m, peak |yRel| at/above this saturates the offset evidence
+CUTIN_MIN_INWARD_VY = 0.15       # m/s, minimum filtered inward lateral speed to count as evidence
+CUTIN_SATURATE_INWARD_VY = 0.7   # m/s, filtered inward lateral speed at/above this saturates
+CUTIN_MAX_YAW_RATE = 0.05        # rad/s, ego yaw rate above this suppresses confidence (curved-road gate)
+CUTIN_LOG_THRESHOLD = 0.5        # confidence above which a validated cut-in gets logged
+
 
 class KalmanParams:
   def __init__(self, dt: float):
@@ -57,14 +70,23 @@ class Track:
     self.K_C = kalman_params.C
     self.K_K = kalman_params.K
     self.kf = KF1D([[v_lead], [0.0]], self.K_A, self.K_C, self.K_K)
+    self.yRel = 0.0
+    self.peak_abs_yRel = 0.0
+    self.vy_filt = FirstOrderFilter(0.0, CUTIN_VY_FILTER_TAU, DT_MDL)
 
   def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float, measured: float):
+    # filtered estimate of lateral velocity, from the previous cycle's yRel -- not a raw
+    # 1-frame derivative, per cutin_confidence()'s use of it below
+    if self.cnt > 0:
+      self.vy_filt.update((y_rel - self.yRel) / DT_MDL)
+
     # relative values, copy
     self.dRel = d_rel   # LONG_DIST
     self.yRel = y_rel   # -LAT_DIST
     self.vRel = v_rel   # REL_SPEED
     self.vLead = v_lead
     self.measured = measured   # measured or estimate
+    self.peak_abs_yRel = max(self.peak_abs_yRel, abs(self.yRel))
 
     # computed velocity and accelerations
     if self.cnt > 0:
@@ -80,6 +102,22 @@ class Track:
       self.aLeadTau.update(0.0)
 
     self.cnt += 1
+
+  def cutin_confidence(self, straight_road: bool, not_ego_lane_change: bool) -> float:
+    """0-1 confidence that this track was drifting in from an adjacent lane, from its own
+    pre-selection history alone -- independent of whether it's actually selected as a lead
+    this cycle. Gated to 0 outright on a curved road or while ego itself is lane-changing
+    (scenario 7/8 in the cut-in relaxation plan); otherwise a product of how far adjacent it
+    was and how fast it's currently moving toward the path, each saturating over a range
+    rather than a single hard threshold."""
+    if not (straight_road and not_ego_lane_change) or self.cnt < CUTIN_MIN_TRACK_AGE_CYCLES:
+      return 0.0
+    offset_score = np.clip((self.peak_abs_yRel - CUTIN_MIN_LATERAL_OFFSET) /
+                            (CUTIN_OFFSET_SATURATE - CUTIN_MIN_LATERAL_OFFSET), 0., 1.)
+    inward_vy = -math.copysign(1.0, self.yRel) * self.vy_filt.x if self.yRel else 0.0
+    inward_score = np.clip((inward_vy - CUTIN_MIN_INWARD_VY) /
+                            (CUTIN_SATURATE_INWARD_VY - CUTIN_MIN_INWARD_VY), 0., 1.)
+    return float(offset_score * inward_score)
 
   def get_RadarState(self, model_prob: float = 0.0):
     return {
@@ -202,6 +240,10 @@ class RadarD:
 
     self.ready = False
 
+    # previous cycle's selected radarTrackId per lead slot, to detect a fresh lead-selection
+    # transition -- the only time cutin_confidence() is worth evaluating (see update())
+    self._prev_lead_track_id = [-1, -1]
+
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
     self.current_time = 1e-9*max(sm.logMonoTime.values())
@@ -241,6 +283,9 @@ class RadarD:
       model_v_ego = sm['modelV2'].velocity.x[0]
     else:
       model_v_ego = self.v_ego
+    yaw_rate = sm['modelV2'].orientationRate.z[0] if len(sm['modelV2'].orientationRate.z) else 0.0
+    straight_road = abs(yaw_rate) < CUTIN_MAX_YAW_RATE
+    not_ego_lane_change = sm['modelV2'].meta.laneChangeState == log.LaneChangeState.off
     leads_v3 = sm['modelV2'].leadsV3
     if len(leads_v3) > 1:
       for i in range(2):
@@ -254,6 +299,19 @@ class RadarD:
       for i, lead in enumerate((self.radar_state.leadOne, self.radar_state.leadTwo)):
         values = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[i], model_v_ego,
                           self.lead_prob_filters[i].x, low_speed_override=(i == 0))
+
+        track_id = values.get('radarTrackId', -1)
+        is_fresh_selection = track_id != -1 and track_id != self._prev_lead_track_id[i]
+        confidence = 0.0
+        if is_fresh_selection and track_id in self.tracks:
+          confidence = self.tracks[track_id].cutin_confidence(straight_road, not_ego_lane_change)
+        values['cutinConfidence'] = confidence
+        self._prev_lead_track_id[i] = track_id
+        if confidence > CUTIN_LOG_THRESHOLD:
+          cloudlog.info('cut-in detected: track=%s confidence=%.2f dRel=%.1f vRel=%.1f v_ego=%.1f',
+                        track_id, confidence, values.get('dRel', float('nan')),
+                        values.get('vRel', float('nan')), self.v_ego)
+
         # pycapnp's dict-to-struct conversion creates schema reference cycles.
         # Real-time processes disable GC, so write scalar fields directly.
         # radar_state is fresh each update: absent fields keep their defaults.

@@ -64,6 +64,9 @@ from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.gap_params import (  
   COMFORT_BRAKE, STOP_DISTANCE, get_jerk_factor, get_T_FOLLOW, get_stopped_equivalence_factor,
   get_safe_obstacle_distance, resolve_gap_params,
 )
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.cutin_relaxation import (
+  CutinRelaxationState, update as cutin_update,
+)
 
 
 def gen_long_model():
@@ -257,6 +260,9 @@ class LongitudinalMpc:
     self.set_weights()
     self.personal_track = None
     self.personal_stable_time = self.personal_blend = 0.
+    self.cutin_state = CutinRelaxationState()
+    self._cutin_clock = 0.
+    self.last_cutin_track_id = -1
     if getattr(self, 'stop_trajectory', None) is not None:
       self.stop_trajectory.reset()
 
@@ -412,6 +418,19 @@ class LongitudinalMpc:
     self.params[:,5] = LEAD_DANGER_FACTOR
     self.params[:,6] = stop_distance
     self.params[:,7] = comfort_brake
+    self._cutin_clock += self.dt
+    lead = radarstate.leadOne
+    self.cutin_state, relaxed_stop_distance = cutin_update(
+      self.cutin_state, self._cutin_clock, v_ego, lead.status, lead.cutinConfidence, lead.radarTrackId,
+      lead.dRel, t_follow, comfort_brake, stop_distance)
+    if relaxed_stop_distance != stop_distance:
+      self.params[:,6] = relaxed_stop_distance
+      if self.last_cutin_track_id != self.cutin_state.active_track_id:
+        cloudlog.info('cut-in relaxation started: track=%s stop_distance=%.1f->%.1f',
+                      self.cutin_state.active_track_id, stop_distance, relaxed_stop_distance)
+    elif self.last_cutin_track_id != -1:
+      cloudlog.info('cut-in relaxation ended: track=%s', self.last_cutin_track_id)
+    self.last_cutin_track_id = self.cutin_state.active_track_id
     self.update_personal(radarstate, radar_age)
     if not personal_active:
       # Observe lead identity while disengaged, but do not start a stop clock.

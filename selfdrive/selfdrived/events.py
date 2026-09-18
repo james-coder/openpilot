@@ -255,7 +255,9 @@ def startup_master_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubM
   # selfdrive/car/obd_scan_controller.py) -- this doesn't trigger a scan itself, and adds
   # nothing to the line below it when there's no scan on file or it came back clean.
   mil = summarize_mil(Params().get("ObdLastScan"))
-  subtext = f"{branch} — {mil}" if mil else branch
+  # Plain ASCII on purpose: the same em-dash character caused "CO?" instead of "CO2" on
+  # this device's font earlier this session -- this UI can't render it either.
+  subtext = f"{branch} - {mil}" if mil else branch
   return StartupAlert("WARNING: This branch is not tested", subtext, alert_status=AlertStatus.userPrompt)
 
 def below_engage_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality) -> Alert:

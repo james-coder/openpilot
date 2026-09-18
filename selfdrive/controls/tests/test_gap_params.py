@@ -37,6 +37,25 @@ def test_resolve_gap_params_with_profile_overrides_all_three():
   assert (t_follow2, comfort_brake2, stop_distance2) == (1.0, 2.0, 4.5)
 
 
+def test_resolve_gap_params_with_profile_works_with_a_real_capnp_message_round_trip():
+  """End-to-end regression test for a real production crash: long_mpc.py calls this with
+  personality=sm['selfdriveState'].personality -- a value read off a real capnp message,
+  which is a capnp._DynamicEnum, not the plain int a directly-constructed
+  log.LongitudinalPersonality.aggressive is. `==` treats them as equal but a dict/set `in`
+  check does not, since dict lookups hash first. opendbc.car.gm.volt_following's
+  resolve_gap_params() used to be dict-based and crashed plannerd with NotImplementedError
+  on every real drive with a following_profile active -- every existing test above (all
+  using directly-constructed enum values) still passed throughout, which is exactly why
+  this one exists."""
+  msg = log.SelfdriveState.new_message()
+  msg.personality = log.LongitudinalPersonality.aggressive
+  with log.SelfdriveState.from_bytes(msg.to_bytes()) as decoded:
+    wire_personality = decoded.personality
+    assert type(wire_personality).__name__ == '_DynamicEnum'
+    t_follow, comfort_brake, stop_distance = resolve_gap_params(wire_personality, FITTED, 6.0, 2.5)
+    assert (t_follow, comfort_brake, stop_distance) == (1.0, 2.0, 4.5)
+
+
 def test_safe_obstacle_distance_grows_with_speed_and_gap_params():
   low = get_safe_obstacle_distance(5.0, 1.25, 4.5, 2.0)
   high = get_safe_obstacle_distance(25.0, 1.25, 4.5, 2.0)

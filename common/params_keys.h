@@ -93,6 +93,11 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"VoltProtectionMode", {PERSISTENT, STRING, "monitor"}},
     {"VoltProtectionActiveBundle", {CLEAR_ON_MANAGER_START, STRING}},
     {"VoltProtectionStatus", {CLEAR_ON_MANAGER_START, STRING}},
+    // Note: the steady-state following-distance fit (tools/profiling/volt_following_fit.py,
+    // selfdrive/car/volt_following.py) intentionally does NOT use a Params key -- a new key
+    // needs the compiled params_pyx extension rebuilt, which a quick deploy skips and this
+    // value is expected to be hand-tuned repeatedly. It's a plain JSON file instead (see
+    // selfdrive/car/volt_following.py's PROFILE_PATH).
     {"LongitudinalPersonality", {PERSISTENT, INT, std::to_string(static_cast<int>(cereal::LongitudinalPersonality::STANDARD))}},
     {"NetworkMetered", {PERSISTENT, BOOL}},
     {"ObdMultiplexingChanged", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},

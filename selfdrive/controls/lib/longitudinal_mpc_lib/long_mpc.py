@@ -65,6 +65,9 @@ T_DIFFS = np.diff(T_IDXS, prepend=[0.])
 # on top of this file were moved to the experimental/following-distance-and-cutin branch.
 COMFORT_BRAKE = 6.0
 STOP_DISTANCE = 4.5
+# What is actually compiled into c_generated_code's danger-zone constraint (see update()).
+BAKED_COMFORT_BRAKE = 2.5
+BAKED_STOP_DISTANCE = 6.0
 CRUISE_MIN_ACCEL = -1.2
 CRUISE_MAX_ACCEL = 1.6
 MIN_X_LEAD_FACTOR = 0.5
@@ -435,7 +438,18 @@ class LongitudinalMpc:
     self.params[:,2] = np.min(x_obstacles, axis=1)
     self.params[:,3] = np.copy(self.a_prev)
     self.params[:,4] = t_follow
-    self.params[:,5] = LEAD_DANGER_FACTOR
+    # The danger-zone constraint (gen_long_ocp) bakes stop_distance/comfort_brake into the
+    # compiled solver at codegen time as stock 2.5/6.0, and the device has no acados_template
+    # so it cannot regenerate c_generated_code. With a shorter comfort target, 0.75 x that
+    # baked-in distance exceeds the comfort target at highway speed and the slack penalty
+    # fights the comfort cost -- this is what produced the hard braking on engage on
+    # 2026-09-18 (see docs/2026-09-18-startup-and-longitudinal-incident.md). The danger
+    # factor IS a live parameter, so scale it to keep the zone at exactly
+    # LEAD_DANGER_FACTOR x the *current* comfort target, the same relationship stock has.
+    # If c_generated_code is ever regenerated with the new constants, delete this scaling.
+    baked_safety = get_safe_obstacle_distance(v_ego, t_follow, BAKED_STOP_DISTANCE, BAKED_COMFORT_BRAKE)
+    comfort_now = get_safe_obstacle_distance(v_ego, t_follow, self.stop_distance, self.comfort_brake)
+    self.params[:,5] = LEAD_DANGER_FACTOR * min(1.0, comfort_now / max(baked_safety, 1e-3))
     self.params[:,6] = self.stop_distance
     self.params[:,7] = self.comfort_brake
     self.update_personal(radarstate, radar_age)

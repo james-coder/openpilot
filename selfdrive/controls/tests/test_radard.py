@@ -1,12 +1,13 @@
 """Cut-in detection: Track.cutin_confidence() in isolation, and RadarD's transition-detection
 wiring end to end. See selfdrive/controls/radard.py and
 /home/james/.claude/plans/memoized-puzzling-rose.md for the design this implements."""
+import pytest
 from cereal import log
 
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.radard import (
   RadarD, Track, KalmanParams,
-  CUTIN_MIN_TRACK_AGE_CYCLES, CUTIN_LOG_THRESHOLD,
+  CUTIN_ADJACENCY_DECAY_TAU, CUTIN_MIN_TRACK_AGE_CYCLES, CUTIN_LOG_THRESHOLD,
 )
 from openpilot.selfdrive.controls.tests.test_radar_memory import RadarInputs
 
@@ -56,6 +57,21 @@ class TestTrackCutinConfidence:
     # vehicle drifting away from ego's path, not toward it
     track = feed_ramp(make_track(), cycles=60, y_start=0.5, y_end=3.0)
     assert track.cutin_confidence(straight_road=True, not_ego_lane_change=True) == 0.
+
+
+class TestRecentAdjacencyDecay:
+  """Regression coverage for the fix this round's review caught: a track's adjacency evidence
+  must decay after it returns to in-path, not stay lifetime-sticky (the old peak_abs_yRel
+  monotonic max never went back down, so a car that ran parallel long ago and has been
+  in-path ever since could still misfire on a much-later, unrelated lead-selection swap)."""
+
+  def test_recent_abs_yrel_decays_after_returning_to_path(self):
+    track = feed_ramp(make_track(), cycles=CUTIN_MIN_TRACK_AGE_CYCLES, y_start=3.0, y_end=3.0)
+    assert track.recent_abs_yRel.x == pytest.approx(3.0, abs=0.1)
+    # settle in-path for far longer than the decay tau
+    settle_cycles = int(CUTIN_ADJACENCY_DECAY_TAU * 4 / DT_MDL)
+    feed_ramp(track, cycles=settle_cycles, y_start=0.0, y_end=0.0)
+    assert track.recent_abs_yRel.x < 0.5
 
 
 class TestRadarDCutinWiring:

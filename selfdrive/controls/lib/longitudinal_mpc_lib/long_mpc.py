@@ -420,14 +420,20 @@ class LongitudinalMpc:
     self.params[:,7] = comfort_brake
     self._cutin_clock += self.dt
     lead = radarstate.leadOne
-    self.cutin_state, relaxed_stop_distance = cutin_update(
+    self.cutin_state, relaxed_stop_distance, relaxed_comfort_brake = cutin_update(
       self.cutin_state, self._cutin_clock, v_ego, lead.status, lead.cutinConfidence, lead.radarTrackId,
       lead.dRel, t_follow, comfort_brake, stop_distance)
-    if relaxed_stop_distance != stop_distance:
+    # t_follow is never touched by cutin_update -- see cutin_relaxation.py's module docstring
+    # for why that keeps this from directly weakening the danger-zone constraint, and why
+    # that's not the same as a guarantee nothing downstream (e.g. FCW, which reacts to this
+    # MPC's own solved trajectory) is ever indirectly affected.
+    if relaxed_stop_distance != stop_distance or relaxed_comfort_brake != comfort_brake:
       self.params[:,6] = relaxed_stop_distance
+      self.params[:,7] = relaxed_comfort_brake
       if self.last_cutin_track_id != self.cutin_state.active_track_id:
-        cloudlog.info('cut-in relaxation started: track=%s stop_distance=%.1f->%.1f',
-                      self.cutin_state.active_track_id, stop_distance, relaxed_stop_distance)
+        cloudlog.info('cut-in relaxation started: track=%s stop_distance=%.1f->%.1f comfort_brake=%.1f->%.1f',
+                      self.cutin_state.active_track_id, stop_distance, relaxed_stop_distance,
+                      comfort_brake, relaxed_comfort_brake)
     elif self.last_cutin_track_id != -1:
       cloudlog.info('cut-in relaxation ended: track=%s', self.last_cutin_track_id)
     self.last_cutin_track_id = self.cutin_state.active_track_id

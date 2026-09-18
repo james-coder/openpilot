@@ -36,7 +36,13 @@ CUTIN_OFFSET_SATURATE = 2.5      # m, peak |yRel| at/above this saturates the of
 CUTIN_MIN_INWARD_VY = 0.15       # m/s, minimum filtered inward lateral speed to count as evidence
 CUTIN_SATURATE_INWARD_VY = 0.7   # m/s, filtered inward lateral speed at/above this saturates
 CUTIN_MAX_YAW_RATE = 0.05        # rad/s, ego yaw rate above this suppresses confidence (curved-road gate)
-CUTIN_LOG_THRESHOLD = 0.5        # confidence above which a validated cut-in gets logged
+CUTIN_LOG_THRESHOLD = 0.5        # confidence above which a lead-selection transition is an accepted cut-in
+CUTIN_ADJACENCY_DECAY_TAU = 8.0  # s, decay time constant for "how recently was this track substantially
+                                  # adjacent" -- recent evidence, not a lifetime-sticky peak (a car that
+                                  # ran parallel long ago and has been in-path ever since shouldn't still
+                                  # "count" toward a much-later, unrelated lead-selection transition).
+                                  # Comfortably longer than a realistic several-second lane change so an
+                                  # in-progress genuine cut-in isn't itself discounted away by the decay.
 
 
 class KalmanParams:
@@ -71,7 +77,10 @@ class Track:
     self.K_K = kalman_params.K
     self.kf = KF1D([[v_lead], [0.0]], self.K_A, self.K_C, self.K_K)
     self.yRel = 0.0
-    self.peak_abs_yRel = 0.0
+    # instant rise / slow decay, same asymmetric idiom as RadarD.lead_prob_filters below --
+    # "how adjacent has this track recently been", not a lifetime-sticky peak (see
+    # CUTIN_ADJACENCY_DECAY_TAU)
+    self.recent_abs_yRel = FirstOrderFilter(0.0, CUTIN_ADJACENCY_DECAY_TAU, DT_MDL)
     self.vy_filt = FirstOrderFilter(0.0, CUTIN_VY_FILTER_TAU, DT_MDL)
 
   def update(self, d_rel: float, y_rel: float, v_rel: float, v_lead: float, measured: float):
@@ -86,7 +95,10 @@ class Track:
     self.vRel = v_rel   # REL_SPEED
     self.vLead = v_lead
     self.measured = measured   # measured or estimate
-    self.peak_abs_yRel = max(self.peak_abs_yRel, abs(self.yRel))
+    if abs(self.yRel) > self.recent_abs_yRel.x:
+      self.recent_abs_yRel.x = abs(self.yRel)
+    else:
+      self.recent_abs_yRel.update(abs(self.yRel))
 
     # computed velocity and accelerations
     if self.cnt > 0:
@@ -103,6 +115,24 @@ class Track:
 
     self.cnt += 1
 
+  def cutin_evidence(self, straight_road: bool, not_ego_lane_change: bool) -> dict:
+    """Full component breakdown behind cutin_confidence(), for diagnostic logging -- every
+    leadOne transition gets one of these logged (see RadarD.update()), accepted or not, so
+    "that was obviously a cut-in, why did it score low?" is answerable from device logs
+    without needing full replay/visualization tooling."""
+    age_ok = self.cnt >= CUTIN_MIN_TRACK_AGE_CYCLES
+    offset_score = np.clip((self.recent_abs_yRel.x - CUTIN_MIN_LATERAL_OFFSET) /
+                            (CUTIN_OFFSET_SATURATE - CUTIN_MIN_LATERAL_OFFSET), 0., 1.)
+    inward_vy = -math.copysign(1.0, self.yRel) * self.vy_filt.x if self.yRel else 0.0
+    inward_score = np.clip((inward_vy - CUTIN_MIN_INWARD_VY) /
+                            (CUTIN_SATURATE_INWARD_VY - CUTIN_MIN_INWARD_VY), 0., 1.)
+    confidence = float(offset_score * inward_score) if (straight_road and not_ego_lane_change and age_ok) else 0.0
+    return {
+      'track_age_cycles': self.cnt, 'age_ok': age_ok, 'recent_abs_yRel': round(float(self.recent_abs_yRel.x), 2),
+      'inward_vy': round(float(inward_vy), 2), 'straight_road': straight_road, 'not_ego_lane_change': not_ego_lane_change,
+      'dRel': round(float(self.dRel), 1), 'vRel': round(float(self.vRel), 1), 'confidence': round(confidence, 3),
+    }
+
   def cutin_confidence(self, straight_road: bool, not_ego_lane_change: bool) -> float:
     """0-1 confidence that this track was drifting in from an adjacent lane, from its own
     pre-selection history alone -- independent of whether it's actually selected as a lead
@@ -110,14 +140,7 @@ class Track:
     (scenario 7/8 in the cut-in relaxation plan); otherwise a product of how far adjacent it
     was and how fast it's currently moving toward the path, each saturating over a range
     rather than a single hard threshold."""
-    if not (straight_road and not_ego_lane_change) or self.cnt < CUTIN_MIN_TRACK_AGE_CYCLES:
-      return 0.0
-    offset_score = np.clip((self.peak_abs_yRel - CUTIN_MIN_LATERAL_OFFSET) /
-                            (CUTIN_OFFSET_SATURATE - CUTIN_MIN_LATERAL_OFFSET), 0., 1.)
-    inward_vy = -math.copysign(1.0, self.yRel) * self.vy_filt.x if self.yRel else 0.0
-    inward_score = np.clip((inward_vy - CUTIN_MIN_INWARD_VY) /
-                            (CUTIN_SATURATE_INWARD_VY - CUTIN_MIN_INWARD_VY), 0., 1.)
-    return float(offset_score * inward_score)
+    return self.cutin_evidence(straight_road, not_ego_lane_change)['confidence']
 
   def get_RadarState(self, model_prob: float = 0.0):
     return {
@@ -304,13 +327,20 @@ class RadarD:
         is_fresh_selection = track_id != -1 and track_id != self._prev_lead_track_id[i]
         confidence = 0.0
         if is_fresh_selection and track_id in self.tracks:
-          confidence = self.tracks[track_id].cutin_confidence(straight_road, not_ego_lane_change)
+          evidence = self.tracks[track_id].cutin_evidence(straight_road, not_ego_lane_change)
+          confidence = evidence['confidence']
+          # Log every transition, not just accepted ones -- an accepted-only log makes false
+          # negatives ("that was obviously a cut-in, why did it score 0.31?") unanswerable
+          # after a drive. accepted here matches the threshold cutin_relaxation.py itself uses.
+          accepted = confidence > CUTIN_LOG_THRESHOLD
+          msg = ('cut-in transition: track=%s accepted=%s confidence=%.2f age=%d age_ok=%s ' +
+                 'recent_abs_yRel=%.2f inward_vy=%.2f straight_road=%s not_ego_lane_change=%s ' +
+                 'dRel=%.1f vRel=%.1f v_ego=%.1f')
+          cloudlog.info(msg, track_id, accepted, confidence, evidence['track_age_cycles'], evidence['age_ok'],
+                        evidence['recent_abs_yRel'], evidence['inward_vy'], straight_road, not_ego_lane_change,
+                        evidence['dRel'], evidence['vRel'], self.v_ego)
         values['cutinConfidence'] = confidence
         self._prev_lead_track_id[i] = track_id
-        if confidence > CUTIN_LOG_THRESHOLD:
-          cloudlog.info('cut-in detected: track=%s confidence=%.2f dRel=%.1f vRel=%.1f v_ego=%.1f',
-                        track_id, confidence, values.get('dRel', float('nan')),
-                        values.get('vRel', float('nan')), self.v_ego)
 
         # pycapnp's dict-to-struct conversion creates schema reference cycles.
         # Real-time processes disable GC, so write scalar fields directly.

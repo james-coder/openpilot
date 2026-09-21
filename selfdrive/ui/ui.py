@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import faulthandler
 import os
 import time
 
@@ -13,7 +14,25 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 BIG_UI = gui_app.big_ui()
 
 
+FAULT_LOG = '/data/log/ui_faults.log'
+
+
+def enable_fault_log(path=FAULT_LOG):
+  """On a fatal signal (SIGABRT/SIGSEGV) dump every thread's Python stack to a persistent file.
+  The manager only records the exit code (a -6 on 2026-09-21 mid-drive left nothing else), and
+  the process's stderr scrolls off the tmux pane within minutes."""
+  try:
+    f = open(path, 'a')  # noqa: SIM115 -- must stay open for faulthandler
+    f.write(f'\n=== ui start pid={os.getpid()} t={time.time():.0f}\n')  # noqa: TID251 -- persisted wall timestamp
+    f.flush()
+    faulthandler.enable(file=f, all_threads=True)
+    return f
+  except OSError:
+    return None
+
+
 def main():
+  enable_fault_log()
   # Keep initialization and hotplug recovery on the same core. Core 5 is
   # reserved for plannerd/radard; the UI must not migrate there while rendering.
   cores = {0}

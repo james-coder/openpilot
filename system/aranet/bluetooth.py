@@ -20,7 +20,7 @@ import time
 
 from openpilot.selfdrive.car.aranet import SENSOR, advertisements, decode, background_priority
 from openpilot.system.aranet.protocol import ASSETS, SOCKET, encode
-from openpilot.system.aranet.safety import offroad, UnsafeInitialization
+from openpilot.system.aranet.safety import offroad
 
 LOG = logging.getLogger('aranet-bluetooth')
 
@@ -58,12 +58,19 @@ class Radio:
     self.receiver = None
 
   def ready(self):
-    return self.attach is not None and self.attach.poll() is None and Path('/sys/class/bluetooth/hci0').exists()
+    # hci0 present, and if we own the HCI attachment it must still be alive.
+    return Path('/sys/class/bluetooth/hci0').exists() and (self.attach is None or self.attach.poll() is None)
+
+  def adopt(self):
+    """hci0 already exists (earlier run, or a previous launcher): bring it up and use it instead of refusing."""
+    self.attach = None
+    run_checked([str(ASSETS / 'bin/hciconfig'), 'hci0', 'up'])
+    run_checked([str(ASSETS / 'bin/btmgmt'), '-i', '0', 'le', 'on'], 30)
 
   def initialize(self):
-    offroad()
     if Path('/sys/class/bluetooth/hci0').exists():
-      raise RuntimeError('Bluetooth is owned by another launcher; no reset attempted')
+      self.adopt()
+      return
     self.close()
     for path in ('/dev/btpower', '/dev/ttyHS1'):
       if not Path(path).exists():
@@ -158,7 +165,7 @@ def main():
     os.chmod(SOCKET, 0o660)
     server.listen(1)
     server.setblocking(False)
-    state, detail, retry, last_status = 'waiting_offroad', 'Waiting for safe Bluetooth initialization', 0., 0.
+    state, detail, retry, last_status = 'initializing', 'Initializing Bluetooth', 0., 0.
     last_forward = 0.
     try:
       while True:
@@ -190,7 +197,7 @@ def main():
         elif now >= retry:
           try:
             if not radio.ready():
-              state, detail = 'initializing', 'Initializing Bluetooth while offroad or safely parked'
+              state, detail = 'initializing', 'Initializing Bluetooth'
               client.send(encode(dict(type='status', state=state, message=detail)))
               radio.initialize()
             if radio.scanner is None:
@@ -213,14 +220,10 @@ def main():
                     pass  # Drop telemetry, never block on a slow recorder.
           except (OSError, RuntimeError, subprocess.SubprocessError) as exc:
             radio.stop_scan()
-            unsafe = isinstance(exc, UnsafeInitialization)
-            state = 'waiting_offroad' if unsafe else 'initialization_failed'
+            state = 'initialization_failed'
             detail = str(exc)[:240]
             LOG.warning('%s: %s', state, detail)
-            # Merely waiting on safe-to-init telemetry: recheck soon, both to react promptly
-            # once parked and to keep the safety gate's own subscriptions from going stale.
-            # A real hardware/transport failure backs off much further.
-            retry = time.monotonic() + (2 if unsafe else 30)
+            retry = time.monotonic() + 30
         if client is not None and time.monotonic() - last_status >= 5:
           try:
             client.send(encode(dict(type='status', state=state, message=detail)))

@@ -22,8 +22,8 @@ def sample(root: Path, now=1000., ppm=1159, interval=120, state='recording', sta
 def test_latest_co2_requires_live_collector_and_fresh_valid_sample(tmp_path):
   assert co2_overlay.latest_co2(tmp_path, 1000.) is None  # cold boot / feature absent
   sample(tmp_path)
-  assert co2_overlay.latest_co2(tmp_path, 1000.) == (1159, 1240.)
-  assert co2_overlay.latest_co2(tmp_path, 1241.) is None
+  assert co2_overlay.latest_co2(tmp_path, 1000.) == (1159, 1900.)  # interval 120 s: shown for max(900, 3*interval)
+  assert co2_overlay.latest_co2(tmp_path, 1901.) is None
   (tmp_path / 'status.json').write_text(json.dumps({'time': 900, 'state': 'recording'}))
   assert co2_overlay.latest_co2(tmp_path, 1000.) is None  # crashed/stopped
   (tmp_path / 'status.json').write_text(json.dumps({'time': 1000, 'state': 'paused'}))
@@ -77,7 +77,7 @@ def test_badge_uses_max_font_size_and_lower_right_and_hides_when_stale(monkeypat
   monkeypatch.setattr(co2_overlay, 'time', SimpleNamespace(time=lambda: 1000.))
   from openpilot.selfdrive.ui import ui_state as ui_state_module
   monkeypatch.setattr(ui_state_module, 'ui_state', SimpleNamespace(started=False, sm={'driverMonitoringState': SimpleNamespace(isRHD=False)}))
-  overlay = SimpleNamespace(_latest=(1159, 1240.), _font=object(), _badge=None)
+  overlay = SimpleNamespace(_latest=(1159, 1900.), _font=object(), _badge=None)
   co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
   text_draws = [d for d in draws if d[0] == 'text']
   assert [d[1] for d in text_draws] == ['CO2 ', '1159 ppm']  # plain "2", not the unsupported ₂ glyph
@@ -101,11 +101,11 @@ def test_badge_label_color_only_turns_red_above_threshold(monkeypatch):
   monkeypatch.setattr(co2_overlay, 'time', SimpleNamespace(time=lambda: 1000.))
   from openpilot.selfdrive.ui import ui_state as ui_state_module
   monkeypatch.setattr(ui_state_module, 'ui_state', SimpleNamespace(started=False, sm={'driverMonitoringState': SimpleNamespace(isRHD=False)}))
-  overlay = SimpleNamespace(_latest=(1000, 1240.), _font=object(), _badge=None)
+  overlay = SimpleNamespace(_latest=(1000, 1900.), _font=object(), _badge=None)
   co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
   assert draws[0] == ('CO2 ', co2_overlay.COLORS.WHITE)  # exactly at threshold: not yet red
   draws.clear()
-  overlay._latest = (1001, 1240.)
+  overlay._latest = (1001, 1900.)
   co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
   assert draws[0] == ('CO2 ', co2_overlay.HIGH_CO2_COLOR)
   assert draws[1] == ('1001 ppm', co2_overlay.COLORS.WHITE)
@@ -121,7 +121,7 @@ def test_badge_moves_above_right_hand_drive_monitor_and_can_be_hidden(monkeypatc
   state = SimpleNamespace(isRHD=False)
   fake_ui = SimpleNamespace(started=False, sm={'driverMonitoringState': state})
   monkeypatch.setattr(ui_state_module, 'ui_state', fake_ui)
-  overlay = SimpleNamespace(_latest=(1159, 1240.), _font=object(), _badge=None)
+  overlay = SimpleNamespace(_latest=(1159, 1900.), _font=object(), _badge=None)
   co2_overlay.Co2Overlay._render(overlay, rl.Rectangle(30, 30, 2100, 1020))
   state.isRHD = True
   fake_ui.started = True

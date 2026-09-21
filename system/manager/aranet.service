@@ -9,8 +9,8 @@ Group=comma
 WorkingDirectory=/data/openpilot
 Environment=PYTHONPATH=/data/openpilot
 ExecStart=/usr/local/venv/bin/python -m openpilot.selfdrive.car.aranet
-Restart=on-failure
-RestartSec=30
+Restart=always
+RestartSec=10
 Nice=19
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
@@ -24,8 +24,8 @@ ProtectSystem=strict
 ProtectHome=true
 ReadWritePaths=/data/aranet
 UMask=0022
-StandardOutput=null
-StandardError=null
+StandardOutput=journal
+StandardError=journal
 KillMode=mixed
 
 [Install]

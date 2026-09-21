@@ -20,7 +20,7 @@ from openpilot.system.ui.widgets import Widget
 
 
 POLL_SECONDS = 5
-STATUS_MAX_AGE = 20
+STATUS_MAX_AGE = 30
 HIGH_CO2_PPM = 1000
 HIGH_CO2_COLOR = rl.Color(230, 60, 60, 255)
 
@@ -43,7 +43,7 @@ def latest_co2(root: Path = ROOT, now: float | None = None) -> tuple[int, float]
     if (any(type(value) not in (int, float) or not math.isfinite(value) for value in row) or
         not 0 <= ppm <= 32767 or not 1 <= interval <= 3600):
       return None
-    expiry = timestamp + min(600, max(180, 2 * interval))
+    expiry = timestamp + min(1800, max(900, 3 * interval))  # keep showing across the sensor's own interval
     return (round(ppm), expiry) if timestamp <= now <= expiry else None
   except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
     return None

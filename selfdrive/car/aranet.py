@@ -16,6 +16,7 @@ import subprocess
 import time
 
 ROOT = Path('/data/aranet')
+SENSOR_STALE_S = 900  # an Aranet4 advertises once per measurement interval (up to 10 min); was 240, which blinked the badge off
 SENSOR = 'CE:24:29:74:F2:C2'  # Owner's previously identified Aranet4 2954E; never auto-select another.
 MAX_ROWS = 21600
 RETENTION = 30 * 86400
@@ -207,7 +208,7 @@ def main():
               if not isinstance(state, str) or not isinstance(detail, str):
                 raise ValueError('Invalid helper status')
               if state == 'listening' and last_write is not None:
-                if time.time() - last_write <= 240:  # noqa: TID251 -- persisted sample freshness
+                if time.time() - last_write <= SENSOR_STALE_S:  # noqa: TID251 -- persisted sample freshness
                   state, detail = 'recording', 'Recording Aranet4 2954E'
                 else:
                   state, detail = 'sensor_stale', 'Sensor stale; no fresh readings'

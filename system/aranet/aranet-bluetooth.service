@@ -16,8 +16,8 @@ RuntimeDirectory=aranet-bluetooth
 RuntimeDirectoryMode=0750
 LogsDirectory=aranet-bluetooth
 LogsDirectoryMode=0750
-Restart=on-failure
-RestartSec=30
+Restart=always
+RestartSec=10
 Nice=19
 CPUSchedulingPolicy=idle
 IOSchedulingClass=idle
@@ -31,8 +31,8 @@ RestrictAddressFamilies=AF_UNIX AF_BLUETOOTH AF_NETLINK
 ProtectSystem=full
 ProtectHome=true
 ReadOnlyPaths=/data/aranet /data/aranet-bluetooth
-StandardOutput=null
-StandardError=null
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

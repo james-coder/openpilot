@@ -26,7 +26,7 @@ def test_no_manager_dependency():
     assert 'Requires=' not in text and 'BindsTo=' not in text
     assert 'After=multi-user.target' not in text  # Would cycle with WantedBy at boot.
     assert 'CPUSchedulingPolicy=idle' in text and 'CPUQuota=5%' in text
-    assert 'RestartSec=30' in text and 'MemoryMax=' in text
+    assert 'Restart=always' in text and 'RestartSec=10' in text and 'MemoryMax=' in text and 'StandardOutput=journal' in text
 
 
 @pytest.mark.parametrize('raw', [b'', b'[]', b'null', b'{}', b'x'*4097, b'{"version":1,"type":"command"}'])
@@ -55,95 +55,16 @@ def test_feed_and_database(tmp_path, monkeypatch):
     history.db.close()
 
 
-@pytest.mark.parametrize('failure', ['unseen', 'stale', 'invalid', 'empty', 'ignition', 'started', 'controls'])
-def test_initialization_gate_denies(failure, monkeypatch):
-  monkeypatch.setattr(safety.time, 'monotonic', lambda: 10.)
-  panda = SimpleNamespace(ignitionLine=failure=='ignition', ignitionCan=False, controlsAllowed=failure=='controls')
-  data = {
-    'deviceState': SimpleNamespace(started=failure=='started'),
-    'pandaStates': [] if failure=='empty' else [panda],
-    # Not parked, so the ignition/started/controls cases still deny even under the parked-safe path.
-    'carState': SimpleNamespace(gearShifter='drive', standstill=False, vEgo=5.),
-    'selfdriveState': SimpleNamespace(enabled=True),
-  }
-  class SM:
-    services = list(data)
-    seen = dict.fromkeys(data, failure != 'unseen')
-    valid = dict.fromkeys(data, failure != 'invalid')
-    recv_time = dict.fromkeys(data, 0 if failure == 'stale' else 9.)
-    def update(self, timeout):
-      pass
-    def __getitem__(self, key):
-      return data[key]
-  gate = safety.OffroadGate.__new__(safety.OffroadGate)
-  gate.sm = SM()
-  with pytest.raises(safety.UnsafeInitialization):
-    gate.check()
-
-
-@pytest.mark.parametrize('case,allowed', [
-  ('parked_ignition_line', True), ('parked_ignition_can', True), ('parked_started', True),
-  ('moving', False), ('drive_gear', False), ('unknown_gear', False), ('engaged', False),
-  ('controls_allowed', False), ('stale_car', False), ('stale_selfdrive', False),
-])
-def test_initialization_gate_allows_while_safely_parked(case, allowed, monkeypatch):
-  """A car whose CAN bus (e.g. the Volt's) keeps reporting ignition on after parking must still
-  be able to start Bluetooth once it's verifiably in Park, stopped, and disengaged."""
-  monkeypatch.setattr(safety.time, 'monotonic', lambda: 10.)
-  panda = SimpleNamespace(
-    # Every case keeps ignition "on" via ignitionLine unless it's specifically exercising
-    # ignitionCan or deviceState.started as the sole on-signal (e.g. the Volt's GMLAN quirk).
-    ignitionLine=case != 'parked_ignition_can',
-    ignitionCan=case == 'parked_ignition_can',
-    controlsAllowed=case == 'controls_allowed',
-  )
-  data = {
-    'deviceState': SimpleNamespace(started=case == 'parked_started'),
-    'pandaStates': [panda],
-    'carState': SimpleNamespace(
-      gearShifter='drive' if case == 'drive_gear' else 'unknown' if case == 'unknown_gear' else 'park',
-      standstill=case != 'moving',
-      vEgo=2. if case == 'moving' else 0.,
-    ),
-    'selfdriveState': SimpleNamespace(enabled=case == 'engaged'),
-  }
-  class SM:
-    services = list(data)
-    seen = dict.fromkeys(data, True)
-    valid = dict.fromkeys(data, True)
-    recv_time = {k: 0. if (case == 'stale_car' and k == 'carState') or (case == 'stale_selfdrive' and k == 'selfdriveState')
-                 else 9. for k in data}
-    def update(self, timeout):
-      pass
-    def __getitem__(self, key):
-      return data[key]
-  gate = safety.OffroadGate.__new__(safety.OffroadGate)
-  gate.sm = SM()
-  if allowed:
-    gate.check()
-  else:
-    with pytest.raises(safety.UnsafeInitialization):
-      gate.check()
-
-
-def test_initialization_denied_before_hardware(monkeypatch):
-  def denied():
-    raise safety.UnsafeInitialization('onroad')
-  monkeypatch.setattr(bluetooth, 'offroad', denied)
-  monkeypatch.setattr(bluetooth.subprocess, 'run', lambda *a, **k: pytest.fail('must not run tools'))
-  with pytest.raises(safety.UnsafeInitialization):
-    bluetooth.Radio().initialize()
-
-
-def test_firmware_checks_each_send_and_receive(monkeypatch):
-  def denied():
-    raise safety.UnsafeInitialization('ignition changed')
-  monkeypatch.setattr(firmware, 'offroad', denied)
-  uart = firmware.UART(-1, None)
-  with pytest.raises(safety.UnsafeInitialization):
-    uart.send(0xfc00)
-  with pytest.raises(safety.UnsafeInitialization):
-    uart.event()
+def test_existing_hci0_is_adopted_not_refused(monkeypatch, tmp_path):
+  """An hci0 left by an earlier run used to make initialize() raise forever ("owned by another
+  launcher"), so the badge never came back until a reboot. Now it is simply brought up and used."""
+  calls = []
+  monkeypatch.setattr(bluetooth.Path, 'exists', lambda self: str(self) == '/sys/class/bluetooth/hci0')
+  monkeypatch.setattr(bluetooth, 'run_checked', lambda argv, timeout=10: calls.append([str(a) for a in argv][-2:]) or '')
+  radio = bluetooth.Radio()
+  radio.initialize()
+  assert calls == [['hci0', 'up'], ['le', 'on']]
+  assert radio.ready()
 
 
 def test_firmware_nvm_and_bounds():

@@ -20,8 +20,8 @@ from openpilot.system.ui.widgets import Widget
 ROOT = Path('/data/wind')
 POLL_SECONDS = 5
 STATUS_MAX_AGE_S = 30      # daemon must have written within this
-READING_MAX_AGE_S = 3600   # hide a reading older than this even if the daemon is alive
-READING_OLD_S = 1200       # dim the badge past this (offline for a while)
+READING_MAX_AGE_S = 6 * 3600  # hide only when the last reading is this old (long offline stretch)
+READING_OLD_S = 1200          # dim past this and show the age, so a stale value is never mistaken for live
 STRONG_MPH = 25
 STRONG_COLOR = rl.Color(255, 170, 40, 255)
 DIM = rl.Color(255, 255, 255, 140)
@@ -111,6 +111,8 @@ class WindOverlay(Widget):
     text = f'WIND {speed:.0f} mph {compass(direction)}'
     if gust is not None and gust >= speed + 8:
       text += f' G{gust:.0f}'
+    if age > READING_OLD_S:
+      text += f' ({age / 60:.0f}m ago)'
     size = FONT_SIZES.max_speed
     text_size = measure_text_cached(self._font, text, size)
     arrow = size * 1.1

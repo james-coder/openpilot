@@ -21,6 +21,8 @@ def test_latest_wind_requires_live_daemon_and_fresh_reading(tmp_path):
   assert wo.latest_wind(tmp_path, 1000.) is None                      # reading too old
   status(tmp_path, reading_age=900.)
   assert wo.latest_wind(tmp_path, 1000.)[3] == 900.                  # old but shown (dimmed by the renderer)
+  status(tmp_path, reading_age=5 * 3600.)
+  assert wo.latest_wind(tmp_path, 1000.)[3] == 5 * 3600.             # hours offline: still shown, with its age
 
 
 def test_latest_wind_rejects_corrupt_data(tmp_path):

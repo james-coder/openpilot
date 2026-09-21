@@ -100,14 +100,29 @@ def write_status(payload, root=ROOT):
     pass  # never turn a storage failure into a tight loop
 
 
+def load_previous(root=ROOT, now=None):
+  """(reading, reading_time) persisted by the previous run, so the badge shows the last known wind
+  right at startup (marked by its age) instead of waiting for GPS + network. None if unusable."""
+  now = time.time() if now is None else now  # noqa: TID251 -- persisted wall timestamps
+  try:
+    status = json.loads((root / 'status.json').read_text())
+    r, rt = status.get('reading'), status.get('reading_time')
+    if isinstance(r, dict) and type(rt) in (int, float) and 0 <= now - rt <= 24 * 3600:
+      parse_response({'current': {'wind_speed_10m': r['wind_mph'], 'wind_direction_10m': r['dir_deg'],
+                                  'wind_gusts_10m': r.get('gust_mph')}, 'current_units': {'wind_speed_10m': 'mph'}})
+      return r, float(rt)
+  except (OSError, ValueError, TypeError, KeyError):
+    pass
+  return None, 0.
+
+
 def main():
   import cereal.messaging as messaging
   from openpilot.common.swaglog import cloudlog
   sm = messaging.SubMaster(['gpsLocation', 'gpsLocationExternal'])
   last_fetch = None
   last_lat = last_lon = 0.
-  reading = None      # last good wind reading dict
-  reading_time = 0.   # wall time it was fetched
+  reading, reading_time = load_previous()  # last good wind reading dict and the wall time it was fetched
   failures = 0
   while True:
     sm.update(0)

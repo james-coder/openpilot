@@ -51,3 +51,14 @@ def test_write_status_atomic(tmp_path):
   wm.write_status({'time': 1., 'state': 'ok'}, root=tmp_path / 'wind')
   assert (tmp_path / 'wind' / 'status.json').read_text() == '{"time": 1.0, "state": "ok"}'
   assert not (tmp_path / 'wind' / 'status.tmp').exists()
+
+
+def test_load_previous_reading_survives_restart(tmp_path):
+  assert wm.load_previous(tmp_path, 1000.) == (None, 0.)
+  wm.write_status({'time': 990., 'state': 'ok', 'reading': wm.parse_response(body()), 'reading_time': 990.}, root=tmp_path)
+  r, t = wm.load_previous(tmp_path, 1000.)
+  assert (r['wind_mph'], r['dir_deg'], t) == (12.3, 315, 990.)
+  wm.write_status({'time': 1., 'state': 'ok', 'reading': wm.parse_response(body()), 'reading_time': 1.}, root=tmp_path)
+  assert wm.load_previous(tmp_path, 2 * 86400.) == (None, 0.)        # a day old: start fresh
+  wm.write_status({'time': 990., 'state': 'ok', 'reading': {'wind_mph': 'x'}, 'reading_time': 990.}, root=tmp_path)
+  assert wm.load_previous(tmp_path, 1000.) == (None, 0.)

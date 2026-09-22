@@ -77,6 +77,7 @@ procs = [
   NativeProcess("stream_encoderd", "system/loggerd", ["./encoderd", "--stream"], notcar),
   PythonProcess("logmessaged", "system.logmessaged", always_run),
   PythonProcess("windd", "system.wind_monitor", only_onroad, enabled=not PC),
+  PythonProcess("modemlogd", "system.modem_log", always_run, enabled=TICI),
 
   NativeProcess("camerad", "system/camerad", ["./camerad"], driverview, enabled=not WEBCAM),
   PythonProcess("webcamerad", "tools.webcam.camerad", driverview, enabled=WEBCAM),

@@ -17,12 +17,18 @@ def test_haversine_known_distance():
 
 
 def test_fix_from_rejects_bad_fixes():
-  good = SimpleNamespace(flags=1, horizontalAccuracy=5., latitude=40.5, longitude=-111.9, bearingDeg=270.)
+  good = SimpleNamespace(hasFix=True, horizontalAccuracy=5., latitude=40.5, longitude=-111.9, bearingDeg=270.)
   assert wm.fix_from(good) == (40.5, -111.9, 270.)
-  assert wm.fix_from(SimpleNamespace(**{**vars(good), 'flags': 0})) is None
+  assert wm.fix_from(SimpleNamespace(**{**vars(good), 'hasFix': False})) is None
   assert wm.fix_from(SimpleNamespace(**{**vars(good), 'horizontalAccuracy': 5000.})) is None
   assert wm.fix_from(SimpleNamespace(**{**vars(good), 'latitude': 0., 'longitude': 0.})) is None
   assert wm.fix_from(None) is None
+
+
+def test_fix_from_accepts_qcomgpsd_fix_without_accuracy():
+  # What the comma 3X logged on 2026-09-25: hasFix set, flags and accuracy left at 0.
+  qcom = SimpleNamespace(hasFix=True, flags=0, horizontalAccuracy=0., latitude=41.191, longitude=-111.97, bearingDeg=90.)
+  assert wm.fix_from(qcom) == (41.191, -111.97, 90.)
 
 
 def body(**over):
@@ -40,7 +46,8 @@ def test_parse_response_ok_and_validation():
     wm.parse_response(body(wind_speed_10m='12'))
   with pytest.raises(ValueError):
     wm.parse_response(body(wind_direction_10m=400))
-  b = body(); b['current_units']['wind_speed_10m'] = 'kmh'
+  b = body()
+  b['current_units']['wind_speed_10m'] = 'kmh'
   with pytest.raises(ValueError):
     wm.parse_response(b)
   with pytest.raises((ValueError, KeyError)):

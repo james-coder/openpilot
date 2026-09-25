@@ -52,7 +52,10 @@ def fix_from(msg):
   if msg is None:
     return None
   try:
-    if not (msg.flags & 1) or not (0. < msg.horizontalAccuracy <= MAX_ACCURACY_M):
+    # hasFix is set by both GPS daemons. flags is ublox-only: the comma 3X's Qualcomm receiver
+    # (qcomgpsd, gpsLocation) always sends flags=0 and horizontalAccuracy=0, which is "not
+    # reported" rather than perfect, so only a reported accuracy is checked against the limit.
+    if not msg.hasFix or not (0. <= msg.horizontalAccuracy <= MAX_ACCURACY_M):
       return None
     lat, lon = float(msg.latitude), float(msg.longitude)
     if not (math.isfinite(lat) and math.isfinite(lon)) or (lat == 0. and lon == 0.):

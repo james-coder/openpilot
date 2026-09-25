@@ -53,17 +53,15 @@ T_IDXS_LST = [index_function(idx, max_val=MAX_T, max_idx=N) for idx in range(N+1
 T_IDXS = np.array(T_IDXS_LST)
 FCW_IDXS = T_IDXS < 5.0
 T_DIFFS = np.diff(T_IDXS, prepend=[0.])
-# Simple, direct edits (no profile/data system, no personality-dependent branching) to
-# roughly halve the steady-state following gap at every speed -- comfort_brake is the
-# dominant term at highway speed, so it has to move too, not just t_follow/stop_distance.
-# 6.0 (vs. stock 2.5) was chosen deliberately conservative: it's higher than anything
-# steady-state-tested tonight (the reverted personality-profile system topped out at 4.8
-# for its aggressive tier) but well short of the ~13-14 that would be needed for a literal
-# 50% cut, specifically to stay closer to already-observed behavior. See
-# docs/2026-09-18-startup-and-longitudinal-incident.md for the full incident this followed;
-# the data-driven personality-profile system and cut-in relaxation feature previously built
-# on top of this file were moved to the experimental/following-distance-and-cutin branch.
-COMFORT_BRAKE = 6.0
+# The steady-state following gap is t_follow * v + stop_distance: comfort_brake appears in both the
+# desired distance (v_ego^2 / 2cb) and the lead's stopped-equivalent position (v_lead^2 / 2cb), and
+# the two cancel whenever the speeds match. The 2026-09-17 retune shortened the gap through
+# t_follow and stop_distance; it also raised comfort_brake to 6.0, which did not shorten the gap
+# but made the planner assume it could brake at 6 m/s^2 while it can only command ACCEL_MIN
+# (-3.5). Closing on slower or stopped traffic it waited, then braked late and hard. Back to
+# stock 2.5 (docs/2026-09-25-panic-brake-analysis.md): same following gap, earlier and gentler
+# braking when closing. Keep it at or below -ACCEL_MIN (test_following_distance.py).
+COMFORT_BRAKE = 2.5
 STOP_DISTANCE = 4.5
 # What is actually compiled into c_generated_code's danger-zone constraint (see update()).
 BAKED_COMFORT_BRAKE = 2.5

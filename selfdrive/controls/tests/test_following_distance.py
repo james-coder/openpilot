@@ -4,7 +4,8 @@ from openpilot.common.parameterized import parameterized_class
 
 from cereal import log
 
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import get_safe_obstacle_distance, get_stopped_equivalence_factor, get_T_FOLLOW
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import ACCEL_MIN, COMFORT_BRAKE, get_safe_obstacle_distance, \
+  get_stopped_equivalence_factor, get_T_FOLLOW
 from openpilot.selfdrive.test.longitudinal_maneuvers.maneuver import Maneuver
 
 
@@ -44,3 +45,17 @@ class TestFollowingDistance:
     err_ratio = 0.2 if self.e2e else 0.1
     abs_err_margin = 0.5 if v_lead > 0.0 else 1.15
     assert simulation_steady_state == pytest.approx(correct_steady_state, abs=err_ratio * correct_steady_state + abs_err_margin)
+
+
+def test_comfort_brake_is_commandable():
+  # The planner must not plan on braking harder than it can command; 6.0 did, and braked late
+  # and hard when closing on slower traffic (docs/2026-09-25-panic-brake-analysis.md).
+  assert COMFORT_BRAKE <= -ACCEL_MIN
+
+
+def test_stopped_car_from_highway_speed_stays_within_limits():
+  man = Maneuver('', duration=25., initial_speed=27., lead_relevancy=True, initial_distance_lead=150.,
+                 speed_lead_values=[0.], breakpoints=[0.], personality=log.LongitudinalPersonality.aggressive)
+  valid, output = man.evaluate()
+  assert valid
+  assert output[:, 5].min() > ACCEL_MIN + .1  # 6.0 saturated at ACCEL_MIN here

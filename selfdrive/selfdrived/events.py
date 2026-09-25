@@ -251,9 +251,9 @@ def startup_master_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubM
   if "REPLAY" in os.environ:
     branch = "replay"
 
-  # Reuses the existing check-engine scanner's last saved result (selfdrive/car/obd_scan.py,
-  # selfdrive/car/obd_scan_controller.py) -- this doesn't trigger a scan itself, and adds
-  # nothing to the line below it when there's no scan on file or it came back clean.
+  # Last saved check-engine scan (selfdrive/car/obd_scan.py). card rescans automatically on every
+  # shift into Park and once per ignition cycle, so this is normally the state at the last Park;
+  # an older scan is labelled with its age. Nothing is added when there's no scan or it's clean.
   mil = summarize_mil(Params().get("ObdLastScan"))
   # Plain ASCII on purpose: the same em-dash character caused "CO?" instead of "CO2" on
   # this device's font earlier this session -- this UI can't render it either.

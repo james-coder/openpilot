@@ -11,6 +11,12 @@ from openpilot.selfdrive.car.gm_egr import GmEgrScanner
 from openpilot.selfdrive.car.gm_egr_data import EGR_SAFETY_FLAG
 from openpilot.selfdrive.car.gm_egr_archive import archive_report
 
+# Automatic scans: once per card start (each ignition cycle) and on every shift into Park, under
+# the same gates as a manual scan, so the startup alert and the check-engine badge show the
+# car's current state instead of whenever someone last pressed Scan. A code can't set or clear
+# while the car is off, so the scan from the last Park is current at the next boot.
+AUTO_SCAN_COOLDOWN_S = 30.
+
 
 class ObdScanController:
   def __init__(self, CP, params, replay=False):
@@ -29,6 +35,9 @@ class ObdScanController:
     self._last_gear = self._last_speed = -100.
     self._faulted = False
     self._archive_ready = False
+    self._auto_due = "boot"
+    self._auto_last = -AUTO_SCAN_COOLDOWN_S
+    self._was_park = None
 
   def poll_params(self):
     """Called by the background parameter thread; all disk I/O stays here."""
@@ -42,9 +51,9 @@ class ObdScanController:
     snapshot = self._snapshot
     if snapshot is not None and snapshot is not self._written:
       status, report = snapshot
-      self.params.put("ObdScanStatus", status, block=True)
       if report is not None and (self._written is None or report != self._written[1]):
         self.params.put("ObdLastScan", report, block=True)
+      self.params.put("ObdScanStatus", status, block=True)
       self._written = snapshot
     snapshot = self._gm_snapshot
     if snapshot is not None and snapshot is not self._gm_written:
@@ -140,7 +149,19 @@ class ObdScanController:
             scanner.revision += 1
           else:
             scanner.start(request['request_id'], self.vehicle, now)
+            self._auto_due = None  # a manual scan answers the same question
+            self._auto_last = now
             frames = []
+    park = CS.gearShifter == "park"
+    if park and self._was_park is False:
+      self._auto_due = "park"
+    self._was_park = park
+    if (self._auto_due and not reason and request is None and not self.scanner.active and not self.gm_scanner.active and
+        now - self._auto_last >= AUTO_SCAN_COOLDOWN_S):
+      self.scanner.start(f"auto-{self._auto_due}-{now:.0f}", self.vehicle, now)
+      self._auto_due = None
+      self._auto_last = now
+      frames = []
     sends = self.scanner.tick(now, frames, reason)
     egr_reason = gm_reason
     if isinstance(self.gm_scanner, GmEgrScanner) and not all(p.safetyParam & EGR_SAFETY_FLAG for p in pandas):

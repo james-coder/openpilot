@@ -63,6 +63,18 @@ def latest_wind(root: Path = ROOT, now: float | None = None):
     return None
 
 
+def left_badge_x(rect: rl.Rectangle) -> float:
+  """Left edge for the bottom-left badges (wind, check engine): right of the driver-monitoring
+  face icon, which sits in the bottom-left corner of a left-hand-drive car."""
+  rhd = False
+  try:
+    from openpilot.selfdrive.ui.ui_state import ui_state
+    rhd = ui_state.started and ui_state.sm['driverMonitoringState'].isRHD
+  except Exception:
+    pass
+  return rect.x + UI_CONFIG.border_size + (16 if rhd else UI_CONFIG.button_size + 24)
+
+
 def _heading():
   """Car heading in degrees from the UI's GPS feed, or None."""
   try:
@@ -71,7 +83,7 @@ def _heading():
     for svc in ('gpsLocation', 'gpsLocationExternal'):
       if svc in sm.services and sm.alive[svc] and sm.valid[svc]:
         g = sm[svc]
-        if (g.flags & 1) and g.speed > 1.5:  # bearing is meaningless when nearly stopped
+        if g.hasFix and g.speed > 1.5:  # bearing is meaningless when nearly stopped
           return float(g.bearingDeg)
   except Exception:
     pass
@@ -116,8 +128,8 @@ class WindOverlay(Widget):
     size = FONT_SIZES.max_speed
     text_size = measure_text_cached(self._font, text, size)
     arrow = size * 1.1
-    # bottom-left, above the border; the CO2 badge (if any) is bottom-right
-    x = rect.x + UI_CONFIG.border_size + 16
+    # bottom-left, beside the driver-monitoring icon; the CO2 badge (if any) is bottom-right
+    x = left_badge_x(rect)
     y = rect.y + rect.height - UI_CONFIG.border_size - text_size.y - 20
     backing = rl.Rectangle(x - 12, y - 8, text_size.x + arrow + 40, text_size.y + 16)
     self._badge = backing

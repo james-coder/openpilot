@@ -1,11 +1,12 @@
 import copy
+from datetime import datetime
 import pytest
 from types import SimpleNamespace
 
 from opendbc.car.can_definitions import CanData
 from opendbc.car.gm.values import CAR
-from openpilot.selfdrive.car.obd_scan import ObdScanner, decode_reply, scan_block_reason, summarize_mil
-from openpilot.selfdrive.car.obd_scan_controller import ObdScanController
+from openpilot.selfdrive.car.obd_scan import ObdScanner, decode_reply, mil_state, scan_block_reason, summarize_mil
+from openpilot.selfdrive.car.obd_scan_controller import AUTO_SCAN_COOLDOWN_S, ObdScanController
 from openpilot.selfdrive.ui.layouts.settings.obd_diagnostics_data import lamp_status, result_rows, valid_report, descriptions
 
 
@@ -301,18 +302,18 @@ class TestSummarizeMil:
       '7E8': {'stored': {'state': 'ok', 'codes': ['P0401']}, 'pending': {'state': 'ok', 'codes': ['P0401']}},
       '7E9': {'permanent': {'state': 'ok', 'codes': ['P0171']}},
     }}
-    assert summarize_mil(report) == 'MIL: P0171, P0401'
+    assert summarize_mil(report) == 'Codes: P0171, P0401'
 
   def test_partial_scan_still_shows_what_was_read(self):
     report = {'state': 'partial', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': ['P0300']},
                                                      'pending': {'state': 'timeout', 'error': 'No response'}}}}
-    assert summarize_mil(report) == 'MIL: P0300'
+    assert summarize_mil(report) == 'Codes: P0300'
 
   def test_many_codes_truncated_for_the_small_display(self):
     codes = [f'P0{i:03d}' for i in range(10)]
     report = {'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': codes}}}}
     summary = summarize_mil(report)
-    assert summary == 'MIL: P0000, P0001, P0002, P0003, P0004, P0005 +4 more'
+    assert summary == 'Codes: P0000, P0001, P0002, P0003, P0004, P0005 +4 more'
 
   def test_malformed_report_shapes_never_raise(self):
     # a syntactically-valid-JSON-but-wrong-shape value (stale schema, hand-edited file, a
@@ -328,3 +329,78 @@ class TestSummarizeMil:
     assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': 'P0401'}}}}) == ''
     assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': [1, 2]}}}}) == ''
     assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': None}}}}) == ''
+
+  def test_lamp_status_decides_the_mil_wording(self):
+    # The device's 2026-09-12 scan: engine ECU lamp on with P0401, other ECUs lamp off and clean.
+    def report(mil):
+      return {'state': 'complete', 'timestamp': '2026-09-12T07:09:52+00:00', 'ecus': {
+        '7E8': {'lamp': {'state': 'ok', 'mil': mil, 'count': int(mil)}, 'stored': {'state': 'ok', 'codes': ['P0401']},
+                'permanent': {'state': 'ok', 'codes': ['P0401']}},
+        '7E9': {'lamp': {'state': 'ok', 'mil': False, 'count': 0}, 'stored': {'state': 'ok', 'codes': []}}}}
+    scanned = datetime.fromisoformat('2026-09-12T07:09:52+00:00').timestamp()
+    assert summarize_mil(report(True), scanned + 60) == 'MIL ON: P0401'
+    assert summarize_mil(report(False), scanned + 60) == 'MIL off, codes: P0401'
+    assert mil_state(report(True)) == (True, ['P0401'], scanned)
+    lamp_only = {'state': 'complete', 'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': True}}}}
+    assert summarize_mil(lamp_only) == 'MIL ON'
+    clean_lamp_off = {'state': 'complete', 'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': False}}}}
+    assert summarize_mil(clean_lamp_off) == ''
+
+  def test_old_scan_is_labelled_with_its_age(self):
+    report = {'state': 'complete', 'timestamp': '2026-09-12T07:09:52+00:00',
+              'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': True}, 'stored': {'state': 'ok', 'codes': ['P0401']}}}}
+    scanned = datetime.fromisoformat(report['timestamp']).timestamp()
+    assert summarize_mil(report, scanned + 11 * 3600) == 'MIL ON: P0401'
+    assert summarize_mil(report, scanned + 13 * 86400) == 'MIL ON: P0401 (scan 13d old)'
+    assert summarize_mil({**report, 'timestamp': 'garbage'}, scanned + 13 * 86400) == 'MIL ON: P0401'
+
+
+class TestAutoScan:
+  @pytest.fixture(autouse=True)
+  def setup_method(self, mocker):
+    self.params = mocker.Mock()
+    self.params.get.return_value = None
+    CP = SimpleNamespace(carFingerprint=CAR.CHEVROLET_VOLT, carVin=VEHICLE['vin'], passive=False)
+    self.controller = ObdScanController(CP, self.params)
+    self.CS = SimpleNamespace(canValid=True, gearShifter='park', vEgo=0.)
+    self.sm = FakeSM()
+
+  def step(self, now, initialized=True):
+    timestamp = int(now * 1e9)
+    self.sm.logMonoTime = dict.fromkeys(self.sm.logMonoTime, timestamp)
+    batches = [(timestamp, [CanData(0x1F5, bytes(8), 0), CanData(0x34A, bytes(5), 0)])]
+    return self.controller.step(now, batches, self.CS, self.sm, initialized)
+
+  def test_boot_scan_waits_for_permission_then_runs_once(self):
+    assert self.step(100., initialized=False) == []
+    assert not self.controller.scanner.active
+    assert len(self.step(101.)) == 1
+    assert self.controller.scanner.status['request_id'].startswith('auto-boot')
+    self.controller.scanner.cancel()
+    assert self.step(200.) == []
+
+  def test_shift_into_park_rescans_but_not_while_driving(self):
+    self.step(100.)
+    self.controller.scanner.cancel()
+    self.CS.gearShifter, self.CS.vEgo = 'drive', 10.
+    assert self.step(200.) == []
+    assert not self.controller.scanner.active
+    self.CS.gearShifter, self.CS.vEgo = 'park', 0.
+    assert len(self.step(300.)) == 1
+    assert self.controller.scanner.status['request_id'].startswith('auto-park')
+
+  def test_gear_flicker_is_rate_limited(self):
+    self.step(100.)
+    self.controller.scanner.cancel()
+    self.CS.gearShifter = 'reverse'
+    self.step(101.)
+    self.CS.gearShifter = 'park'
+    assert self.step(102.) == []
+    assert len(self.step(100. + AUTO_SCAN_COOLDOWN_S)) == 1
+
+  def test_manual_scan_satisfies_boot_scan(self):
+    self.controller._requests.put({'version': 1, 'command': 'scan', 'request_id': 'manual', 'issued_mono': 100.})
+    assert len(self.step(100.)) == 1
+    assert self.controller.scanner.status['request_id'] == 'manual'
+    self.controller.scanner.cancel()
+    assert self.step(200.) == []

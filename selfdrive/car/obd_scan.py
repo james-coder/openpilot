@@ -32,38 +32,67 @@ def scan_block_reason(*, supported, started, initialized, fresh, park, speed, en
   return ""
 
 
-def summarize_mil(report: dict | None) -> str:
-  """One-line summary of DTCs from the last saved check-engine scan (ObdLastScan), for
-  the startup alert. Only counts a service's codes if that service's own read succeeded
-  ("state": "ok") -- a failed/unsupported/timed-out read contributes nothing rather than
-  being silently treated as "no codes". Empty string (display nothing extra) whenever
-  there's no scan on file yet, the saved scan didn't complete/partially complete, or it
-  completed clean -- the menu-based scanner already covers everything else, this is only
-  the boot-time headline.
+STALE_SCAN_S = 12 * 3600  # scans run at every boot and shift to Park, so older than this means they've been failing
 
-  Called unguarded from startup_master_alert() -> selfdrived's main loop, with nothing
-  upstream catching exceptions -- an uncaught error here crashes selfdrived outright. The
-  stored value is JSON deserialized from Params with no schema enforcement beyond "valid
-  JSON", so this must tolerate any syntactically-valid-but-wrong-shaped value (a stale
-  schema, hand-edited file, bug elsewhere writing the wrong shape) without raising, not
-  just the None/wrong-state cases the early return already covers."""
+
+def mil_state(report) -> tuple[bool | None, list[str], float | None]:
+  """(lamp, codes, scan wall time) from a saved ObdLastScan report.
+
+  lamp is True if any ECU's service 01 PID 01 read says the MIL is commanded on, False if
+  at least one ECU was read and none say so, None if no lamp status was read. codes is the
+  union of stored, pending and permanent codes from services whose own read succeeded; a
+  failed read contributes nothing rather than counting as "no codes". The light and the
+  codes are separate facts: a stored or permanent code outlives the light, which is why
+  P0401 stayed on file after the dashboard light went out.
+
+  Tolerates any JSON shape without raising: callers include selfdrived's main loop."""
   try:
     if not isinstance(report, dict) or report.get("state") not in ("complete", "partial"):
-      return ""
-    codes = set()
-    for ecu in report.get("ecus", {}).values():
+      return None, [], None
+    lamp, codes = None, set()
+    ecus = report.get("ecus", {})
+    for ecu in ecus.values() if isinstance(ecus, dict) else ():
       if not isinstance(ecu, dict):
         continue
+      result = ecu.get("lamp", {})
+      if isinstance(result, dict) and result.get("state") == "ok" and isinstance(result.get("mil"), bool):
+        lamp = bool(lamp) or result["mil"]
       for service in ("stored", "pending", "permanent"):
         result = ecu.get(service, {})
         if isinstance(result, dict) and result.get("state") == "ok" and isinstance(result.get("codes"), list):
           codes.update(c for c in result["codes"] if isinstance(c, str))
-    if not codes:
+    try:
+      scanned = datetime.fromisoformat(report["timestamp"]).timestamp()
+    except (KeyError, TypeError, ValueError):
+      scanned = None
+    return lamp, sorted(codes), scanned
+  except Exception:
+    return None, [], None
+
+
+def format_age(seconds: float) -> str:
+  return f"{seconds / 86400:.0f}d" if seconds >= 86400 else f"{seconds / 3600:.0f}h"
+
+
+def summarize_mil(report, now: float | None = None) -> str:
+  """One-line check-engine summary for the startup alert, or "" when there's nothing to say
+  (no scan on file, or a clean one). "MIL" only appears as "MIL ON" when the lamp read says
+  so; codes left behind after the light went out read as "MIL off". A scan older than
+  STALE_SCAN_S carries its age, so an old result is never mistaken for the current state."""
+  try:
+    lamp, codes, scanned = mil_state(report)
+    if not codes and not lamp:
       return ""
-    shown = sorted(codes)
-    text = "MIL: " + ", ".join(shown[:6])
-    if len(shown) > 6:
-      text += f" +{len(shown) - 6} more"
+    shown = ", ".join(codes[:6]) + (f" +{len(codes) - 6} more" if len(codes) > 6 else "")
+    if lamp:
+      text = "MIL ON" + (f": {shown}" if shown else "")
+    elif lamp is False:
+      text = f"MIL off, codes: {shown}"
+    else:
+      text = f"Codes: {shown}"
+    now = datetime.now(UTC).timestamp() if now is None else now
+    if scanned is not None and now - scanned > STALE_SCAN_S:
+      text += f" (scan {format_age(now - scanned)} old)"
     return text
   except Exception:
     return ""

@@ -9,6 +9,7 @@ from openpilot.selfdrive.ui.onroad.driver_state import DriverStateRenderer
 from openpilot.selfdrive.ui.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.onroad.co2_overlay import Co2Overlay
 from openpilot.selfdrive.ui.onroad.wind_overlay import WindOverlay
+from openpilot.selfdrive.ui.onroad.check_engine_overlay import CheckEngineOverlay
 from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import gui_app
@@ -58,6 +59,11 @@ class AugmentedRoadView(CameraView):
     except Exception:
       self._wind_overlay = None
       cloudlog.exception('Optional wind overlay unavailable')
+    try:
+      self._check_engine_overlay = CheckEngineOverlay()
+    except Exception:
+      self._check_engine_overlay = None
+      cloudlog.exception('Optional check-engine overlay unavailable')
     self.alert_renderer = AlertRenderer()
     self.driver_state_renderer = DriverStateRenderer()
 
@@ -112,6 +118,12 @@ class AugmentedRoadView(CameraView):
           self._wind_overlay = None
       else:
         self._wind_overlay.hide()
+    if self._check_engine_overlay is not None and ui_state.sm['selfdriveState'].alertSize == log.SelfdriveState.AlertSize.none:
+      try:
+        self._check_engine_overlay.render(self._content_rect)
+      except Exception:
+        cloudlog.exception('Optional check-engine overlay disabled after rendering error')
+        self._check_engine_overlay = None
     self.alert_renderer.render(self._content_rect)
     self.driver_state_renderer.render(self._content_rect)
 

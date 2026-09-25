@@ -136,8 +136,9 @@ class TestAlerts:
       alert = startup_master_alert(self.CP, self.CS, self.sm, False, 100, log.LongitudinalPersonality.standard)
       assert 'MIL' not in alert.alert_text_2
 
-      params.put('ObdLastScan', {'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': ['P0401']}}}}, block=True)
+      params.put('ObdLastScan', {'state': 'complete', 'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': True},
+                                                                       'stored': {'state': 'ok', 'codes': ['P0401']}}}}, block=True)
       alert = startup_master_alert(self.CP, self.CS, self.sm, False, 100, log.LongitudinalPersonality.standard)
-      assert 'MIL: P0401' in alert.alert_text_2
+      assert 'MIL ON: P0401' in alert.alert_text_2
     finally:
       params.remove('ObdLastScan')

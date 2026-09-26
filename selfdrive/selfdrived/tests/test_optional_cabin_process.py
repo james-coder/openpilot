@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 from cereal import log, car
 from openpilot.common.prefix import OpenpilotPrefix
-from openpilot.selfdrive.selfdrived.events import Events, ET, EventName, driving_process_failures, process_not_running_alert
+from openpilot.selfdrive.selfdrived.events import Events, ET, EventName, OPTIONAL_PROCESSES, driving_process_failures, process_not_running_alert
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
 from openpilot.system.manager.process_config import managed_processes
@@ -35,7 +35,12 @@ def test_dead_aranet_does_not_block_engagement_or_disengage():
     assert machine.state == log.SelfdriveState.OpenpilotState.enabled
 
 
-@pytest.mark.parametrize('name', sorted((set(managed_processes) - {'aranetd'}) | {'unknown_future_process', 'aranatd'}))
+@pytest.mark.parametrize('optional', sorted(OPTIONAL_PROCESSES))
+def test_dead_optional_addon_does_not_block(optional):
+  assert not driving_process_failures(manager_state(optional))
+
+
+@pytest.mark.parametrize('name', sorted((set(managed_processes) - OPTIONAL_PROCESSES) | {'unknown_future_process', 'aranatd'}))
 def test_every_other_process_still_blocks_and_disengages(name):
   state = manager_state('aranetd', name)
   assert driving_process_failures(state) == {name}

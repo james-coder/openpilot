@@ -72,12 +72,12 @@ procs = [
   DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
 
   NativeProcess("loggerd", "system/loggerd", ["./loggerd"], logging),
-  PythonProcess("gmtripd", "selfdrive.car.gm_trip_monitor", volt_trip_logging),
+  PythonProcess("gmtripd", "selfdrive.car.gm_trip_monitor", volt_trip_logging, restart_if_crash=True),
   NativeProcess("encoderd", "system/loggerd", ["./encoderd"], only_onroad),
   NativeProcess("stream_encoderd", "system/loggerd", ["./encoderd", "--stream"], notcar),
   PythonProcess("logmessaged", "system.logmessaged", always_run),
-  PythonProcess("windd", "system.wind_monitor", only_onroad, enabled=not PC),
-  PythonProcess("modemlogd", "system.modem_log", always_run, enabled=TICI),
+  PythonProcess("windd", "system.wind_monitor", only_onroad, enabled=not PC, restart_if_crash=True),
+  PythonProcess("modemlogd", "system.modem_log", always_run, enabled=TICI, restart_if_crash=True),
 
   NativeProcess("camerad", "system/camerad", ["./camerad"], driverview, enabled=not WEBCAM),
   PythonProcess("webcamerad", "tools.webcam.camerad", driverview, enabled=WEBCAM),

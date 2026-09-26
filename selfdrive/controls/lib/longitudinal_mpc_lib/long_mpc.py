@@ -186,7 +186,9 @@ def gen_long_ocp():
   blend = p[8] * support_blend
   desired_dist_comfort = (1. - blend) * desired_dist_comfort + blend * (p[9] + personal_distance)
   # Personal comfort targets cannot reduce the original collision-distance penalty.
-  desired_dist_safety = get_safe_obstacle_distance(v_ego, lead_t_follow)
+  # Pinned to the BAKED_* constants that update()'s live danger-factor scaling assumes, so a
+  # solver regeneration can't silently shrink the low-speed danger zone by ~25%.
+  desired_dist_safety = get_safe_obstacle_distance(v_ego, lead_t_follow, BAKED_STOP_DISTANCE, BAKED_COMFORT_BRAKE)
 
   # The main cost in normal operation is how close you are to the "desired" distance
   # from an obstacle at every timestep. This obstacle can be a lead car

@@ -116,3 +116,17 @@ def test_driver_override_clears_hold_and_disengage_resets():
   assert abs(o[2140, 2]) == 0.         # held >1 s by the driver: cleared
   lac.reset()
   assert lac.pid.i == 0.
+
+
+def test_firmer_steering_scales_gains_and_stays_stable():
+  from openpilot.selfdrive.controls.lib.latcontrol_pid import FIRMER_FF_SCALE, FIRMER_KP_SCALE
+  CP = CarInterface.get_non_essential_params(CAR.CHEVROLET_VOLT)
+  lac, VM = controller(False)
+  kp0, ff0 = lac.pid.k_p, lac.ff_factor
+  lac.set_firmer(CP)
+  lac.pid.speed = 30.
+  assert lac.pid.k_p == pytest.approx(np.interp(30., CP.lateralTuning.pid.kpBP, CP.lateralTuning.pid.kpV) * FIRMER_KP_SCALE)
+  assert lac.ff_factor == pytest.approx(ff0 * FIRMER_FF_SCALE) and kp0 is not None
+  o = drive(lac, VM, d=0.1, T=40.)
+  y = o[2000:, 1]
+  assert np.ptp(y) < .05  # settles; no sustained weave in the toy loop

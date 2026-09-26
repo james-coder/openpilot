@@ -28,6 +28,10 @@ DESCRIPTIONS = {
     "center against the push instead of settling off-center, and the wind badge shows HOLD. Steering strength limits and " +
     "your ability to override are unchanged. Off: never. Changes apply next drive."
   ),
+  "VoltSteerResponse": tr_noop(
+    "Firmer: steering follows openpilot's intended path more tightly, reducing the slow side-to-side weave. " +
+    "Steering strength limits and your ability to override are unchanged. Changes apply next drive."
+  ),
   "IsLdwEnabled": tr_noop(
     "Receive alerts to steer back into the lane when your vehicle drifts over a detected lane line " +
     "without a turn signal activated while driving over 31 mph (50 km/h)."
@@ -117,6 +121,16 @@ class TogglesLayout(Widget):
       icon="speed_limit.png"
     )
 
+    self._steer_response_setting = multiple_button_item(
+      lambda: tr("Steering Response"),
+      lambda: tr(DESCRIPTIONS["VoltSteerResponse"]),
+      buttons=[lambda: tr("Stock"), lambda: tr("Firmer")],
+      button_width=255,
+      callback=self._set_steer_response,
+      selected_index=1 if self._params.get("VoltSteerResponse", return_default=True) == "firmer" else 0,
+      icon="speed_limit.png"
+    )
+
     self._toggles = {}
     self._locked_toggles = set()
     for param, (title, desc, icon, needs_restart) in self._toggle_defs.items():
@@ -150,6 +164,7 @@ class TogglesLayout(Widget):
       if param == "DisengageOnAccelerator":
         self._toggles["LongitudinalPersonality"] = self._long_personality_setting
         self._toggles["VoltCrosswindHold"] = self._crosswind_hold_setting
+        self._toggles["VoltSteerResponse"] = self._steer_response_setting
 
     self._update_experimental_mode_icon()
     self._scroller = Scroller(list(self._toggles.values()), line_separator=True, spacing=0)
@@ -256,6 +271,9 @@ class TogglesLayout(Widget):
     self._params.put_bool(param, state, block=True)
     if self._toggle_defs[param][3]:
       self._params.put_bool("OnroadCycleRequested", True, block=True)
+
+  def _set_steer_response(self, button_index: int):
+    self._params.put("VoltSteerResponse", "firmer" if button_index == 1 else "stock", block=True)
 
   def _set_crosswind_hold(self, button_index: int):
     self._params.put("VoltCrosswindHold", "off" if button_index == 1 else "auto", block=True)

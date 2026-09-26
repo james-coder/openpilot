@@ -94,6 +94,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"VoltProtectionActiveBundle", {CLEAR_ON_MANAGER_START, STRING}},
     {"VoltProtectionStatus", {CLEAR_ON_MANAGER_START, STRING}},
     {"VoltCrosswindHold", {PERSISTENT, STRING, "auto"}},
+    {"VoltSteerResponse", {PERSISTENT, STRING, "stock"}},
     {"LongitudinalPersonality", {PERSISTENT, INT, std::to_string(static_cast<int>(cereal::LongitudinalPersonality::STANDARD))}},
     {"NetworkMetered", {PERSISTENT, BOOL}},
     {"ObdMultiplexingChanged", {CLEAR_ON_MANAGER_START | CLEAR_ON_ONROAD_TRANSITION, BOOL}},

@@ -12,6 +12,13 @@ HOLD_I_LIMIT = 0.4     # the hold term alone uses at most 40% of the (unchanged,
 HOLD_DECAY = 0.995     # per 10 ms once the hold turns off: fades out over ~2 s instead of letting go
 HOLD_OVERRIDE_S = 1.0  # driver steering longer than this (e.g. lane change) clears the hold
 
+# Volt steering response setting (docs/2026-09-26-crosswind-analysis.md): the wheel reaches ~2/3 of the target
+# angle about 0.2 s late, which the driving model turns into a 2-3 s weave. "Firmer" raises the angle gain and
+# feedforward. Torque limits (3 Nm, panda-enforced) and driver override are unchanged.
+RESPONSE_PARAM = 'VoltSteerResponse'  # 'stock' (default) or 'firmer'
+FIRMER_KP_SCALE = 1.5
+FIRMER_FF_SCALE = 1.1
+
 
 class LatControlPID(LatControl):
   def __init__(self, CP, CI, dt):
@@ -24,9 +31,16 @@ class LatControlPID(LatControl):
     self.hold = None
     if CP.carFingerprint == 'CHEVROLET_VOLT' and not any(CP.lateralTuning.pid.kiV):
       from openpilot.common.params import Params
-      self.hold = CrosswindHold(enabled=Params().get(HOLD_PARAM, return_default=True) != 'off')
+      params = Params()
+      if params.get(RESPONSE_PARAM, return_default=True) == 'firmer':
+        self.set_firmer(CP)
+      self.hold = CrosswindHold(enabled=params.get(HOLD_PARAM, return_default=True) != 'off')
       self._stock_ki = (list(CP.lateralTuning.pid.kiBP), list(CP.lateralTuning.pid.kiV))
       self._override_time = 0.
+
+  def set_firmer(self, CP):
+    self.pid._k_p = [list(CP.lateralTuning.pid.kpBP), [v * FIRMER_KP_SCALE for v in CP.lateralTuning.pid.kpV]]
+    self.ff_factor = CP.lateralTuning.pid.kf * FIRMER_FF_SCALE
 
   def reset(self):
     super().reset()

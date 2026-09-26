@@ -93,6 +93,7 @@ def _heading():
 class WindOverlay(Widget):
   _shared_latest = None
   _reader_thread: threading.Thread | None = None
+  _hold = None  # same decision as the steering controller's crosswind hold (selfdrive/controls/lib/crosswind_hold.py)
 
   def __init__(self):
     super().__init__()
@@ -107,12 +108,31 @@ class WindOverlay(Widget):
         pass
 
   def _poll(self):
+    from openpilot.common.params import Params
+    from openpilot.selfdrive.controls.lib.crosswind_hold import CrosswindHold, PARAM
     while True:
+      try:
+        if self.__class__._hold is None:
+          self.__class__._hold = CrosswindHold(enabled=Params().get(PARAM, return_default=True) != 'off', start_thread=False)
+        self.__class__._hold.refresh()
+      except Exception:
+        pass
       try:
         self.__class__._shared_latest = latest_wind()
       except Exception:
         self.__class__._shared_latest = None
       time.sleep(POLL_SECONDS)
+
+  @staticmethod
+  def _holding() -> bool:
+    hold = WindOverlay._hold
+    if hold is None or not hold.active:
+      return False
+    try:
+      from openpilot.selfdrive.ui.ui_state import ui_state
+      return bool(ui_state.sm['carControl'].latActive)
+    except Exception:
+      return False
 
   def _render(self, rect: rl.Rectangle):
     value = self.__class__._shared_latest
@@ -125,6 +145,9 @@ class WindOverlay(Widget):
       text += f' G{gust:.0f}'
     if age > READING_OLD_S:
       text += f' ({age / 60:.0f}m ago)'
+    holding = self._holding()
+    if holding:
+      text += '  HOLD'  # steering is adding crosswind hold (driver notice)
     size = FONT_SIZES.max_speed
     text_size = measure_text_cached(self._font, text, size)
     arrow = size * 1.1
@@ -137,6 +160,8 @@ class WindOverlay(Widget):
     color = STRONG_COLOR if speed >= STRONG_MPH or (gust or 0) >= STRONG_MPH + 10 else COLORS.WHITE
     if age > READING_OLD_S:
       color = DIM
+    if holding:
+      color = STRONG_COLOR
     rl.draw_text_ex(self._font, text, rl.Vector2(x, y), size, 0, color)
     heading = _heading()
     if heading is not None:

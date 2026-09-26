@@ -76,3 +76,12 @@ def test_parse_response_accepts_live_api_unit_label():
   b = body()
   b['current_units']['wind_speed_10m'] = 'mp/h'
   assert wm.parse_response(b)['wind_mph'] == 12.3
+
+
+def test_crosswind_component_sign_and_gating():
+  r = {'wind_mph': 20., 'dir_deg': 270}  # from the west
+  assert wm.crosswind(r, 0., 30.) == -20.   # heading north: wind from the left
+  assert wm.crosswind(r, 180., 30.) == 20.  # heading south: wind from the right
+  assert abs(wm.crosswind(r, 90., 30.)) < .1  # headwind
+  assert wm.crosswind(r, 0., 2.) is None      # nearly stopped: heading unusable
+  assert wm.crosswind(None, 0., 30.) is None

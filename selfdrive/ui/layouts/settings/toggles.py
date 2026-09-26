@@ -23,6 +23,11 @@ DESCRIPTIONS = {
     "In relaxed mode openpilot will stay further away from lead cars. On supported cars, you can cycle through these personalities with " +
     "your steering wheel distance button."
   ),
+  "VoltCrosswindHold": tr_noop(
+    "Auto: in a strong crosswind (12 mph or more across the car, from the live wind reading), steering holds the lane " +
+    "center against the push instead of settling off-center, and the wind badge shows HOLD. Steering strength limits and " +
+    "your ability to override are unchanged. Off: never. Changes apply next drive."
+  ),
   "IsLdwEnabled": tr_noop(
     "Receive alerts to steer back into the lane when your vehicle drifts over a detected lane line " +
     "without a turn signal activated while driving over 31 mph (50 km/h)."
@@ -102,6 +107,16 @@ class TogglesLayout(Widget):
       icon="speed_limit.png"
     )
 
+    self._crosswind_hold_setting = multiple_button_item(
+      lambda: tr("Crosswind Hold"),
+      lambda: tr(DESCRIPTIONS["VoltCrosswindHold"]),
+      buttons=[lambda: tr("Auto"), lambda: tr("Off")],
+      button_width=255,
+      callback=self._set_crosswind_hold,
+      selected_index=0 if self._params.get("VoltCrosswindHold", return_default=True) != "off" else 1,
+      icon="speed_limit.png"
+    )
+
     self._toggles = {}
     self._locked_toggles = set()
     for param, (title, desc, icon, needs_restart) in self._toggle_defs.items():
@@ -134,6 +149,7 @@ class TogglesLayout(Widget):
       # insert longitudinal personality after NDOG toggle
       if param == "DisengageOnAccelerator":
         self._toggles["LongitudinalPersonality"] = self._long_personality_setting
+        self._toggles["VoltCrosswindHold"] = self._crosswind_hold_setting
 
     self._update_experimental_mode_icon()
     self._scroller = Scroller(list(self._toggles.values()), line_separator=True, spacing=0)
@@ -240,6 +256,9 @@ class TogglesLayout(Widget):
     self._params.put_bool(param, state, block=True)
     if self._toggle_defs[param][3]:
       self._params.put_bool("OnroadCycleRequested", True, block=True)
+
+  def _set_crosswind_hold(self, button_index: int):
+    self._params.put("VoltCrosswindHold", "off" if button_index == 1 else "auto", block=True)
 
   def _set_longitudinal_personality(self, button_index: int):
     self._params.put("LongitudinalPersonality", button_index, block=True)

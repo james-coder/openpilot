@@ -65,6 +65,14 @@ def fix_from(msg):
     return None
 
 
+def crosswind(reading, bearing_deg, gps_speed):
+  """Signed crosswind component in mph (+ = blowing from the car's right, pushing it left), or None when
+  there's no reading or the GPS heading is meaningless (nearly stopped)."""
+  if not reading or gps_speed is None or not gps_speed > 5.:
+    return None
+  return round(reading['wind_mph'] * math.sin(math.radians(reading['dir_deg'] - bearing_deg)), 1)
+
+
 def parse_response(payload):
   """Validate an Open-Meteo JSON body (already decoded) into our status fields, or raise ValueError."""
   cur = payload['current']
@@ -130,11 +138,12 @@ def main():
   failures = 0
   while True:
     sm.update(0)
-    fix = None
+    fix = gps_speed = None
     for svc in ('gpsLocation', 'gpsLocationExternal'):
       if sm.alive[svc] and sm.valid[svc]:
         fix = fix_from(sm[svc])
         if fix:
+          gps_speed = float(sm[svc].speed)
           break
     now = time.time()  # noqa: TID251 -- persisted wall timestamps, compared against API validity
     state = 'nofix' if fix is None else ('ok' if reading else 'waiting')
@@ -154,7 +163,9 @@ def main():
           cloudlog.warning('windd: fetch failed (%d in a row): %s', failures, str(e)[:160])
     write_status({'time': now, 'state': state, 'failures': failures, 'fix': fix is not None,
                   'lat': None if fix is None else round(fix[0], 3), 'lon': None if fix is None else round(fix[1], 3),
-                  'reading': reading, 'reading_time': reading_time, 'source': 'open-meteo'})
+                  'reading': reading, 'reading_time': reading_time, 'source': 'open-meteo',
+                  # consumed by selfdrive/controls/lib/crosswind_hold.py
+                  'cross_mph': None if fix is None else crosswind(reading, fix[2], gps_speed)})
     time.sleep(LOOP_SLEEP_S)
 
 

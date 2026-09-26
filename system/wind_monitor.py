@@ -76,7 +76,8 @@ def parse_response(payload):
     raise ValueError('wind field out of range')
   if type(gust) not in (int, float) or not math.isfinite(gust) or not (0 <= gust <= 300):
     gust = None
-  if payload.get('current_units', {}).get('wind_speed_10m') != 'mph':
+  # Open-Meteo labels miles per hour 'mp/h' (live API, 2026-09-26); accept 'mph' too.
+  if payload.get('current_units', {}).get('wind_speed_10m') not in ('mph', 'mp/h'):
     raise ValueError('unexpected wind unit')
   return {'wind_mph': round(float(speed), 1), 'gust_mph': None if gust is None else round(float(gust), 1),
           'dir_deg': round(float(direction)) % 360, 'valid_time': str(cur.get('time', '')),

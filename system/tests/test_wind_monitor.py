@@ -69,3 +69,10 @@ def test_load_previous_reading_survives_restart(tmp_path):
   assert wm.load_previous(tmp_path, 2 * 86400.) == (None, 0.)        # a day old: start fresh
   wm.write_status({'time': 990., 'state': 'ok', 'reading': {'wind_mph': 'x'}, 'reading_time': 990.}, root=tmp_path)
   assert wm.load_previous(tmp_path, 1000.) == (None, 0.)
+
+
+def test_parse_response_accepts_live_api_unit_label():
+  # Captured from the live API: it says 'mp/h', which rejected every reading on 2026-09-25.
+  b = body()
+  b['current_units']['wind_speed_10m'] = 'mp/h'
+  assert wm.parse_response(b)['wind_mph'] == 12.3

@@ -58,6 +58,23 @@ def can_comm_callbacks(logcan: messaging.SubSocket, sendcan: messaging.PubSocket
   return can_recv, can_send
 
 
+
+# Radar self-reported faults (blocked/misaligned) fall back to vision-only lead tracking and must
+# not invalidate liveTracks: an invalid liveTracks makes radarState invalid and selfdrived raises
+# commIssue, a soft disable, which defeated the vision-only fallback entirely.
+NON_DISABLING_RADAR_ERRORS = ('radarDegraded', 'radarDegradedReasons')
+
+
+def radar_tracks_valid(errors) -> bool:
+  return not any(v for k, v in errors.to_dict().items() if k not in NON_DISABLING_RADAR_ERRORS)
+
+
+def carcontrol_fresh(now_ns: int, cc_mono_ns: int) -> bool:
+  # Only the age matters. carControl.valid mirrors carState.canValid, and refusing to send on a
+  # momentary CAN glitch cut every ASCM frame (brake, regen, steering, keepalives) mid-drive
+  # instead of letting the canError disable send proper inactive commands, as upstream does.
+  return 0 <= now_ns - cc_mono_ns <= 150_000_000
+
 class Car:
   CI: CarInterfaceBase
   RI: RadarInterfaceBase
@@ -277,7 +294,7 @@ class Car:
 
     if RD is not None:
       tracks_msg = messaging.new_message('liveTracks')
-      tracks_msg.valid = not any(RD.errors.to_dict().values())
+      tracks_msg.valid = radar_tracks_valid(RD.errors)
       tracks_msg.liveTracks = RD
       self.pm.send('liveTracks', tracks_msg)
 
@@ -297,7 +314,7 @@ class Car:
     from opendbc.car.gm.volt_longitudinal import supported as volt_supported
     if volt_supported(self.CP):
       now = self.can_log_mono_time if REPLAY else time.monotonic_ns()
-      if not self.sm.valid['carControl'] or not 0 <= now-self.sm.logMonoTime['carControl'] <= 150_000_000:
+      if not carcontrol_fresh(now, self.sm.logMonoTime['carControl']):
         return  # Never re-stamp or re-transmit stale protection/actuator commands.
 
     if self.sm.all_alive(['carControl']):

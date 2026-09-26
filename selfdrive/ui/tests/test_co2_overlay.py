@@ -54,9 +54,13 @@ def test_full_screen_graph_only_while_parked_and_disengaged(monkeypatch):
   state = SimpleNamespace(canValid=True, gearShifter='park', vEgo=0.)
   class FakeSM(dict):
     recv_frame = {'carState': 2}
+    alive = {'carState': True}
   fake_ui = SimpleNamespace(started=True, started_frame=1, engaged=False, sm=FakeSM(carState=state))
   monkeypatch.setattr(aranet_screen, 'ui_state', fake_ui)
   assert aranet_screen.graph_allowed()
+  FakeSM.alive = {'carState': False}  # last message said parked, but carState stopped arriving
+  assert not aranet_screen.graph_allowed()
+  FakeSM.alive = {'carState': True}
   fake_ui.engaged = True
   assert not aranet_screen.graph_allowed()
   fake_ui.engaged = False

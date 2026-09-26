@@ -16,7 +16,9 @@ def graph_allowed():
   if not ui_state.started:
     return True
   state = ui_state.sm['carState']
-  return (ui_state.sm.recv_frame['carState'] >= ui_state.started_frame and state.canValid and
+  # alive: a last-received "parked" carState must not keep the graph over the road view after
+  # carState stops arriving (e.g. card died) and the car is driven away.
+  return (ui_state.sm.recv_frame['carState'] >= ui_state.started_frame and ui_state.sm.alive['carState'] and state.canValid and
           str(state.gearShifter) == 'park' and abs(state.vEgo) < .1 and not ui_state.engaged)
 
 

@@ -69,6 +69,12 @@ BAKED_STOP_DISTANCE = 6.0
 CRUISE_MIN_ACCEL = -1.2
 CRUISE_MAX_ACCEL = 1.6
 MIN_X_LEAD_FACTOR = 0.5
+# While the lead is braking harder than this, halve the jerk/accel-change cost so the planner
+# follows it down promptly. With the short 09-17 following times, the smoothing otherwise lets a
+# lead braking at 2-3 m/s^2 from 45 mph close the gap (stock maneuver tests); see
+# docs/2026-09-25-panic-brake-analysis.md. Normal closing on slower traffic is unaffected.
+LEAD_BRAKING_ACCEL = -1.0
+LEAD_BRAKING_JERK_SCALE = 0.5
 
 def get_jerk_factor(personality=log.LongitudinalPersonality.standard):
   if personality==log.LongitudinalPersonality.relaxed:
@@ -352,8 +358,8 @@ class LongitudinalMpc:
     for i in range(N):
       self.solver.cost_set(i, 'Zl', Zl)
 
-  def set_weights(self, prev_accel_constraint=True, personality=log.LongitudinalPersonality.standard):
-    jerk_factor = get_jerk_factor(personality) * self.jerk_scale
+  def set_weights(self, prev_accel_constraint=True, personality=log.LongitudinalPersonality.standard, lead_braking=False):
+    jerk_factor = get_jerk_factor(personality) * self.jerk_scale * (LEAD_BRAKING_JERK_SCALE if lead_braking else 1.)
     a_change_cost = A_CHANGE_COST if prev_accel_constraint else 0
     cost_weights = [X_EGO_OBSTACLE_COST, X_EGO_COST, V_EGO_COST, A_EGO_COST, jerk_factor * a_change_cost, jerk_factor * J_EGO_COST]
     constraint_cost_weights = [LIMIT_COST, LIMIT_COST, LIMIT_COST, DANGER_ZONE_COST]

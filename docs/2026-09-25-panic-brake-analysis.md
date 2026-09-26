@@ -71,24 +71,41 @@ comma's maneuver test "approach a stopped car from 60 mph": 6.0 saturates at -3.
 **Change:** `COMFORT_BRAKE` 6.0 → 2.5 (`long_mpc.py`), with tests that it stays within the
 commandable deceleration and that the 60 mph stopped-car approach does not saturate.
 
-## Open: following time vs. a lead that brakes hard
+## Would it have kept you from taking over?
 
-comma's stock maneuvers "following at 45 mph, lead brakes to a stop at 2 / 3 m/s²" fail with
-the current T_FOLLOW. In the simulation the planner alone does not keep the gap, even with the
-instant actuator in comma's test plant. Stock passes. COMFORT_BRAKE 2.5 halves the overlap but
-does not remove it:
+Driver-trigger model (`panic_brake_prevent.py`), calibrated per event. At the real press, the
+braking the situation needed was `closing² / 2(gap − 4.5 m)`, and openpilot wasn't delivering
+it. In the sim, the driver would press at the first moment the needed braking reaches that same
+level while openpilot is braking less than 80% of it. If that never happens, the takeover was
+prevented.
 
-| Personality (T) | lead 2 m/s², cb 6.0 → 2.5 | lead 3 m/s², cb 6.0 → 2.5 |
-|---|---|---|
-| aggressive (0.625 s) | -1.3 → -0.5 m | -6.7 → -1.2 m |
-| standard (0.725 s) | -4.3 → -1.6 m | -9.6 → -3.2 m |
-| relaxed (0.875 s) | -2.3 → -0.7 m | -7.5 → -1.4 m |
+Of the 36 takeovers while engaged, 31 could be simulated. **13 are explained by the car ahead:**
+the baseline sim reproduces the press to within 3 s. The other 18 are lights, turns or late
+cut-ins.
 
-The shortest following time that passes both, with cb 2.5: aggressive 0.875 s; standard and
-relaxed 1.1 s (they use a higher jerk cost, so they react more slowly). The measured real
-following gap on relaxed is a median of 1.07 s including the 4.5 m standstill distance. Raising
-relaxed to 1.1 s adds about 4.5 m at 45 mph and 7 m at 70 mph, still well short of stock
-relaxed (1.75 s). This is a decision for the driver, not made here.
+| Strategy | Takeovers prevented (of 13) | Happy approaches with extra braking >0.5 / >1.0 m/s² (of 111) | comma lead-brake maneuvers |
+|---|---|---|---|
+| was: cb 6.0 | 0 | - | fail 2, 3 and 3+ m/s² |
+| cb 2.5 | 6 | 2 / 0 | fail 2 and 3 m/s² |
+| cb 2.0 | 7 | 5 / 0 | fail 2, 3 and 3+ m/s² |
+| cb 1.5 | 9 | 9 / 0 | fail all three; the 60 mph stopped-car approach saturates |
+| **cb 2.5 + quick response while the lead brakes (shipped)** | **5** | **2 / 0** | **all pass (relaxed and aggressive)** |
+
+"Quick response" halves the jerk/accel-change cost while the lead decelerates harder than
+-1 m/s² (`LEAD_BRAKING_JERK_SCALE`). It is what makes the short following times hold up when the
+car ahead brakes hard. Without it, "following at 45 mph, lead brakes to a stop at 2-3 m/s²"
+closes the gap in simulation, even with an instant actuator. It costs one prevented takeover
+(af seg 7) relative to plain 2.5. A lower comfort-brake prevents more takeovers but makes the
+hard-braking-lead case worse, so collision protection sets the limit.
+
+Takeovers still not prevented, and why:
+- **Car ahead detected late**, 80-90 m out while already closing at 12-27 mph (af seg 18 t21,
+  b5 seg 3). This is a sensing limit, not tuning.
+- **Traffic light** (b3 seg 16).
+- **More room wanted than the planner keeps**: 67 mph, 27 m gap, closing 2 mph (ab seg 25).
+- **Delayed, not avoided** (b2 seg 5): the sim still reaches your trigger level, just 5.8 s later
+  than you actually pressed.
+- **Moderate closing** where only lower comfort-brake values help (aa seg 2, af seg 7, b1 seg 4).
 
 ## Limits
 

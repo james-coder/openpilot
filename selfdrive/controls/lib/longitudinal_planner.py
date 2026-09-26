@@ -10,7 +10,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, LongitudinalPlanSource
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LEAD_BRAKING_ACCEL, LongitudinalMpc, LongitudinalPlanSource
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import T_IDXS as T_IDXS_MPC
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N, get_accel_from_plan
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
@@ -141,7 +141,9 @@ class LongitudinalPlanner:
     if force_slow_decel:
       v_cruise = 0.0
 
-    self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality)
+    lead = sm['radarState'].leadOne
+    lead_braking = bool(lead.status and lead.aLeadK < LEAD_BRAKING_ACCEL)
+    self.mpc.set_weights(prev_accel_constraint, personality=sm['selfdriveState'].personality, lead_braking=lead_braking)
     self.mpc.set_cur_state(self.v_desired_filter.x, self.a_desired)
     trajectory = getattr(self.mpc, 'stop_trajectory', None)
     if trajectory is not None and trajectory.reference is not None and self.mpc.personal_blend:

@@ -59,3 +59,15 @@ def test_stopped_car_from_highway_speed_stays_within_limits():
   valid, output = man.evaluate()
   assert valid
   assert output[:, 5].min() > ACCEL_MIN + .1  # 6.0 saturated at ACCEL_MIN here
+
+
+@pytest.mark.parametrize("personality", [log.LongitudinalPersonality.relaxed, log.LongitudinalPersonality.aggressive])
+@pytest.mark.parametrize("lead_stop_time", [10., 6.66])  # lead brakes from 20 m/s to a stop at 2 and 3 m/s^2
+def test_keeps_gap_when_lead_brakes_hard(personality, lead_stop_time):
+  # Stock maneuvers that failed with the short 09-17 following times until the planner was made
+  # to respond promptly while the lead brakes (LEAD_BRAKING_JERK_SCALE).
+  man = Maneuver('', duration=50., initial_speed=20., lead_relevancy=True, initial_distance_lead=35.,
+                 speed_lead_values=[20., 20., 0.], breakpoints=[0., 15., 15. + lead_stop_time], personality=personality)
+  valid, output = man.evaluate()
+  assert valid
+  assert output[:, 6].min() > .4

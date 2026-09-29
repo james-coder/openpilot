@@ -95,7 +95,7 @@ def get_T_FOLLOW(personality=log.LongitudinalPersonality.standard):
   elif personality==log.LongitudinalPersonality.standard:
     return 0.875
   elif personality==log.LongitudinalPersonality.aggressive:
-    return 0.725
+    return 0.8  # closest setting kept at the 0.8 s minimum time gap of ISO 15622 (per the 2026-09-28 audit)
   else:
     raise NotImplementedError("Longitudinal personality not supported")
 

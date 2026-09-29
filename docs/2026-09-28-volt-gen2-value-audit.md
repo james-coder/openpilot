@@ -6,13 +6,13 @@ Sep 7 to Sep 26). Nothing was wrong on the scale of a wrong unit or sign. The Vo
 `values.py` / `interface.py` are upstream comma's; the fork's additions are flags, the following-distance
 constants and the crosswind / low-speed brake changes.
 
-## Verified and pending: wheel speed reads 1.6% low (worth fixing)
+## Fixed: wheel speed reads 1.6% low
 
 `wheelSpeedFactor` is the default 1.0 (`opendbc/car/interfaces.py:205`). Wheel-derived `vEgo` divided by GPS
 speed: median **0.9846** over 111k samples, 0.984-0.987 on every date (Sep 7, 8, 12, 21, 25-26); IQR
 0.983-0.987. A factor of **1.0156** for the Volt (`gm/interface.py`, Volt branch) makes the set speed, gaps
 and braking distances use the true speed (the set speed currently holds a true speed 1.6% higher). Re-measure
-after a tire change. Proposed edit, not yet applied:
+after a tire change. Applied 2026-09-28:
 
     ret.wheelSpeedFactor = 1.0156   # in the CHEVROLET_VOLT branch next to steerActuatorDelay
 
@@ -44,12 +44,12 @@ after a tire change. Proposed edit, not yet applied:
   brake-pressed threshold 8, EV/flag handling, steering lock 522 deg (3.0 turns), on-center steer ratio
   17.4-18.4 (do not change 17.7 to GM's 15.7).
 
-## Pending, needs a decision
+## Also applied 2026-09-28 (approved by the driver)
 
 - **Closest following time 0.725 s -> 0.8 s.** The audit cites ISO 15622:2018 as requiring at least 0.8 s;
   I have not verified the standard. Only the closest setting is affected (the middle is 0.875 s, max 1.25 s).
-  Edit: `get_T_FOLLOW` aggressive, `long_mpc.py:98`.
-- **`MAX_BRAKE` comment** (`gm/values.py:37`) should say the -4.0 figure is unproven (text above).
+  Done in `get_T_FOLLOW` (aggressive), `long_mpc.py`.
+- **`MAX_BRAKE` comment** (`gm/values.py`) now says the -4.0 figure is unproven (text above). The mapping is unchanged.
 
 ## Left alone on purpose
 

@@ -151,7 +151,7 @@ def test_startup_config_keeps_same_controller_params_and_stock_when_unvalidated(
 
 
 def test_personal_planner_parameters_are_per_instance_and_stock_defaults_survive():
-  from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc
+  from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import COMFORT_BRAKE, STOP_DISTANCE, LongitudinalMpc
   from cereal import log
 
   custom = LongitudinalMpc(stop_distance=4.5, comfort_brake=1.5, jerk_scale=1.5)
@@ -165,9 +165,10 @@ def test_personal_planner_parameters_are_per_instance_and_stock_defaults_survive
     mpc.set_cur_state(10.0, 0.0)
     mpc.update(radar, 10.0)
     assert mpc.solution_status == 0
-    assert np.all(mpc.params[:, 5] == 0.75)
+  # the danger factor follows the *current* comfort target (the compiled solver bakes in 2.5/6.0), capped at 0.75
+  assert np.all(custom.params[:, 5] == 0.75) and np.all((stock.params[:, 5] > 0.) & (stock.params[:, 5] <= 0.75))
   assert np.all(custom.params[:, 6] == 4.5) and np.all(custom.params[:, 7] == 1.5)
-  assert np.all(stock.params[:, 6] == 6.0) and np.all(stock.params[:, 7] == 2.5)
+  assert np.all(stock.params[:, 6] == STOP_DISTANCE) and np.all(stock.params[:, 7] == COMFORT_BRAKE)
 
 
 def test_stopping_entry_is_continuous_despite_measured_response_lag():

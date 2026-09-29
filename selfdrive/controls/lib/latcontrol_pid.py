@@ -2,7 +2,9 @@ import math
 
 from cereal import log
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
+from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.crosswind_hold import CrosswindHold, PARAM as HOLD_PARAM
+from openpilot.selfdrive.controls.lib.steer_experiment import SteerExperiment, friction_assist
 from openpilot.common.pid import PIDController
 
 # Volt crosswind hold (docs/2026-09-26-crosswind-analysis.md): integral only while a strong crosswind is reported.
@@ -29,6 +31,7 @@ class LatControlPID(LatControl):
     self.ff_factor = CP.lateralTuning.pid.kf
     self.get_steer_feedforward = CI.get_steer_feedforward_function()
     self.hold = None
+    self.exp = None
     if CP.carFingerprint == 'CHEVROLET_VOLT' and not any(CP.lateralTuning.pid.kiV):
       from openpilot.common.params import Params
       params = Params()
@@ -37,10 +40,39 @@ class LatControlPID(LatControl):
       self.hold = CrosswindHold(enabled=params.get(HOLD_PARAM, return_default=True) != 'off')
       self._stock_ki = (list(CP.lateralTuning.pid.kiBP), list(CP.lateralTuning.pid.kiV))
       self._override_time = 0.
+      # Bounded A/B steering experiment (steer_experiment.py): None unless armed while parked. Never fatal.
+      self._base_kp = [list(self.pid._k_p[0]), list(self.pid._k_p[1])]
+      self._base_ff = self.ff_factor
+      self._exp_applied = (1., 1.)
+      try:
+        self.exp = SteerExperiment.from_params(params)
+      except Exception:
+        cloudlog.exception('steering experiment unavailable')
+        self.exp = None
 
   def set_firmer(self, CP):
     self.pid._k_p = [list(CP.lateralTuning.pid.kpBP), [v * FIRMER_KP_SCALE for v in CP.lateralTuning.pid.kpV]]
     self.ff_factor = CP.lateralTuning.pid.kf * FIRMER_FF_SCALE
+
+  def _exp_step(self, active, CS, error, desired_curvature, limited):
+    """Advance the experiment and apply its (bounded) gain scales; returns the friction assist in torque units."""
+    try:
+      mix = self.exp.step(active, CS.vEgo, CS.aEgo, CS.steeringPressed, desired_curvature)
+      cfg = self.exp.cfg
+      scales = (1. + mix * (cfg['kp'] - 1.), 1. + mix * (cfg['ff'] - 1.))
+      if scales != self._exp_applied:
+        self.pid._k_p = [self._base_kp[0], [v * scales[0] for v in self._base_kp[1]]]
+        self.ff_factor = self._base_ff * scales[1]
+        self._exp_applied = scales
+      if not active or CS.steeringPressed or limited or CS.vEgo < 5:
+        return 0.
+      return mix * friction_assist(error, cfg['friction'])
+    except Exception:
+      cloudlog.exception('steering experiment disabled after an error')
+      self.exp = None
+      self.pid._k_p = [self._base_kp[0], list(self._base_kp[1])]
+      self.ff_factor = self._base_ff
+      return 0.
 
   def reset(self):
     super().reset()
@@ -72,6 +104,9 @@ class LatControlPID(LatControl):
 
     pid_log.steeringAngleDesiredDeg = angle_steers_des
     pid_log.angleError = error
+    friction = 0.
+    if self.exp is not None:
+      friction = self._exp_step(active, CS, error, desired_curvature, steer_limited_by_safety)
     if not active:
       output_torque = 0.0
       pid_log.active = False
@@ -84,7 +119,7 @@ class LatControlPID(LatControl):
         self._update_hold(active, CS)
 
       output_torque = self.pid.update(error,
-                                feedforward=ff,
+                                feedforward=ff + friction,
                                 speed=CS.vEgo,
                                 freeze_integrator=freeze_integrator)
       if self.hold is not None and abs(self.pid.i) > HOLD_I_LIMIT:

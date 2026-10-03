@@ -249,3 +249,33 @@ test('native braking details and decisions are isolated, revision-protected, and
   ])
     assert.equal((await fetch(url + route)).status, 404);
 });
+
+test('dashcam reports are listed and served, but raw recordings and traversal are not', async () => {
+  const dash = fs.mkdtempSync(path.join(os.tmpdir(), 'dashcam-test-'));
+  const id = '2026-10-01-1901';
+  const rep = path.join(dash, 'incidents', id, 'report');
+  fs.mkdirSync(path.join(rep, 'stills'), { recursive: true });
+  fs.mkdirSync(path.join(dash, 'incidents', id, 'raw'));
+  fs.writeFileSync(path.join(rep, 'report.json'), JSON.stringify({ onset_wall_mdt: 'x', radar_tracks_within_15m: [] }));
+  fs.writeFileSync(path.join(rep, 'video.mp4'), Buffer.alloc(1000, 7));
+  fs.writeFileSync(path.join(rep, 'stills', 'a_road.jpg'), 'jpg');
+  fs.writeFileSync(path.join(dash, 'incidents', id, 'raw', 'secret.txt'), 'no');
+  const srv = createApp({ dataDir: dir, dashcamDir: dash }).listen(0, '127.0.0.1');
+  await new Promise((resolve) => srv.once('listening', resolve));
+  const u = `http://127.0.0.1:${srv.address().port}`;
+  try {
+    const list = await (await fetch(u + '/api/dashcam')).json();
+    assert.equal(list.items[0].id, id);
+    assert.deepEqual(list.items[0].stills, ['a_road.jpg']);
+    assert.equal((await fetch(`${u}/dashcam-files/${id}/video.mp4`)).status, 200);
+    const part = await fetch(`${u}/dashcam-files/${id}/video.mp4`, { headers: { Range: 'bytes=0-99' } });
+    assert.equal(part.status, 206);
+    assert.equal((await part.arrayBuffer()).byteLength, 100);
+    assert.equal((await fetch(`${u}/dashcam-files/${id}/stills/a_road.jpg`)).status, 200);
+    for (const p of [`${id}/raw/secret.txt`, `${id}/../${id}/report/video.mp4`, `${id}/report.json/../../raw/secret.txt`, 'bad/video.mp4', `${id}/telemetry.npz`])
+      assert.notEqual((await fetch(`${u}/dashcam-files/${p}`)).status, 200, p);
+  } finally {
+    await new Promise((resolve) => srv.close(resolve));
+    fs.rmSync(dash, { recursive: true, force: true });
+  }
+});

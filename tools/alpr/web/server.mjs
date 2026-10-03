@@ -1,4 +1,5 @@
 import { installBrakingRoutes } from './braking-server.mjs';
+import { installDashcamRoutes } from './dashcam-server.mjs';
 import express from 'express';
 import { installAssistedRoutes } from './assisted-server.mjs';
 import fs from 'node:fs';
@@ -57,6 +58,7 @@ export function validateLabels(data, template) {
 
 export function createApp({
   dataDir = '/mnt/algo14/comma3-alpr',
+  dashcamDir = process.env.DASHCAM_DATA_DIR || '/mnt/algo14/dashcam',
   repoDir = path.resolve(here, '../../..'),
 } = {}) {
   const app = express();
@@ -83,6 +85,7 @@ export function createApp({
   app.use(express.json({ limit: '5mb' }));
   installAssistedRoutes(app, dataDir);
   installBrakingRoutes(app, dataDir);
+  installDashcamRoutes(app, dashcamDir);
   app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));
   for (const name of ['braking-audit', 'can-coverage'])
     app.get('/api/' + name, (_req, res) => {

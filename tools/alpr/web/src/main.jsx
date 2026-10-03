@@ -18,15 +18,18 @@ import {
   Radar,
   ScanLine,
   Trash2,
+  Video,
   Wifi,
 } from 'lucide-react';
 import './style.css';
 import AssistedReview from './AssistedReview';
 import BrakingReview from './NativeBrakingReview';
 import CanReview from './CanReview';
+import Dashcam from './Dashcam';
 import { DisplayControls, useDisplaySettings, enhance } from './DisplayControls';
 
 const nav = [
+  ['dashcam', 'Dashcam', Video],
   ['overview', 'Study overview', Home],
   ['review', 'Review plates', ScanLine],
   ['manual', 'Original annotations', FileText],
@@ -235,6 +238,8 @@ function App() {
                 retry={save}
                 blocked={blocked.current}
               />
+            ) : page === 'dashcam' ? (
+              <Dashcam />
             ) : page === 'braking' ? (
               <BrakingReview />
             ) : page === 'can-review' ? (

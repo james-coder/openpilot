@@ -75,21 +75,18 @@ def format_age(seconds: float) -> str:
 
 
 def summarize_mil(report, now: float | None = None) -> str:
-  """One-line check-engine summary for the startup alert, or "" when there's nothing to say
-  (no scan on file, or a clean one). "MIL" only appears as "MIL ON" when the lamp read says
-  so; codes left behind after the light went out read as "MIL off". A scan older than
+  """One-line check-engine summary for the startup alert: "MIL ON" (plus codes) only when the
+  scan read the lamp as on, i.e. when the car's own dash is showing the check-engine light.
+  Returns "" when the lamp is off, when its status is unknown, and when there is no scan on
+  file; stored, pending and permanent codes without a lit lamp stay in the diagnostics
+  settings page and the saved ObdLastScan report, not the startup alert. A scan older than
   STALE_SCAN_S carries its age, so an old result is never mistaken for the current state."""
   try:
     lamp, codes, scanned = mil_state(report)
-    if not codes and not lamp:
+    if not lamp:
       return ""
     shown = ", ".join(codes[:6]) + (f" +{len(codes) - 6} more" if len(codes) > 6 else "")
-    if lamp:
-      text = "MIL ON" + (f": {shown}" if shown else "")
-    elif lamp is False:
-      text = f"MIL off, codes: {shown}"
-    else:
-      text = f"Codes: {shown}"
+    text = "MIL ON" + (f": {shown}" if shown else "")
     now = datetime.now(UTC).timestamp() if now is None else now
     if scanned is not None and now - scanned > STALE_SCAN_S:
       text += f" (scan {format_age(now - scanned)} old)"

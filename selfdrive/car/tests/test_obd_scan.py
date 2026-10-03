@@ -297,23 +297,38 @@ class TestSummarizeMil:
     report = {'state': 'partial', 'ecus': {'7E8': {'stored': {'state': 'timeout', 'error': 'No response'}}}}
     assert summarize_mil(report) == ''
 
-  def test_codes_deduplicated_across_ecus_and_services(self):
+  def test_codes_without_lamp_status_show_nothing(self):
+    # lamp status unknown (never read): the dash light is not known to be on, so nothing is shown
     report = {'state': 'complete', 'ecus': {
       '7E8': {'stored': {'state': 'ok', 'codes': ['P0401']}, 'pending': {'state': 'ok', 'codes': ['P0401']}},
       '7E9': {'permanent': {'state': 'ok', 'codes': ['P0171']}},
     }}
-    assert summarize_mil(report) == 'Codes: P0171, P0401'
+    assert mil_state(report)[:2] == (None, ['P0171', 'P0401'])
+    assert summarize_mil(report) == ''
+    unread_lamp = {'state': 'partial', 'ecus': {'7E8': {'lamp': {'state': 'timeout', 'error': 'No response'},
+                                                         'stored': {'state': 'ok', 'codes': ['P0300']}}}}
+    assert mil_state(unread_lamp)[:2] == (None, ['P0300'])
+    assert summarize_mil(unread_lamp) == ''
 
-  def test_partial_scan_still_shows_what_was_read(self):
-    report = {'state': 'partial', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': ['P0300']},
+  def test_codes_deduplicated_across_ecus_and_services_when_lamp_on(self):
+    report = {'state': 'complete', 'ecus': {
+      '7E8': {'lamp': {'state': 'ok', 'mil': True}, 'stored': {'state': 'ok', 'codes': ['P0401']},
+              'pending': {'state': 'ok', 'codes': ['P0401']}},
+      '7E9': {'permanent': {'state': 'ok', 'codes': ['P0171']}},
+    }}
+    assert summarize_mil(report) == 'MIL ON: P0171, P0401'
+
+  def test_partial_scan_with_lamp_on_still_shows_what_was_read(self):
+    report = {'state': 'partial', 'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': True},
+                                                     'stored': {'state': 'ok', 'codes': ['P0300']},
                                                      'pending': {'state': 'timeout', 'error': 'No response'}}}}
-    assert summarize_mil(report) == 'Codes: P0300'
+    assert summarize_mil(report) == 'MIL ON: P0300'
 
   def test_many_codes_truncated_for_the_small_display(self):
     codes = [f'P0{i:03d}' for i in range(10)]
-    report = {'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': codes}}}}
+    report = {'state': 'complete', 'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': True}, 'stored': {'state': 'ok', 'codes': codes}}}}
     summary = summarize_mil(report)
-    assert summary == 'Codes: P0000, P0001, P0002, P0003, P0004, P0005 +4 more'
+    assert summary == 'MIL ON: P0000, P0001, P0002, P0003, P0004, P0005 +4 more'
 
   def test_malformed_report_shapes_never_raise(self):
     # a syntactically-valid-JSON-but-wrong-shape value (stale schema, hand-edited file, a
@@ -329,6 +344,9 @@ class TestSummarizeMil:
     assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': 'P0401'}}}}) == ''
     assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': [1, 2]}}}}) == ''
     assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': None}}}}) == ''
+    assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'lamp': 'not a dict', 'stored': {'state': 'ok', 'codes': ['P0401']}}}}) == ''
+    assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': 'yes'}, 'stored': {'state': 'ok', 'codes': ['P0401']}}}}) == ''
+    assert summarize_mil({'state': 'complete', 'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': 1}, 'stored': {'state': 'ok', 'codes': ['P0401']}}}}) == ''
 
   def test_lamp_status_decides_the_mil_wording(self):
     # The device's 2026-09-12 scan: engine ECU lamp on with P0401, other ECUs lamp off and clean.
@@ -339,12 +357,18 @@ class TestSummarizeMil:
         '7E9': {'lamp': {'state': 'ok', 'mil': False, 'count': 0}, 'stored': {'state': 'ok', 'codes': []}}}}
     scanned = datetime.fromisoformat('2026-09-12T07:09:52+00:00').timestamp()
     assert summarize_mil(report(True), scanned + 60) == 'MIL ON: P0401'
-    assert summarize_mil(report(False), scanned + 60) == 'MIL off, codes: P0401'
+    # lamp off with codes still on file (the P0401 case): nothing at startup, codes stay in the report
+    assert summarize_mil(report(False), scanned + 60) == ''
+    assert mil_state(report(False)) == (False, ['P0401'], scanned)
     assert mil_state(report(True)) == (True, ['P0401'], scanned)
     lamp_only = {'state': 'complete', 'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': True}}}}
     assert summarize_mil(lamp_only) == 'MIL ON'
     clean_lamp_off = {'state': 'complete', 'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': False}}}}
     assert summarize_mil(clean_lamp_off) == ''
+    lamp_off_all_services = {'state': 'complete', 'ecus': {'7E8': {
+      'lamp': {'state': 'ok', 'mil': False}, 'stored': {'state': 'ok', 'codes': ['P0401']},
+      'pending': {'state': 'ok', 'codes': ['P0171']}, 'permanent': {'state': 'ok', 'codes': ['P0401']}}}}
+    assert summarize_mil(lamp_off_all_services) == ''
 
   def test_old_scan_is_labelled_with_its_age(self):
     report = {'state': 'complete', 'timestamp': '2026-09-12T07:09:52+00:00',
@@ -353,6 +377,11 @@ class TestSummarizeMil:
     assert summarize_mil(report, scanned + 11 * 3600) == 'MIL ON: P0401'
     assert summarize_mil(report, scanned + 13 * 86400) == 'MIL ON: P0401 (scan 13d old)'
     assert summarize_mil({**report, 'timestamp': 'garbage'}, scanned + 13 * 86400) == 'MIL ON: P0401'
+    # an old scan with the lamp off or unknown stays silent rather than gaining an age suffix
+    lamp_off = {**report, 'ecus': {'7E8': {'lamp': {'state': 'ok', 'mil': False}, 'stored': {'state': 'ok', 'codes': ['P0401']}}}}
+    assert summarize_mil(lamp_off, scanned + 13 * 86400) == ''
+    lamp_unknown = {**report, 'ecus': {'7E8': {'stored': {'state': 'ok', 'codes': ['P0401']}}}}
+    assert summarize_mil(lamp_unknown, scanned + 13 * 86400) == ''
 
 
 class TestAutoScan:

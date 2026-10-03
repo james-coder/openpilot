@@ -18,6 +18,16 @@ def getxattr(path: str, attr_name: str) -> bytes | None:
     _cached_attributes[key] = response
   return _cached_attributes[key]
 
+def getxattr_uncached(path: str, attr_name: str) -> bytes | None:
+  """Always asks the filesystem. For flags another process can set later (the deleter reading user.preserve): the
+  cached version would keep returning "not set" for the life of the process."""
+  try:
+    return xattr.getxattr(path, attr_name)
+  except OSError as e:
+    if e.errno == errno.ENODATA or (hasattr(errno, 'ENOATTR') and e.errno == errno.ENOATTR):
+      return None
+    raise
+
 def setxattr(path: str, attr_name: str, attr_value: bytes) -> None:
   _cached_attributes.pop((path, attr_name), None)
   xattr.setxattr(path, attr_name, attr_value)

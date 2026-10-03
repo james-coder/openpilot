@@ -327,9 +327,9 @@ def posenet_invalid_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.Sub
   return NoEntryAlert(msg, alert_text_1="Posenet Speed Invalid")
 
 
-# Optional add-ons (cabin CO2, wind, modem logging, trip logging): never an engagement or
+# Optional add-ons (cabin CO2, wind, modem logging, trip logging, dashcam event saving): never an engagement or
 # disengagement dependency. Keep all other processes fail-closed, including unknown/new names.
-OPTIONAL_PROCESSES = frozenset({'aranetd', 'windd', 'modemlogd', 'gmtripd'})
+OPTIONAL_PROCESSES = frozenset({'aranetd', 'windd', 'modemlogd', 'gmtripd', 'eventd'})
 
 
 def driving_process_failures(manager_state) -> set[str]:

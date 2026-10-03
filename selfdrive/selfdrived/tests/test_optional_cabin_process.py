@@ -93,13 +93,14 @@ def live_event_path():
     yield d, cs
 
 
+@pytest.mark.parametrize('proc_name', ['aranetd', 'eventd'])
 @pytest.mark.parametrize('failure', ['absent', 'stopped', 'crashed', 'permission_denied', 'cold_boot_unavailable'])
-def test_real_event_path_optional_failure(live_event_path, failure):
+def test_real_event_path_optional_failure(live_event_path, failure, proc_name):
   d, cs = live_event_path
   msg = log.ManagerState.new_message()
   if failure != 'absent':
     proc = msg.init('processes', 1)[0]
-    proc.name = 'aranetd'
+    proc.name = proc_name
     proc.running = False
     proc.shouldBeRunning = failure != 'stopped'
     proc.exitCode = 1 if failure in ('permission_denied', 'crashed') else 0

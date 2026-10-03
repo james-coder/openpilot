@@ -73,6 +73,7 @@ procs = [
 
   NativeProcess("loggerd", "system/loggerd", ["./loggerd"], logging),
   PythonProcess("gmtripd", "selfdrive.car.gm_trip_monitor", volt_trip_logging, restart_if_crash=True),
+  PythonProcess("eventd", "system.review.eventd", logging, restart_if_crash=True),
   NativeProcess("encoderd", "system/loggerd", ["./encoderd"], only_onroad),
   NativeProcess("stream_encoderd", "system/loggerd", ["./encoderd", "--stream"], notcar),
   PythonProcess("logmessaged", "system.logmessaged", always_run),

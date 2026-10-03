@@ -71,7 +71,9 @@ class TestDeleter(UploaderTestCase):
       self.make_file_with_data(self.seg_format2.format(0), self.f_type),
     ])
 
-  def test_delete_many_preserved(self):
+  def test_delete_many_preserved(self, monkeypatch):
+    # room for five 0.1 MB segments of flagged footage: the 6th flagged group and its prior segment are ordinary footage
+    monkeypatch.setattr(deleter, 'PRESERVE_BUDGET_BYTES', 600_000)
     self.assertDeleteOrder([
       self.make_file_with_data(self.seg_format.format(0), self.f_type),
       self.make_file_with_data(self.seg_format.format(1), self.f_type, preserve_xattr=deleter.PRESERVE_ATTR_VALUE),
@@ -115,3 +117,43 @@ class TestDeleter(UploaderTestCase):
     self.join_thread()
 
     assert f_path.exists(), "File deleted when locked"
+
+  def flagged(self, seg: int, route: str | None = None) -> Path:
+    return self.make_file_with_data((route or self.seg_format2).format(seg), self.f_type, preserve_xattr=deleter.PRESERVE_ATTR_VALUE)
+
+  def test_preserve_budget_drops_the_oldest_flagged_footage_first(self, monkeypatch):
+    monkeypatch.setattr(deleter, 'PRESERVE_BUDGET_BYTES', 250_000)  # two 0.1 MB segments
+    self.assertDeleteOrder([
+      self.make_file_with_data(self.seg_format.format(0), self.f_type),
+      self.flagged(10),   # over budget: ordinary footage again
+      self.flagged(20),
+      self.flagged(30),
+    ])
+
+  def test_newest_flagged_group_is_kept_even_when_it_alone_exceeds_the_budget(self, monkeypatch):
+    monkeypatch.setattr(deleter, 'PRESERVE_BUDGET_BYTES', 1)
+    self.assertDeleteOrder([self.flagged(10), self.flagged(20)])
+
+  def test_flag_set_after_the_deleter_looked_is_seen(self):
+    import xattr
+    path = self.make_file_with_data(self.seg_dir, self.f_type).parent
+    assert not deleter.has_preserve_xattr(self.seg_dir)
+    xattr.setxattr(str(path), deleter.PRESERVE_ATTR_NAME, deleter.PRESERVE_ATTR_VALUE)  # as loggerd/eventd do, bypassing our cache
+    assert deleter.has_preserve_xattr(self.seg_dir)
+    assert self.seg_dir in deleter.get_preserved_segments([self.seg_dir])
+
+  def test_failure_reading_flags_protects_nothing_but_keeps_deleting(self, monkeypatch):
+    def denied(_d):
+      raise PermissionError('injected')
+    monkeypatch.setattr(deleter, 'has_preserve_xattr', denied)
+    assert deleter.get_preserved_segments(['00000005--4c4e99b08b--3']) == set()
+    f_path = self.make_file_with_data(self.seg_dir, self.f_type, preserve_xattr=deleter.PRESERVE_ATTR_VALUE)
+    self.start_thread()
+    try:
+      with Timeout(2, "Timeout waiting for file to be deleted"):
+        while f_path.exists():
+          time.sleep(0.01)
+      assert self.del_thread.is_alive(), "deleter thread died on a flag-read error"
+    finally:
+      self.join_thread()
+

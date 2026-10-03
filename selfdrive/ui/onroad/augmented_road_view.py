@@ -15,6 +15,11 @@ from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.swaglog import cloudlog
+try:
+  from openpilot.selfdrive.ui.onroad.event_overlay import EventOverlay
+except Exception:  # optional banner: an import problem must never take the driving screen down
+  EventOverlay = None
+  cloudlog.exception('Optional event overlay import failed')
 from openpilot.common.transformations.camera import DEVICE_CAMERAS, DeviceCameraConfig, view_frame_from_device_frame
 from openpilot.common.transformations.orientation import rot_from_euler
 
@@ -65,6 +70,11 @@ class AugmentedRoadView(CameraView):
     except Exception:
       self._check_engine_overlay = None
       cloudlog.exception('Optional check-engine overlay unavailable')
+    try:
+      self._event_overlay = EventOverlay() if EventOverlay is not None else None
+    except Exception:
+      self._event_overlay = None
+      cloudlog.exception('Optional event overlay unavailable')
     try:
       self._steer_test_overlay = SteerTestOverlay()
     except Exception:
@@ -130,6 +140,12 @@ class AugmentedRoadView(CameraView):
       except Exception:
         cloudlog.exception('Optional check-engine overlay disabled after rendering error')
         self._check_engine_overlay = None
+    if self._event_overlay is not None and ui_state.sm['selfdriveState'].alertSize == log.SelfdriveState.AlertSize.none:
+      try:
+        self._event_overlay.render(self._content_rect)
+      except Exception:
+        cloudlog.exception('Optional event overlay disabled after rendering error')
+        self._event_overlay = None
     if self._steer_test_overlay is not None and ui_state.sm['selfdriveState'].alertSize == log.SelfdriveState.AlertSize.none:
       try:
         self._steer_test_overlay.render(self._content_rect)

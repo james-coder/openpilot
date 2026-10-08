@@ -90,6 +90,45 @@ DBC. **View signal** opens the associated definition. Activity tracking starts
 when the live Bits view opens; it cannot recover earlier changes from a frozen
 snapshot. Reset activity starts a new baseline for the selected message.
 
+## Diagnostic traffic
+
+At boot a factory tester sweeps module diagnostics on bus 0. Frames on the diagnostic IDs below show a
+label and a one-line decode instead of only raw bytes: in the raw row's subtitle, in the message screen's
+**Diagnostic ID**, **Diagnostic note** and **Diagnostic frame** rows, and in Find (try `hmi`, `tester`, `bcm`). No DBC is changed
+and nothing is transmitted.
+
+| IDs | Meaning | Basis |
+| --- | --- | --- |
+| 0x241 BCM, 0x242 PSCM, 0x248 HVAC A26 (low-speed bus), 0x251 HVAC K33 (low-speed bus), 0x252 HMI, 0x254 Amplifier, 0x7E0 ECM, 0x7E1 HPCM, 0x7E4 HPCM2 (hybrid battery module), 0x7E5 EBCM, 0x7E7 BECM (battery energy control module) | tester request | owner's GDS2 analysis (address and module only) |
+| 0x541 BCM, 0x552 HMI, 0x5E8 ECM, 0x5E9 HPCM, 0x5EC HPCM2, 0x5ED EBCM, 0x5EF BECM | module reply, unsegmented (`81` DTC report frames) | **derived**, shown as `(derived)` |
+| 0x641 BCM, 0x648 HVAC A26, 0x652 HMI | module reply, segmented (ISO-TP, e.g. `$22` answers and negative replies) | **derived** |
+| 0x651 HVAC K33 | module reply, segmented | answered on the car in the owner's HVAC testing; the only reply not marked derived |
+| 0x242 / 0x542 / 0x642 | request, unsegmented reply, segmented reply: the Long Range Radar Sensor Module (`Radar`) on bus 1 (object detection), otherwise the Power Steering Control Module (`PSCM`; the same ID also reaches a Keyless Entry module on the low-speed bus) | request GDS2 analysis, replies **derived** |
+| 0x7E8-0x7EF | OBD-II response (request + 8); the module is named only when that request ID is in the table (0x7EA, 0x7EB, 0x7EE stay `unknown ECU reply`) | standard, module derived |
+| 0x101, 0x7DF | tester broadcast (target byte first, 0xFE = all modules), OBD-II functional request | GDS2 analysis / standard |
+
+Reply IDs for diagnostic-report (`$A9`) frames use the unsegmented 0x5xx IDs, while `$22` replies use the
+segmented 0x6xx IDs. That split is inferred from the recorded sweep and the request/reply pairing, not confirmed
+for every module.
+
+Any other ID stays unlabeled until the owner confirms it, however close it is to a listed one (for example 0x249,
+0x24B, 0x553, 0x649). Every ID in the recorded boot sweep is now labeled. Examples:
+
+- `HMI <- tester: read DTCs by status (A9 81 9A)`
+- `HPCM2 <- tester: read data by ID (22 43 56)`
+- `BCM (derived) -> tester: DTC report: C0750, type 03, status 19` (GMLAN `81` report frames on 0x5xx; the code
+  uses the usual P/C/B/U letters, type and status stay raw hex)
+- `HMI (derived) -> tester: negative reply to read diag info: response pending (7F A9 78)`
+- `unknown ECU reply: positive 0x22 read data by ID (62 43 2F)`
+
+The decoder reads ISO-TP single, first, consecutive and flow-control frames and names GMLAN/UDS services, OBD-II
+modes and common negative-response codes. It does not decode data identifiers, PIDs, status bits or DTC
+meanings. Malformed, short or oversized frames get a plain description, never an error. It is a constant-time
+table lookup per frame (about 1 microsecond) with no cache, and it runs only for undefined frames, so the
+8 ms update budget and the 256-unknown-ID-per-bus cap are unchanged. The cap is still first come, first served.
+The code is `selfdrive/ui/layouts/settings/can_diag_decode.py`; to label another ID, add it to its tables once the
+owner has confirmed it.
+
 **More → Bus coverage** separates observed IDs, matching definitions, successful
 decodes and unknown traffic. Counts cover this inspection session. A successful
 decode count does not mean every later frame passes validation.
@@ -122,8 +161,12 @@ DISPLAY=:0 BIG=1 SCALE=1 OFFSCREEN=1 PYTHONPATH="$PWD" .venv/bin/pytest -n0 -q \
   selfdrive/ui/tests/test_can_diagnostics_data.py \
   selfdrive/ui/tests/test_can_diagnostics_usability.py \
   selfdrive/ui/tests/test_can_inspection.py selfdrive/ui/tests/test_can_touch.py \
-  selfdrive/ui/tests/test_can_odometer.py
+  selfdrive/ui/tests/test_can_odometer.py selfdrive/ui/tests/test_can_diag_decode.py
 ```
+
+`test_can_diag_decode.py` is pure Python and also runs without a display. It replays the recorded boot sweep
+(`opendbc_repo/opendbc/car/tests/gm_diag_sweep_fixture.json`); it does not validate the on-device panel or any
+live vehicle traffic.
 
 Generate previews and run layout, control and text-cache checks:
 

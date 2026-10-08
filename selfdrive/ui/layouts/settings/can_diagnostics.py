@@ -10,6 +10,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.layouts.settings.can_diagnostics_data import (
   BUS_LABELS, ODOMETER_KEY, ODOMETER_KM_KEY, diagnostics_timeout, graph_display_bounds, matches_query, signal_timeout,
 )
+from openpilot.selfdrive.ui.layouts.settings.can_diag_decode import label as diagnostic_id, label_text as diagnostic_label, summarize as diagnostic_summary
 from openpilot.selfdrive.ui.layouts.settings.can_inspection import InspectionSession, bit_definitions, preference_document, sample_at
 from openpilot.selfdrive.ui.ui_state import ui_state, device
 from openpilot.system.ui.lib.application import gui_app, FontWeight, FONT_SCALE, font_fallback
@@ -95,6 +96,8 @@ class InspectorRow(Widget):
       return
     row = owner.display.rows.get(key)
     message, unit, _ = owner.snapshot.metadata.get(key, ('Raw / undecoded', '', {}))
+    if row and row.diagnostic:  # label + decoded summary of a known diagnostic ID
+      message = row.diagnostic
     title = key[2] or f'0x{key[1]:X} raw bytes'
     subtitle = f'Bus {key[0]} | 0x{key[1]:X} | {message}'
     if key in owner.display.new and owner.filter == 'changed':
@@ -362,7 +365,8 @@ class CanSignalsLayout(Widget):
       return
     if kind == 'signal' and self.screen not in ('message_signals',) and not (self.screen == 'home' and self.tab == 'favorites'):
       keys = [k for k in keys if (self.bus is None or k[0] == self.bus) and
-              matches_query(self.query, k[0], k[1], *(self.snapshot.metadata.get(k, ('', '', {}))[:2]), k[2] or 'raw')]
+              matches_query(self.query, k[0], k[1], *(self.snapshot.metadata.get(k, ('', '', {}))[:2]), k[2] or 'raw',
+                            diagnostic_label(k[1], k[0]) if k[2] is None else '')]
     signature = (kind, tuple(keys))
     if signature == self._list_keys:
       return
@@ -436,6 +440,9 @@ class CanSignalsLayout(Widget):
               ('Bus / CAN ID', f'{BUS_LABELS[self.message[0]]} / 0x{self.message[1]:X}'),
               ('Observed traffic', lambda: stats('rate')), ('Age', lambda: stats('age')),
               ('Payload length', lambda: stats('size')), ('Decoding', lambda: stats('decode'))]
+      if not definition and (ident := diagnostic_id(self.message[1], self.message[0])):
+        rows[2:2] = [('Diagnostic ID', ident.text), *([('Diagnostic note', ident.note)] if ident.note else []),
+                     ('Diagnostic frame', self._diagnostic_frame)]
       self._raw_size = self._message_size()
       for offset in range(0, max(1, self._raw_size), 8):
         rows.append((f'Raw bytes {offset}-{offset+7}', lambda offset=offset: self._raw_bytes(offset)))
@@ -452,6 +459,10 @@ class CanSignalsLayout(Widget):
     observed = self.display.messages.get(self.message)
     definition = self.snapshot.definitions.get(self.message)
     return len(observed.data) if observed else definition.size if definition else 8
+
+  def _diagnostic_frame(self):
+    msg = self.display.messages.get(self.message)
+    return diagnostic_summary(self.message[1], msg.data, self.message[0]) if msg else 'Not seen'
 
   def _raw_bytes(self, offset):
     msg = self.display.messages.get(self.message)

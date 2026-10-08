@@ -96,6 +96,7 @@ class RowState:
   unit: str
   choice: str
   changes: int
+  diagnostic: str = ''
 
 
 @dataclass(frozen=True)

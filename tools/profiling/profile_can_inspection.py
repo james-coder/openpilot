@@ -23,6 +23,9 @@ def profile(iterations):
   session.select_graph(first, 0)
   session.select_graph((0, 309, 'PRNDL'), 1)
   session.inspect_bits((0, 309))
+  # Diagnostic IDs are seen first (a boot-time tester sweep); the unknown-ID cap is first come, first served.
+  session.ingest([(time.monotonic_ns(), [(0x7E4, bytes.fromhex('0322435600000000'), 0), (0x7EC, bytes.fromhex('0462432fcdaaaaaa'), 0),
+                                         (0x541, bytes.fromhex('8147500319000000'), 0), (0x252, bytes.fromhex('03a9819a00000000'), 0)])])
   # Exercise the unknown-ID cap as well as the decoded messages.
   session.ingest([(time.monotonic_ns(), [(0x10000+i, b'\0'*8, bus) for bus in range(3) for i in range(300)])])
   timings = deque(maxlen=4096)
@@ -31,8 +34,12 @@ def profile(iterations):
   for i in range(iterations):
     rpm = packer.make_can_msg('ECMEngineStatus', 0, {'EngineRPM': 1000+i%2000})
     gear = packer.make_can_msg('ECMPRDNL', 0, {'PRNDL': i%4})
+    # Diagnostic-ID frames with changing payloads, so their labels and summaries are rebuilt inside the measured ingest.
+    diagnostic = [(0x7E4, bytes([3, 0x22, 0x43, i & 0xFF, 0, 0, 0, 0]), 0), (0x7EC, bytes([4, 0x62, 0x43, i & 0xFF, 0xCD, 0xAA, 0xAA, 0xAA]), 0),
+                  (0x541, bytes([0x81, 0x47, 0x50, 0x03, i & 0xFF, 0, 0, 0]), 0), (0x252, bytes.fromhex('03a9819a00000000'), 0)]
+    batch = [rpm, gear]*10 + diagnostic
     start = time.monotonic()
-    session.ingest([(origin+i*5_000_000, [rpm, gear]*10)])
+    session.ingest([(origin+i*5_000_000, batch)])
     timings.append((time.monotonic()-start)*1000)
     if i % 20 == 0:
       session.capture()
@@ -45,9 +52,10 @@ def profile(iterations):
   assert len(session.histories) == 2
   assert all(len(buf.samples) <= 6000 for buf in session.histories.values())
   assert len(session.snapshot.messages) <= 3*256+113
+  assert session.snapshot.rows[(0, 0x7E4, None)].diagnostic.startswith('HPCM2 <- tester: read data by ID')
   growth = max(memory)-min(memory) if memory else 0
   assert growth < 8*1024*1024, f'RSS grew {growth} bytes after warmup'
-  return {'iterations': iterations, 'frames_per_batch': 20,
+  return {'iterations': iterations, 'frames_per_batch': 24,
           'batch_ms': {'median': statistics.median(timings), 'p99': sorted(timings)[int(len(timings)*.99)], 'max': max(timings)},
           'rss_samples_bytes': memory, 'rss_range_after_warmup_bytes': growth,
           'graph_samples': [len(buf.samples) for buf in session.histories.values()], 'observed_ids': len(session.snapshot.messages)}

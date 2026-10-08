@@ -11,6 +11,7 @@ from opendbc.can.parser import CANDefine
 from opendbc.can.dbc import DBC as DbcFile
 from opendbc.car import Bus
 from opendbc.car.gm.values import CAR, CanBus, DBC as GM_DBC_MAP
+from openpilot.selfdrive.ui.layouts.settings.can_diag_decode import summarize as diagnostic_summary
 
 # Which opendbc.car.Bus DBC-map key backs each of this car's physical CAN buses.
 # GM-specific and hardcoded deliberately - this is a personal single-car diagnostics
@@ -120,6 +121,7 @@ class SignalRow:
   unit: str = ''
   choice: str = ''
   changes: int = 0
+  diagnostic: str = ''  # label + decoded summary for undefined frames on a known diagnostic ID
 
   @property
   def key(self) -> tuple[int, int, str | None]:
@@ -132,7 +134,8 @@ class SignalRow:
 
   def details(self) -> str:
     message = self.message or 'No message definition in this bus DBC'
-    return f"Bus {self.bus} ({BUS_LABELS[self.bus]}) | 0x{self.address:X} | {message} | {self.signal or 'raw bytes'}"
+    extra = f' | {self.diagnostic}' if self.diagnostic else ''
+    return f"Bus {self.bus} ({BUS_LABELS[self.bus]}) | 0x{self.address:X} | {message} | {self.signal or 'raw bytes'}{extra}"
 
 
 def signal_metadata(car_fingerprint):
@@ -284,7 +287,11 @@ class CanSnapshot:
             for odometer_key in (ODOMETER_KEY, ODOMETER_KM_KEY):
               if self.rows.pop(odometer_key, None) is not None:
                 touched.add(odometer_key)
-          self.rows[key] = SignalRow(bus=src, address=address, signal=None, text=text, last_updated=now, changes=changes, message=reason)
+          diagnostic = ''
+          if definition is None:  # Constant-time table lookup; the summary is only rebuilt when the payload changes.
+            diagnostic = previous.diagnostic if previous and previous.text == text else diagnostic_summary(address, dat, src)
+          self.rows[key] = SignalRow(bus=src, address=address, signal=None, text=text, last_updated=now, changes=changes, message=reason,
+                                     diagnostic=diagnostic)
         if not wrong_size and not invalid_odometer and (parser := self._message_parsers.get(msg_key)) is not None:
           frames_by_parser.setdefault(parser, []).append((address, dat, src))
 

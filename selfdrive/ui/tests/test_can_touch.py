@@ -111,6 +111,35 @@ def test_message_payload_growth_refreshes_raw_rows(layout):
   assert layout._info.scroll_panel.offset == -100
 
 
+def test_diagnostic_frames_show_label_and_summary_in_raw_row_and_message_detail(layout):
+  layout.session.ingest([(2, [(0x252, bytes.fromhex('03a9819a00000000'), 0), (0x7FF, b'\x01', 0)])])
+  layout.filter, layout._list_keys = 'raw', None
+  layout._refresh()
+  layout.test_render()
+  summary = 'HMI <- tester: read DTCs by status (A9 81 9A)'
+  assert layout.display.rows[(0, 0x252, None)].diagnostic == summary
+  assert layout.display.rows[(0, 0x7FF, None)].diagnostic == ''
+  layout.query, layout._list_keys = 'hmi', None  # the label is searchable
+  layout._update_list()
+  assert [row.key for row in layout._scroller._items] == [(0, 0x252, None)]
+  layout.open_row((0, 0x252, None), 'signal')
+  layout.test_render()
+  values = {row.title: row.value() if callable(row.value) else row.value for row in layout._info._items}
+  assert values['Diagnostic frame'] == summary and 'HMI tester request ID' in values['Diagnostic ID']
+  assert 'Diagnostic note' not in values
+  layout.back()
+  layout.session.ingest([(3, [(0x242, bytes.fromhex('03a9819a00000000'), 0)])])
+  layout._refresh()
+  layout.open_row((0, 0x242, None), 'signal')
+  layout.test_render()
+  values = {row.title: row.value() if callable(row.value) else row.value for row in layout._info._items}
+  assert 'keyless entry' in values['Diagnostic note'] and values['Diagnostic frame'].startswith('PSCM <- tester')
+  layout.back()
+  layout.open_row((0, 0x7FF, None), 'signal')
+  layout.test_render()
+  assert not any(row.title.startswith('Diagnostic') for row in layout._info._items)
+
+
 def test_fault_still_allows_exit(layout):
   layout._faulted = True
   layout.on_back = layout.hide_event

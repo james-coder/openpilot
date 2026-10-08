@@ -49,6 +49,14 @@ class DeviceLayout(Widget):
       cloudlog.exception('Optional Aranet screen unavailable')
       gui_app.push_widget(alert_dialog('Cabin history unavailable. Driving is unaffected.'))
 
+  def _open_dashcam(self):
+    try:
+      from openpilot.selfdrive.ui.layouts.settings.dashcam import DashcamLayout
+      gui_app.push_widget(DashcamLayout())
+    except Exception:
+      cloudlog.exception('Optional dashcam screen unavailable')
+      gui_app.push_widget(alert_dialog('Dashcam unavailable. Driving is unaffected.'))
+
   def _initialize_items(self):
     self._pair_device_btn = button_item(lambda: tr("Pair Device"), lambda: tr("PAIR"), lambda: tr(DESCRIPTIONS['pair_device']),
                                         callback=lambda: gui_app.push_widget(PairingDialog()))
@@ -65,6 +73,7 @@ class DeviceLayout(Widget):
       button_item('Thermal exposure history', 'VIEW', callback=self._open_thermal_history, enabled=ui_state.is_offroad),
       button_item('Parked cooling: 40% trial cap', 'CONFIGURE', callback=self._configure_parked_cooling, enabled=ui_state.is_offroad),
       button_item('Cabin air / Aranet4', 'GRAPH', callback=self._open_aranet, enabled=ui_state.is_offroad),
+      button_item('Dashcam', 'VIEW', callback=self._open_dashcam, enabled=ui_state.is_offroad),
       text_item(lambda: tr("Dongle ID"), self._params.get("DongleId") or (lambda: tr("N/A"))),
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
       self._pair_device_btn,
